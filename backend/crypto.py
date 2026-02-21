@@ -114,3 +114,27 @@ def mask_api_key(api_key: str) -> str:
     if not api_key or len(api_key) < 8:
         return "***"
     return f"{api_key[:4]}...{api_key[-4:]}"
+
+
+def _derive_app_key() -> bytes:
+    """Deriva una clave única de aplicación para secretos globales."""
+    app_key = hashlib.sha256(MASTER_KEY.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(app_key)
+
+
+def encrypt_global_api_key(api_key: str) -> str:
+    """Encripta la API key para modo sin usuarios."""
+    if not api_key:
+        raise ValueError("api_key es requerida")
+
+    f = Fernet(_derive_app_key())
+    return f.encrypt(api_key.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_global_api_key(encrypted_key: str) -> str:
+    """Desencripta la API key para modo sin usuarios."""
+    if not encrypted_key:
+        raise ValueError("encrypted_key es requerida")
+
+    f = Fernet(_derive_app_key())
+    return f.decrypt(encrypted_key.encode("utf-8")).decode("utf-8")
