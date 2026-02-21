@@ -92,7 +92,7 @@ async function api(path, options = {}) {
 
 // ── AUTH ───────────────────────────────────────────────────
 async function checkAuth() {
-  """Verifica si el usuario está autenticado."""
+  // Verifica si el usuario está autenticado.
   try {
     const user = await api('/api/auth/me');
     state.currentUser = user;
@@ -105,7 +105,7 @@ async function checkAuth() {
 }
 
 async function initAuth() {
-  """Inicializa el estado de autenticación."""
+  // Inicializa el estado de autenticación.
   const isAuth = await checkAuth();
 
   if (isAuth) {
@@ -118,7 +118,7 @@ async function initAuth() {
 }
 
 function initAuthForms() {
-  """Inicializa los formularios de login y registro."""
+  // Inicializa los formularios de login y registro.
   // Tabs
   document.querySelectorAll('.auth-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -230,7 +230,7 @@ function initAuthForms() {
 }
 
 async function logout() {
-  """Cierra la sesión del usuario."""
+  // Cierra la sesión del usuario.
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch (err) {
@@ -246,7 +246,7 @@ async function logout() {
 
 // ── SETTINGS / API KEY ─────────────────────────────────────
 function initSettings() {
-  """Inicializa el modal de settings."""
+  // Inicializa el modal de settings.
   // Open buttons
   $('btn-settings').addEventListener('click', showSettings);
   $('btn-settings-projects').addEventListener('click', showSettings);
@@ -322,7 +322,7 @@ function initSettings() {
 }
 
 async function showSettings() {
-  """Muestra el modal de settings con datos actualizados."""
+  // Muestra el modal de settings con datos actualizados.
   if (!state.currentUser) return;
 
   // Refresh user data
@@ -349,7 +349,7 @@ function hideSettings() {
 }
 
 function updateApiKeyUI() {
-  """Actualiza la UI según el estado de la API key."""
+  // Actualiza la UI según el estado de la API key.
   if (state.hasApiKey) {
     hide($('api-key-not-set'));
     show($('api-key-set'));
