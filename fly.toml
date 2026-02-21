@@ -11,10 +11,22 @@ primary_region = 'cdg'
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = 'stop'
+  auto_stop_machines = 'off'  # Mantener máquina siempre activa para persistencia
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1    # Siempre tener al menos 1 máquina corriendo
   processes = ['app']
+
+[[mounts]]
+  source = 'data_vol'         # Nombre del volumen en Fly.io
+  destination = '/app/data'   # Donde se monta dentro del contenedor
+  processes = ['app']
+
+[env]
+  FLY_APP_NAME = 'explainer-api-pablo'
+  # Las siguientes variables DEBEN configurarse con 'fly secrets set':
+  # JWT_SECRET - Clave para firmar tokens JWT (openssl rand -base64 32)
+  # APP_ENCRYPTION_KEY - Clave para encriptar API keys (openssl rand -base64 32)
+  # GEMINI_API_KEY - API key de Gemini (opcional, fallback si usuario no tiene)
 
 [[vm]]
   memory = '512mb'

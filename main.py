@@ -57,13 +57,27 @@ from backend.middleware import SecurityHeadersMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicializa la base de datos al arrancar."""
+    # Determinar directorio de datos según el entorno
+    if os.environ.get("FLY_APP_NAME"):
+        data_dir = Path("/app/data")
+    else:
+        data_dir = Path("data")
+
     # Crear directorios necesarios
-    Path("data").mkdir(parents=True, exist_ok=True)
-    Path("data/projects").mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "projects").mkdir(parents=True, exist_ok=True)
 
     # Inicializar base de datos
     init_db()
-    print("[Startup] Base de datos inicializada")
+    print(f"[Startup] Base de datos inicializada en {data_dir}")
+
+    # Verificar conexión a la base de datos
+    try:
+        db = get_db()
+        db.close()
+        print("[Startup] Conexión a base de datos OK")
+    except Exception as e:
+        print(f"[Startup] ERROR conectando a base de datos: {e}")
 
     yield
 
