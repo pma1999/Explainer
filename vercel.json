@@ -10,7 +10,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "https://explainer-api.fly.dev/api/$1"
+      "dest": "https://explainer-api-pablo.fly.dev/api/$1"
     },
     {
       "src": "/static/(.*)",
