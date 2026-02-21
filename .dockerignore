@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# Entorno
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Datos locales (el volumen Fly.io los maneja)
+data/
+*.db
+*.sqlite3
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Fly.io
+fly.toml
+
+# Vercel
+.vercel/
+vercel.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Explainer — Estudio con IA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ===== AUTH VIEW (Login / Register) ===== -->
+  <div id="view-auth" class="view">
+    <div class="auth-bg">
+      <div class="bg-glow bg-glow-1"></div>
+      <div class="bg-glow bg-glow-2"></div>
+      <div class="grain-overlay"></div>
+    </div>
+    <main class="auth-main">
+      <div class="auth-card">
+        <div class="auth-header">
+          <div class="logo">
+            <span class="logo-mark">⬡</span>
+            <span class="logo-text">Explainer</span>
+          </div>
+          <h1 class="auth-title">Bienvenido</h1>
+          <p class="auth-subtitle">Inicia sesión para continuar estudiando</p>
+        </div>
+
+        <!-- Tabs -->
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
+          <button class="auth-tab" data-tab="register">Crear cuenta</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="form-login" class="auth-form">
+          <div class="form-group">
+            <label for="login-email" class="form-label">Email</label>
+            <input
+              type="email"
+              id="login-email"
+              name="email"
+              class="form-input"
+              placeholder="tu@email.com"
+              autocomplete="username"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="login-password" class="form-label">Contraseña</label>
+            <input
+              type="password"
+              id="login-password"
+              name="password"
+              class="form-input"
+              placeholder="••••••••"
+              autocomplete="current-password"
+              required
+            />
+          </div>
+          <div class="form-group form-checkbox">
+            <label class="checkbox-label">
+              <input type="checkbox" id="login-remember" />
+              <span>Recordarme en este dispositivo</span>
+            </label>
+          </div>
+          <button type="submit" class="btn-primary btn-full" id="btn-login">
+            <span class="btn-text">Iniciar sesión</span>
+            <span class="spinner hidden"></span>
+          </button>
+          <p class="form-error" id="login-error"></p>
+        </form>
+
+        <!-- Register Form -->
+        <form id="form-register" class="auth-form hidden">
+          <div class="form-group">
+            <label for="register-email" class="form-label">Email</label>
+            <input
+              type="email"
+              id="register-email"
+              name="email"
+              class="form-input"
+              placeholder="tu@email.com"
+              autocomplete="username"
+              required
+            />
+          </div>
+          <div class="form-group">
+            <label for="register-password" class="form-label">Contraseña</label>
+            <input
+              type="password"
+              id="register-password"
+              name="password"
+              class="form-input"
+              placeholder="Mínimo 8 caracteres"
+              autocomplete="new-password"
+              required
+            />
+            <span class="input-hint">Mínimo 8 caracteres, una mayúscula, una minúscula y un número</span>
+          </div>
+          <button type="submit" class="btn-primary btn-full" id="btn-register">
+            <span class="btn-text">Crear cuenta</span>
+            <span class="spinner hidden"></span>
+          </button>
+          <p class="form-error" id="register-error"></p>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== LANDING / UPLOAD VIEW ===== -->
+  <div id="view-landing" class="view">
+    <div class="landing-bg">
+      <div class="bg-glow bg-glow-1"></div>
+      <div class="bg-glow bg-glow-2"></div>
+      <div class="grain-overlay"></div>
+    </div>
+    <header class="landing-header">
+      <div class="logo">
+        <span class="logo-mark">⬡</span>
+        <span class="logo-text">Explainer</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn-ghost" id="btn-settings">⚙️ Ajustes</button>
+        <button class="btn-ghost" id="btn-logout">Cerrar sesión</button>
+        <button class="btn-ghost" id="btn-go-projects">Mis proyectos →</button>
+      </div>
+    </header>
+    <main class="landing-main">
+      <div class="landing-hero">
+        <p class="hero-eyebrow">Estudio inteligente</p>
+        <h1 class="hero-title">
+          Comprende cualquier<br/>
+          <em>texto académico</em><br/>
+          con profundidad total
+        </h1>
+        <p class="hero-subtitle">
+          Sube un PDF y nuestra IA lo segmenta, explica exhaustivamente,<br/>
+          lo recorre con anotaciones expertas y mapea recursos externos.
+        </p>
+      </div>
+
+      <!-- API Key Warning -->
+      <div class="api-key-warning hidden" id="api-key-warning">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-content">
+          <p class="warning-title">API Key no configurada</p>
+          <p class="warning-sub">Necesitas configurar tu API key de Gemini para procesar documentos.</p>
+        </div>
+        <button class="btn-primary btn-sm" id="btn-configure-api-key">Configurar ahora</button>
+      </div>
+
+      <div class="upload-card" id="upload-card">
+        <div class="upload-zone" id="upload-zone">
+          <div class="upload-icon">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M8 36V40H40V36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="upload-label">Arrastra tu PDF aquí</p>
+          <p class="upload-sub">o haz clic para seleccionar</p>
+          <input type="file" id="file-input" accept=".pdf" hidden />
+        </div>
+
+        <div class="upload-file-preview hidden" id="file-preview">
+          <div class="file-icon">📄</div>
+          <div class="file-info">
+            <span class="file-name" id="file-name-display"></span>
+            <span class="file-size" id="file-size-display"></span>
+          </div>
+          <button class="file-remove" id="btn-remove-file">✕</button>
+        </div>
+
+        <div class="form-fields">
+          <div class="form-group">
+            <label for="project-name" class="form-label">Nombre del proyecto</label>
+            <input
+              type="text"
+              id="project-name"
+              class="form-input"
+              placeholder="Ej: Are Prisons Obsolete — Davis"
+            />
+          </div>
+          <div class="form-group">
+            <label for="project-description" class="form-label">
+              Descripción para el Segmentador
+              <span class="label-hint">¿Qué parte o capítulos del texto quieres estudiar?</span>
+            </label>
+            <textarea
+              id="project-description"
+              class="form-input form-textarea"
+              rows="3"
+              placeholder="Ej: Capítulos 1, 2 y 6 del libro completo"
+            ></textarea>
+          </div>
+        </div>
+
+        <button class="btn-primary" id="btn-upload" disabled>
+          <span class="btn-text">Iniciar análisis</span>
+          <span class="btn-icon">→</span>
+        </button>
+        <p class="upload-note" id="upload-error"></p>
+      </div>
+
+      <div class="feature-pills">
+        <div class="pill"><span class="pill-icon">✦</span> Segmentación didáctica</div>
+        <div class="pill"><span class="pill-icon">✦</span> Explicación exhaustiva</div>
+        <div class="pill"><span class="pill-icon">✦</span> Recorrido anotado</div>
+        <div class="pill"><span class="pill-icon">✦</span> Mapa de recursos</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===== PROJECTS LIST VIEW ===== -->
+  <div id="view-projects" class="view">
+    <div class="app-header">
+      <div class="logo" id="btn-home-from-projects">
+        <span class="logo-mark">⬡</span>
+        <span class="logo-text">Explainer</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn-ghost" id="btn-settings-projects">⚙️ Ajustes</button>
+        <button class="btn-ghost" id="btn-logout-projects">Cerrar sesión</button>
+        <button class="btn-primary btn-sm" id="btn-new-project">+ Nuevo proyecto</button>
+      </div>
+    </div>
+    <div class="projects-container">
+      <div class="projects-header">
+        <h2 class="section-title">Mis proyectos</h2>
+        <p class="section-sub" id="projects-count"></p>
+      </div>
+      <div class="projects-grid" id="projects-grid">
+        <!-- Cards inserted by JS -->
+      </div>
+      <div class="empty-state hidden" id="projects-empty">
+        <p class="empty-icon">⬡</p>
+        <p class="empty-title">Aún no hay proyectos</p>
+        <p class="empty-sub">Sube tu primer PDF para comenzar</p>
+        <button class="btn-primary" id="btn-new-project-2">Crear proyecto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PROJECT DETAIL VIEW ===== -->
+  <div id="view-project" class="view">
+    <div class="project-layout">
+
+      <!-- Sidebar -->
+      <aside class="project-sidebar" id="project-sidebar">
+        <div class="sidebar-header">
+          <button class="btn-back" id="btn-back-to-projects">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Proyectos
+          </button>
+        </div>
+        <div class="sidebar-project-info">
+          <h3 class="sidebar-project-name" id="sidebar-project-name"></h3>
+          <div class="sidebar-status" id="sidebar-status"></div>
+        </div>
+        <div class="sidebar-section-title">Partes del texto</div>
+        <nav class="sidebar-nav" id="sidebar-nav">
+          <!-- Part items injected by JS -->
+        </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-usage-mini" id="sidebar-usage-mini">
+            <div class="usage-mini-label">Coste total</div>
+            <div class="usage-mini-value" id="mini-total-cost">$0.00</div>
+          </div>
+          <button class="btn-danger-sm" id="btn-delete-project">Eliminar proyecto</button>
+        </div>
+      </aside>
+
+      <!-- Main content -->
+      <main class="project-main" id="project-main">
+
+        <!-- Processing overlay -->
+        <div class="processing-overlay hidden" id="processing-overlay">
+          <div class="processing-card">
+            <div class="processing-spinner"></div>
+            <h3 class="processing-title" id="processing-title">Analizando documento...</h3>
+            <p class="processing-sub" id="processing-sub">Preparando la carga del archivo</p>
+            <div class="processing-steps" id="processing-steps"></div>
+          </div>
+        </div>
+
+        <!-- Welcome / no part selected -->
+        <div class="main-welcome" id="main-welcome">
+          <div class="welcome-icon">⬡</div>
+          <h3 class="welcome-title" id="welcome-title">Selecciona una parte</h3>
+          <p class="welcome-sub" id="welcome-sub">Elige una parte del sidebar para ver su contenido</p>
+        </div>
+
+        <!-- Part content -->
+        <div class="part-content hidden" id="part-content">
+          <div class="part-header">
+            <div class="part-number" id="content-part-number"></div>
+            <div class="part-meta">
+              <h2 class="part-title" id="content-part-title"></h2>
+              <p class="part-description" id="content-part-description"></p>
+              <div class="part-badges" id="content-part-badges"></div>
+            </div>
+            <div class="part-usage-card" id="project-usage-card">
+              <div class="usage-card-header">
+                <span class="usage-title">Consumo de IA</span>
+                <span class="usage-cost-pill" id="usage-total-cost">$0.00</span>
+              </div>
+              <div class="usage-grid">
+                <div class="usage-item">
+                  <span class="usage-label">Tokens Entrada</span>
+                  <span class="usage-value" id="usage-prompt-tokens">0</span>
+                </div>
+                <div class="usage-item">
+                  <span class="usage-label">Tokens Salida</span>
+                  <span class="usage-value" id="usage-output-tokens">0</span>
+                </div>
+                <div class="usage-item">
+                  <span class="usage-label">Pensamiento (IA)</span>
+                  <span class="usage-value" id="usage-thought-tokens">0</span>
+                </div>
+                <div class="usage-item">
+                  <span class="usage-label">Total</span>
+                  <span class="usage-value" id="usage-total-tokens">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="tabs-bar">
+            <button class="tab-btn active" data-tab="explicacion">
+              <span class="tab-icon">📖</span> Explicación
+            </button>
+            <button class="tab-btn" data-tab="recorrido">
+              <span class="tab-icon">✍️</span> Recorrido Anotado
+            </button>
+            <button class="tab-btn" data-tab="recursos">
+              <span class="tab-icon">🗺️</span> Recursos
+            </button>
+          </div>
+
+          <!-- Tab panels -->
+          <div class="tab-panel active" id="panel-explicacion">
+            <div class="panel-loading hidden" id="loading-explicacion">
+              <div class="skeleton-block"></div>
+              <div class="skeleton-block skeleton-short"></div>
+              <div class="skeleton-block"></div>
+            </div>
+            <div class="panel-content" id="content-explicacion"></div>
+          </div>
+
+          <div class="tab-panel hidden" id="panel-recorrido">
+            <div class="panel-loading hidden" id="loading-recorrido">
+              <div class="skeleton-block"></div>
+              <div class="skeleton-block skeleton-short"></div>
+              <div class="skeleton-block"></div>
+            </div>
+            <div class="panel-content" id="content-recorrido"></div>
+          </div>
+
+          <div class="tab-panel hidden" id="panel-recursos">
+            <div class="panel-loading hidden" id="loading-recursos">
+              <div class="skeleton-block"></div>
+              <div class="skeleton-block skeleton-short"></div>
+            </div>
+            <div class="panel-content" id="content-recursos"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS MODAL ===== -->
+  <div class="modal-overlay hidden" id="modal-settings">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Ajustes</h3>
+        <button class="modal-close" id="btn-close-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- User Info -->
+        <div class="settings-section">
+          <h4 class="settings-section-title">Cuenta</h4>
+          <div class="settings-item">
+            <span class="settings-label">Email</span>
+            <span class="settings-value" id="settings-email">-</span>
+          </div>
+        </div>
+
+        <!-- API Key -->
+        <div class="settings-section">
+          <h4 class="settings-section-title">API Key de Gemini</h4>
+          <p class="settings-description">
+            Tu API key se almacena de forma segura y encriptada. Nunca la compartimos ni la enviamos a nadie.
+            Obtén tu API key en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+          </p>
+
+          <div id="api-key-not-set" class="api-key-status hidden">
+            <div class="status-badge status-warning">No configurada</div>
+            <p class="status-text">Necesitas configurar tu API key para procesar documentos.</p>
+          </div>
+
+          <div id="api-key-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Configurada</div>
+            <p class="status-text">Tu API key está guardada de forma segura.</p>
+          </div>
+
+          <form id="form-api-key" class="settings-form">
+            <div class="form-group">
+              <label for="api-key-input" class="form-label">API Key</label>
+              <input
+                type="password"
+                id="api-key-input"
+                class="form-input"
+                placeholder="AIza..."
+                autocomplete="off"
+              />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="btn-save-api-key">
+                <span class="btn-text">Guardar API Key</span>
+                <span class="spinner hidden"></span>
+              </button>
+              <button type="button" class="btn-danger" id="btn-delete-api-key">Eliminar</button>
+            </div>
+            <p class="form-error" id="api-key-error"></p>
+            <p class="form-success" id="api-key-success"></p>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOAST ===== -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

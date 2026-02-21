@@ -1,0 +1,30 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+google-genai==0.8.3
+python-multipart==0.0.20
+python-dotenv==1.0.1
+aiofiles==24.1.0
+
+# Autenticación y seguridad
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+cryptography==42.0.0
+
+# Base de datos
+sqlalchemy==2.0.25
+alembic==1.13.1
+
+# SQLite para desarrollo local (PostgreSQL en producción)
+# psycopg2-binary==2.9.9  # Descomentar para producción
+
+# Redis (opcional, para SSE distribuido en producción)
+redis==5.0.1
+
+# Rate limiting
+slowapi==0.1.9
+
+# Validación de email
+email-validator==2.1.0
+
+# Python multipart para form data
+python-multipart==0.0.20
