@@ -4,7 +4,6 @@
 
 // ── State ──────────────────────────────────────────────────
 const state = {
-  currentUser: null,
   currentProjectId: null,
   currentProject: null,
   currentPartId: null,
@@ -70,21 +69,8 @@ function toast(msg, type = '') {
 const API_BASE_URL = 'https://explainer-api-pablo.fly.dev';
 
 async function api(path, options = {}) {
-  // Incluir credentials para enviar cookies httpOnly
-  const opts = {
-    ...options,
-    credentials: 'include',
-  };
-
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
-  const res = await fetch(url, opts);
-
-  // Si es 401 y NO estamos en la vista de auth, redirigir a login
-  if (res.status === 401 && !$('view-auth').classList.contains('active')) {
-    state.currentUser = null;
-    showView('view-auth');
-    throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
-  }
+  const res = await fetch(url, options);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Error desconocido' }));
@@ -94,158 +80,17 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-// ── AUTH ───────────────────────────────────────────────────
-async function checkAuth() {
-  // Verifica si el usuario está autenticado.
+// ── APP INIT ───────────────────────────────────────────────
+async function initApp() {
   try {
-    const user = await api('/api/auth/me');
-    state.currentUser = user;
-    state.hasApiKey = user.has_api_key;
-    return true;
+    const status = await api('/api/settings/api-key/status');
+    state.hasApiKey = Boolean(status.has_api_key);
   } catch (err) {
-    state.currentUser = null;
-    return false;
-  }
-}
-
-async function initAuth() {
-  // Inicializa el estado de autenticación.
-  const isAuth = await checkAuth();
-
-  if (isAuth) {
-    showView('view-landing');
-    initLanding();
-  } else {
-    showView('view-auth');
-    initAuthForms();
-  }
-}
-
-function initAuthForms() {
-  // Inicializa los formularios de login y registro.
-  // Tabs
-  document.querySelectorAll('.auth-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const tabName = tab.dataset.tab;
-
-      // Update tabs
-      document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-
-      // Show/hide forms
-      if (tabName === 'login') {
-        show($('form-login'));
-        hide($('form-register'));
-      } else {
-        hide($('form-login'));
-        show($('form-register'));
-      }
-
-      // Clear errors
-      $('login-error').textContent = '';
-      $('register-error').textContent = '';
-    });
-  });
-
-  // Login form
-  $('form-login').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = $('login-email').value;
-    const password = $('login-password').value;
-    const remember = $('login-remember').checked;
-
-    const btn = $('btn-login');
-    const spinner = btn.querySelector('.spinner');
-    const btnText = btn.querySelector('.btn-text');
-
-    btn.disabled = true;
-    show(spinner);
-    btnText.textContent = 'Iniciando sesión...';
-    $('login-error').textContent = '';
-
-    try {
-      const formData = new FormData();
-      formData.append('email', email);
-      formData.append('password', password);
-      formData.append('remember', remember);
-
-      const user = await api('/api/auth/login', {
-        method: 'POST',
-        body: formData,
-      });
-
-      state.currentUser = user;
-      state.hasApiKey = user.has_api_key;
-
-      toast('¡Bienvenido!', 'success');
-      showView('view-landing');
-      initLanding();
-
-    } catch (err) {
-      $('login-error').textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      hide(spinner);
-      btnText.textContent = 'Iniciar sesión';
-    }
-  });
-
-  // Register form
-  $('form-register').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = $('register-email').value;
-    const password = $('register-password').value;
-
-    const btn = $('btn-register');
-    const spinner = btn.querySelector('.spinner');
-    const btnText = btn.querySelector('.btn-text');
-
-    btn.disabled = true;
-    show(spinner);
-    btnText.textContent = 'Creando cuenta...';
-    $('register-error').textContent = '';
-
-    try {
-      const formData = new FormData();
-      formData.append('email', email);
-      formData.append('password', password);
-
-      const user = await api('/api/auth/register', {
-        method: 'POST',
-        body: formData,
-      });
-
-      state.currentUser = user;
-      state.hasApiKey = false;
-
-      toast('Cuenta creada. Configura tu API key para empezar.', 'success');
-      showView('view-landing');
-      initLanding();
-      showSettings(); // Mostrar settings para que configure API key
-
-    } catch (err) {
-      $('register-error').textContent = err.message;
-    } finally {
-      btn.disabled = false;
-      hide(spinner);
-      btnText.textContent = 'Crear cuenta';
-    }
-  });
-}
-
-async function logout() {
-  // Cierra la sesión del usuario.
-  try {
-    await api('/api/auth/logout', { method: 'POST' });
-  } catch (err) {
-    // Ignorar error
+    state.hasApiKey = false;
   }
 
-  state.currentUser = null;
-  state.hasApiKey = false;
-  showView('view-auth');
-  initAuthForms();
-  toast('Sesión cerrada', 'success');
+  showView('view-landing');
+  initLanding();
 }
 
 // ── SETTINGS / API KEY ─────────────────────────────────────
@@ -327,19 +172,8 @@ function initSettings() {
 
 async function showSettings() {
   // Muestra el modal de settings con datos actualizados.
-  if (!state.currentUser) return;
-
-  // Refresh user data
-  try {
-    const user = await api('/api/auth/me');
-    state.currentUser = user;
-    state.hasApiKey = user.has_api_key;
-  } catch (err) {
-    // Usar datos en caché
-  }
-
   // Update UI
-  $('settings-email').textContent = state.currentUser?.email || '-';
+  $('settings-email').textContent = 'Acceso abierto (sin login)';
   updateApiKeyUI();
 
   show($('modal-settings'));
@@ -1057,16 +891,41 @@ function startSSE(projectId) {
   };
 }
 
+
+
+async function exportProjectsBackup() {
+  try {
+    const payload = await api('/api/projects/export');
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `explainer-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Backup exportado', 'success');
+  } catch (err) {
+    toast('Error exportando backup: ' + err.message, 'error');
+  }
+}
+
+async function importProjectsBackup(file) {
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const result = await api('/api/projects/import', { method: 'POST', body: fd });
+    toast(`Importación completada: ${result.imported} importados, ${result.skipped} omitidos`, 'success');
+    loadProjectsView();
+  } catch (err) {
+    toast('Error importando backup: ' + err.message, 'error');
+  }
+}
 // ── Navigation buttons ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
-
-  // Logout buttons
-  $('btn-logout').addEventListener('click', logout);
-  $('btn-logout-projects').addEventListener('click', logout);
 
   // Home / logo clicks
   $('btn-home-from-projects').addEventListener('click', () => showView('view-landing'));
@@ -1076,6 +935,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('btn-new-project-2').addEventListener('click', () => {
     showView('view-landing');
+  });
+
+  $('btn-export-projects').addEventListener('click', exportProjectsBackup);
+  $('import-projects-input').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) importProjectsBackup(file);
+    e.target.value = '';
   });
 
   $('btn-back-to-projects').addEventListener('click', () => {
@@ -1101,5 +967,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Init
   initSettings();
-  initAuth();
+  initApp();
 });
