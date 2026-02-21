@@ -1,24 +1,17 @@
 {
   "version": 2,
-  "name": "explainer-frontend",
-  "builds": [
+  "rewrites": [
     {
-      "src": "frontend/**",
-      "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "https://explainer-api-pablo.fly.dev/api/$1"
+      "source": "/api/(.*)",
+      "destination": "https://explainer-api-pablo.fly.dev/api/$1"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "/frontend/$1"
+      "source": "/static/(.*)",
+      "destination": "/frontend/$1"
     },
     {
-      "src": "/(.*)",
-      "dest": "/frontend/index.html"
+      "source": "/(.*)",
+      "destination": "/frontend/index.html"
     }
   ],
   "headers": [
