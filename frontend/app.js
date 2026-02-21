@@ -66,7 +66,7 @@ function toast(msg, type = '') {
 
 // ── API ────────────────────────────────────────────────────
 // URL del backend (cambiar si tu backend tiene otra URL)
-const API_BASE_URL = 'https://explainer-api-pablo.fly.dev';
+const API_BASE_URL = window.EXPLAINER_API_BASE_URL || '';
 
 async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
@@ -777,7 +777,7 @@ function startSSE(projectId) {
     state.processingSSE.close();
   }
 
-  const evtSource = new EventSource(`${API_BASE_URL}/api/projects/${projectId}/events`, { withCredentials: true });
+  const evtSource = new EventSource(`${API_BASE_URL}/api/projects/${projectId}/events`);
   state.processingSSE = evtSource;
 
   evtSource.onmessage = async (e) => {
