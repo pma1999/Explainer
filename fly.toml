@@ -1,34 +1,22 @@
-app = 'explainer-api'
-primary_region = 'mad'
+# fly.toml app configuration file generated for explainer-api-pablo on 2026-02-21T15:35:10+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'explainer-api-pablo'
+primary_region = 'cdg'
 
 [build]
-  dockerfile = "Dockerfile"
-
-[env]
-  PORT = '8080'
-  ENVIRONMENT = 'production'
-  # FRONTEND_URL se configura tras desplegar Vercel
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ['app']
 
-  [http_service.concurrency]
-    type = "connections"
-    hard_limit = 100
-    soft_limit = 50
-
-[[mounts]]
-  source = "explainer_data"
-  destination = "/app/data"
-
 [[vm]]
-  size = 'shared-cpu-1x'
   memory = '512mb'
-  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 512
