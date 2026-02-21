@@ -16,10 +16,16 @@ from sqlalchemy.pool import StaticPool
 
 
 # URL de la base de datos - Fly.io provee DATABASE_URL en producción
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "sqlite:///./data/explainer.db"  # Default local
-)
+# En producción (Fly.io), usar ruta absoluta en el volumen montado /app/data
+# En desarrollo local, usar ruta relativa
+if os.environ.get("FLY_APP_NAME"):
+    # Producción Fly.io - volumen montado en /app/data
+    DEFAULT_DB_URL = "sqlite:////app/data/explainer.db"
+else:
+    # Desarrollo local
+    DEFAULT_DB_URL = "sqlite:///./data/explainer.db"
+
+DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DB_URL)
 
 # Configuración del engine según el tipo de base de datos
 if DATABASE_URL.startswith("sqlite"):
