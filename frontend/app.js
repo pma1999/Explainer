@@ -66,6 +66,9 @@ function toast(msg, type = '') {
 }
 
 // ── API ────────────────────────────────────────────────────
+// URL del backend (cambiar si tu backend tiene otra URL)
+const API_BASE_URL = 'https://explainer-api-pablo.fly.dev';
+
 async function api(path, options = {}) {
   // Incluir credentials para enviar cookies httpOnly
   const opts = {
@@ -73,7 +76,8 @@ async function api(path, options = {}) {
     credentials: 'include',
   };
 
-  const res = await fetch(path, opts);
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+  const res = await fetch(url, opts);
 
   // Si es 401, redirigir a login
   if (res.status === 401) {
@@ -939,7 +943,7 @@ function startSSE(projectId) {
     state.processingSSE.close();
   }
 
-  const evtSource = new EventSource(`/api/projects/${projectId}/events`, { withCredentials: true });
+  const evtSource = new EventSource(`${API_BASE_URL}/api/projects/${projectId}/events`, { withCredentials: true });
   state.processingSSE = evtSource;
 
   evtSource.onmessage = async (e) => {
