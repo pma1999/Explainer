@@ -79,8 +79,8 @@ async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
   const res = await fetch(url, opts);
 
-  // Si es 401, redirigir a login
-  if (res.status === 401) {
+  // Si es 401 y NO estamos en la vista de auth, redirigir a login
+  if (res.status === 401 && !$('view-auth').classList.contains('active')) {
     state.currentUser = null;
     showView('view-auth');
     throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
