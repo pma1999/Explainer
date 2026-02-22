@@ -292,7 +292,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
             results = await asyncio.gather(
                 asyncio.to_thread(run_explainer, api_key, file_uri, identificacion, cache_name),
                 asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion, cache_name),
-                asyncio.to_thread(run_resources, api_key, file_uri, identificacion, cache_name),
+                asyncio.to_thread(run_resources, api_key, file_uri, identificacion, None),
                 return_exceptions=True,
             )
 
