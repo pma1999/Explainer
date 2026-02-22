@@ -19,11 +19,7 @@ DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.envir
 os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
 
 from backend.auth import get_current_user_id, get_user_id_from_token
-from backend.local_data import (
-    init_local_data,
-    get_encrypted_api_key,
-    set_encrypted_api_key,
-)
+from backend.local_data import init_local_data
 from backend.supabase_data import (
     create_project as supabase_create_project,
     get_project,
@@ -33,8 +29,13 @@ from backend.supabase_data import (
     export_projects_payload,
     import_projects_payload,
     download_pdf_to_temp,
+    get_user_api_key,
+    set_user_api_key,
+    delete_user_api_key,
+    has_user_api_key,
+    get_user_api_key_status,
 )
-from backend.crypto import encrypt_global_api_key, decrypt_global_api_key
+from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import project_create_rate_limit
 from backend.pricing import calculate_cost, get_model_name, calculate_storage_cost
@@ -73,22 +74,38 @@ async def api_set_api_key(
     user_id: Annotated[str, Depends(get_current_user_id)],
     api_key: str = Form(...),
 ):
+    """Store user's API key (BYOK - Bring Your Own Key).
+
+    The API key is encrypted with a user-specific key before storage.
+    The plaintext key is never stored or logged.
+    """
     if not api_key.startswith("AIza") or len(api_key) < 20:
         raise HTTPException(status_code=400, detail="API key de Gemini inválida")
-    encrypted = encrypt_global_api_key(api_key)
-    set_encrypted_api_key(encrypted)
+
+    # Store encrypted API key for this user (BYOK)
+    set_user_api_key(user_id, api_key, provider="google_gemini")
+
+    # Log only masked version for security
+    print(f"[API Key] User {user_id[:8]}... configured API key: {mask_api_key(api_key)}")
+
     return {"ok": True}
 
 
 @app.delete("/api/settings/api-key")
 async def api_delete_api_key(user_id: Annotated[str, Depends(get_current_user_id)]):
-    set_encrypted_api_key(None)
+    """Delete user's API key."""
+    delete_user_api_key(user_id)
+    print(f"[API Key] User {user_id[:8]}... deleted their API key")
     return {"ok": True}
 
 
 @app.get("/api/settings/api-key/status")
-async def api_api_key_status():
-    return {"has_api_key": bool(get_encrypted_api_key())}
+async def api_api_key_status(user_id: Annotated[str, Depends(get_current_user_id)]):
+    """Get API key status for the authenticated user.
+
+    Returns only status info, never the actual API key.
+    """
+    return get_user_api_key_status(user_id)
 
 
 @app.post("/api/projects")
@@ -171,18 +188,15 @@ async def _process_project(project_id: str, user_id: str) -> None:
             await send_event(project_id, {"type": "error", "message": "Proyecto no encontrado"})
             return
 
-        encrypted_key = get_encrypted_api_key()
-        if not encrypted_key:
-            await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada."})
+        # Get user's API key (BYOK) from Supabase
+        api_key = get_user_api_key(user_id)
+        if not api_key:
+            await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada. Configúrala en Ajustes."})
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
-        try:
-            api_key = decrypt_global_api_key(encrypted_key)
-        except Exception as e:
-            await send_event(project_id, {"type": "error", "message": "Error al leer API key. Vuelve a configurarla."})
-            update_project(project_id, user_id, {"status": "error", "error_message": str(e)})
-            return
+        # Log masked version only for security
+        print(f"[Process] Using API key for user {user_id[:8]}...: {mask_api_key(api_key)}")
 
         from google import genai
         from google.genai import types
@@ -398,13 +412,17 @@ async def api_process_project(
     project_id: str,
     background_tasks: BackgroundTasks,
 ):
+    """Start processing a project using the user's own API key (BYOK)."""
     project = get_project(project_id, user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     if project["status"] not in ("pending", "error"):
         raise HTTPException(status_code=400, detail=f"El proyecto ya está en estado '{project['status']}'")
-    if not get_encrypted_api_key():
+
+    # Check if user has configured their API key (BYOK)
+    if not has_user_api_key(user_id):
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
+
     background_tasks.add_task(_process_project, project_id, user_id)
     return {"ok": True, "status": "started"}
 

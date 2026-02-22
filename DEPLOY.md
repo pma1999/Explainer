@@ -8,14 +8,45 @@
 │  └── explainer.vercel.app                                   │
 ├─────────────────────────────────────────────────────────────┤
 │  SUPABASE — Auth + Postgres + Storage                       │
-│  └── Usuarios, proyectos, PDFs                              │
+│  ├── Usuarios, proyectos, PDFs                              │
+│  └── 🔐 API Keys encriptadas por usuario (BYOK)            │
 ├─────────────────────────────────────────────────────────────┤
 │  FLY.IO (Backend API) — $0                                  │
 │  └── explainer-api.fly.dev                                  │
-│  ├── Auth JWT + Supabase (proyectos y PDFs en la nube)     │
-│  └── API key Gemini en disco/volumen                        │
+│  ├── Auth JWT + Supabase (proyectos, PDFs, API keys)       │
+│  └── Encriptación AES-128 (Fernet) con clave maestra       │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 🔐 Seguridad API Keys (BYOK - Bring Your Own Key)
+
+Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporciona y controla su propia API key de Gemini:
+
+### Modelo de Seguridad
+
+| Aspecto | Implementación |
+|---------|----------------|
+| **Almacenamiento** | API keys encriptadas en Supabase (Postgres), nunca en texto plano |
+| **Encriptación** | AES-128-CBC + HMAC-SHA256 vía Fernet |
+| **Clave de encriptación** | Derivada por usuario: `SHA256(MASTER_KEY + user_id)` |
+| **Acceso** | Row Level Security (RLS): cada usuario solo accede a sus propias keys |
+| **Transmisión** | HTTPS/TLS 1.3 en todo momento |
+| **Logs** | Solo versiones enmascaradas (`AIza...XXXX`) |
+
+### Flujo de Seguridad
+
+1. **Usuario configura su API key** → Frontend envía al backend vía HTTPS + JWT
+2. **Backend encripta** → Usa Fernet con clave derivada del `user_id`
+3. **Almacenamiento** → Se guarda en Supabase con RLS (solo el propietario puede acceder)
+4. **Procesamiento** → El backend desencripta temporalmente en memoria para llamar a Gemini
+5. **Nunca se expone** → La API key en texto plano nunca se envía al frontend ni se registra en logs
+
+### Ventajas BYOK
+
+- **Multi-dispositivo**: La API key del usuario está disponible en todos sus dispositivos
+- **Segregación total**: Un usuario no puede acceder a las keys de otro (RLS a nivel de BD)
+- **Compliance**: Cada usuario es responsable de su propia cuota y facturación con Google
+- **Sin riesgo de fuga**: Incluso si la BD se compromete, las keys están encriptadas
 
 ## Requisitos
 
@@ -51,13 +82,18 @@ La app usa Supabase para usuarios, proyectos y almacenamiento de PDFs.
    - **service_role** → `SUPABASE_SERVICE_ROLE_KEY` (backend)
    - **JWT Secret** → `SUPABASE_JWT_SECRET`
 
-### 2. Ejecutar la migración
+### 2. Ejecutar las migraciones
 
-En el **SQL Editor** de Supabase, ejecuta el contenido de:
+En el **SQL Editor** de Supabase, ejecuta en orden:
 
-`supabase/migrations/20260222100000_initial_explainer.sql`
+1. **`supabase/migrations/20260222100000_initial_explainer.sql`**
+   - Crea la tabla `projects`, RLS y el bucket `project-pdfs`
 
-Eso crea la tabla `projects`, RLS y el bucket `project-pdfs`. Si el bucket no se crea por SQL, créalo manualmente en **Storage → New bucket** con nombre `project-pdfs` (privado).
+2. **`supabase/migrations/20260222120000_user_api_keys.sql`**
+   - Crea la tabla `user_api_keys` para almacenar API keys encriptadas por usuario (BYOK)
+   - Aplica políticas RLS estrictas para aislamiento por usuario
+
+Si el bucket no se crea por SQL, créalo manualmente en **Storage → New bucket** con nombre `project-pdfs` (privado).
 
 ### 3. URLs de redirección (Auth)
 
@@ -174,11 +210,29 @@ Edita `vercel.json` y reemplaza `explainer-api.fly.dev` con tu URL real de Fly.i
 
 ### Test Funcional
 
-1. **Configurar API key**: Ve a "Ajustes" y guarda tu API key de Gemini
-2. **Crear proyecto**: Sube un PDF y verifica que procesa correctamente
-3. Procesamiento completo: segmentación, explicaciones, recorrido, recursos
-4. Verificar que SSE muestra progreso en tiempo real
-5. Verificar que los costos se calculan correctamente
+1. **Configurar API key (BYOK)**:
+   - Ve a "Ajustes" y guarda tu API key de Gemini
+   - Verifica que el estado muestra "Configurada"
+   - Recarga la página y confirma que persiste (sincronización multi-dispositivo)
+
+2. **Seguridad API keys**:
+   - Verifica que la API key nunca aparece en la interfaz después de guardar
+   - Los logs solo muestran versión enmascarada (`AIza...XXXX`)
+
+3. **Crear proyecto**: Sube un PDF y verifica que procesa correctamente
+4. Procesamiento completo: segmentación, explicaciones, recorrido, recursos
+5. Verificar que SSE muestra progreso en tiempo real
+6. Verificar que los costos se calculan correctamente
+
+### Verificación de Seguridad (Opcional)
+
+```sql
+-- Como admin de Supabase, verifica que RLS funciona:
+-- Intentar acceder a API keys de otro usuario debe fallar
+SET ROLE authenticated;
+SET request.jwt.claim.sub = 'uuid-de-otro-usuario';
+SELECT * FROM user_api_keys; -- Debe retornar 0 rows
+```
 
 ---
 

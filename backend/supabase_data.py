@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 from supabase import create_client, Client
 
+from backend.crypto import encrypt_user_api_key, decrypt_user_api_key
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 BUCKET_ID = "project-pdfs"
@@ -187,3 +189,106 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
     finally:
         os.close(fd)
     return path
+
+
+# ========== User API Keys (BYOK) ==========
+
+def has_user_api_key(user_id: str) -> bool:
+    """Check if user has an API key configured."""
+    client = _client()
+    r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+    return bool(r.data)
+
+
+def get_user_api_key(user_id: str) -> Optional[str]:
+    """
+    Get and decrypt the user's API key.
+
+    Args:
+        user_id: UUID of the user
+
+    Returns:
+        Decrypted API key or None if not found
+    """
+    client = _client()
+    r = client.table("user_api_keys").select("encrypted_api_key").eq("user_id", user_id).maybe_single().execute()
+    if not r.data:
+        return None
+
+    encrypted_key = r.data["encrypted_api_key"]
+    return decrypt_user_api_key(encrypted_key, user_id)
+
+
+def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini") -> None:
+    """
+    Encrypt and save the user's API key (BYOK).
+
+    Args:
+        user_id: UUID of the user
+        api_key: API key in plain text (will be encrypted before storage)
+        provider: API provider identifier
+    """
+    client = _client()
+    encrypted_key = encrypt_user_api_key(api_key, user_id)
+
+    # Upsert: insert if not exists, update if exists
+    row = {
+        "user_id": user_id,
+        "encrypted_api_key": encrypted_key,
+        "provider": provider,
+    }
+
+    # Try update first
+    existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+    if existing.data:
+        client.table("user_api_keys").update(row).eq("user_id", user_id).execute()
+    else:
+        client.table("user_api_keys").insert(row).execute()
+
+
+def delete_user_api_key(user_id: str) -> bool:
+    """
+    Delete the user's API key.
+
+    Args:
+        user_id: UUID of the user
+
+    Returns:
+        True if deleted, False if not found
+    """
+    client = _client()
+    existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+    if not existing.data:
+        return False
+
+    client.table("user_api_keys").delete().eq("user_id", user_id).execute()
+    return True
+
+
+def get_user_api_key_status(user_id: str) -> dict[str, Any]:
+    """
+    Get API key status for a user (safe for returning to frontend).
+
+    Returns info about API key without exposing any sensitive data.
+
+    Args:
+        user_id: UUID of the user
+
+    Returns:
+        Dict with has_api_key (bool), provider (str or None), updated_at (str or None)
+    """
+    client = _client()
+    r = client.table("user_api_keys").select("provider, updated_at").eq("user_id", user_id).maybe_single().execute()
+
+    if r.data:
+        return {
+            "has_api_key": True,
+            "provider": r.data.get("provider"),
+            "updated_at": r.data.get("updated_at"),
+        }
+
+    return {
+        "has_api_key": False,
+        "provider": None,
+        "updated_at": None,
+    }
