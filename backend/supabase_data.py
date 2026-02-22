@@ -196,8 +196,11 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
 def has_user_api_key(user_id: str) -> bool:
     """Check if user has an API key configured."""
     client = _client()
-    r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
-    return bool(r.data)
+    try:
+        r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+        return bool(r and r.data)
+    except Exception:
+        return False
 
 
 def get_user_api_key(user_id: str) -> Optional[str]:
@@ -211,12 +214,15 @@ def get_user_api_key(user_id: str) -> Optional[str]:
         Decrypted API key or None if not found
     """
     client = _client()
-    r = client.table("user_api_keys").select("encrypted_api_key").eq("user_id", user_id).maybe_single().execute()
-    if not r.data:
-        return None
+    try:
+        r = client.table("user_api_keys").select("encrypted_api_key").eq("user_id", user_id).maybe_single().execute()
+        if not r or not r.data:
+            return None
 
-    encrypted_key = r.data["encrypted_api_key"]
-    return decrypt_user_api_key(encrypted_key, user_id)
+        encrypted_key = r.data["encrypted_api_key"]
+        return decrypt_user_api_key(encrypted_key, user_id)
+    except Exception:
+        return None
 
 
 def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini") -> None:
@@ -239,10 +245,14 @@ def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini"
     }
 
     # Try update first
-    existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
-    if existing.data:
-        client.table("user_api_keys").update(row).eq("user_id", user_id).execute()
-    else:
+    try:
+        existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+        if existing and existing.data:
+            client.table("user_api_keys").update(row).eq("user_id", user_id).execute()
+        else:
+            client.table("user_api_keys").insert(row).execute()
+    except Exception as e:
+        # If error (e.g., connection), try insert as fallback
         client.table("user_api_keys").insert(row).execute()
 
 
@@ -257,12 +267,15 @@ def delete_user_api_key(user_id: str) -> bool:
         True if deleted, False if not found
     """
     client = _client()
-    existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
-    if not existing.data:
-        return False
+    try:
+        existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+        if not existing or not existing.data:
+            return False
 
-    client.table("user_api_keys").delete().eq("user_id", user_id).execute()
-    return True
+        client.table("user_api_keys").delete().eq("user_id", user_id).execute()
+        return True
+    except Exception:
+        return False
 
 
 def get_user_api_key_status(user_id: str) -> dict[str, Any]:
@@ -278,14 +291,17 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
         Dict with has_api_key (bool), provider (str or None), updated_at (str or None)
     """
     client = _client()
-    r = client.table("user_api_keys").select("provider, updated_at").eq("user_id", user_id).maybe_single().execute()
+    try:
+        r = client.table("user_api_keys").select("provider, updated_at").eq("user_id", user_id).maybe_single().execute()
 
-    if r.data:
-        return {
-            "has_api_key": True,
-            "provider": r.data.get("provider"),
-            "updated_at": r.data.get("updated_at"),
-        }
+        if r and r.data:
+            return {
+                "has_api_key": True,
+                "provider": r.data.get("provider"),
+                "updated_at": r.data.get("updated_at"),
+            }
+    except Exception:
+        pass
 
     return {
         "has_api_key": False,
