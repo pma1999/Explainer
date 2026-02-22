@@ -1,0 +1,75 @@
+# Koyeb configuration for Explainer API
+# This file defines the deployment configuration for Koyeb's free tier (Starter plan)
+#
+# Features:
+# - Scale-to-zero: App stops after inactivity to save resources (free)
+# - Autoscaling: Automatically scales up when needed
+# - Region: Frankfurt (fra) - close to Supabase EU regions
+# - Port: 8080 (matches the app's internal port)
+
+name: explainer-api
+region: fra
+type: web
+
+# Use Docker builder since we have a Dockerfile
+docker:
+  dockerfile: Dockerfile
+
+# Port configuration
+ports:
+  - port: 8080
+    protocol: http
+    expose: true
+
+# Routes
+routes:
+  - path: /
+    port: 8080
+
+# Static environment variables (non-sensitive)
+env:
+  - name: ENVIRONMENT
+    value: production
+  - name: PORT
+    value: "8080"
+  - name: KOYEB_APP_NAME
+    value: explainer-api
+
+# Scaling configuration for free tier
+scaling:
+  min: 0  # Scale-to-zero: app stops after ~5 min of inactivity (FREE)
+  max: 1  # Only 1 instance (free tier limit)
+  targets:
+    - type: cpu
+      value: 80  # Scale up when CPU reaches 80%
+
+# Health check
+healthcheck:
+  protocol: http
+  port: 8080
+  path: /api/settings/api-key/status
+  method: GET
+  grace_period: 30
+  interval: 15
+  timeout: 5
+  retries: 3
+
+# Instance type (free tier uses nano by default)
+instance_types:
+  - type: nano
+
+# IMPORTANT: Secrets must be configured separately via Koyeb CLI or dashboard:
+# - APP_ENCRYPTION_KEY
+# - SUPABASE_URL
+# - SUPABASE_SERVICE_ROLE_KEY
+# - SUPABASE_JWT_SECRET
+# - FRONTEND_URL
+#
+# To set secrets via CLI:
+#   koyeb secret create APP_ENCRYPTION_KEY --value "your-key-here"
+#   koyeb secret create SUPABASE_URL --value "https://xxx.supabase.co"
+#   ... etc
+#
+# Then attach them to the service:
+#   koyeb service update explainer-api/explainer-api --secret APP_ENCRYPTION_KEY
+#   ... etc

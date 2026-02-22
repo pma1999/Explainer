@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv(override=True)
 
-DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.environ.get("FLY_APP_NAME") else "data"))
+DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if (os.environ.get("FLY_APP_NAME") or os.environ.get("KOYEB_APP_NAME")) else "data"))
 os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
 
 from backend.auth import get_current_user_id, get_user_id_from_token
