@@ -143,18 +143,20 @@ vercel --prod
 
 Sigue las instrucciones:
 - Project name: `explainer` (o el que prefieras)
-- Directory: `./frontend` (cuando lo pregunte)
+- **Root Directory**: deja el raíz del repo (no solo `./frontend`) para que el build pueda ejecutar `npm run build`.
 
-### Paso 4: Configurar Variables de Entorno en Vercel
+### Paso 4: Build y variables de entorno en Vercel
 
-Ve al dashboard de Vercel:
-1. Selecciona tu proyecto
-2. Ve a "Settings" → "Environment Variables"
-3. Añade (para que el frontend pueda usar Supabase Auth):
+En el dashboard de Vercel (tu proyecto → Settings):
+
+1. **Build & Development**
+   - **Build Command**: `npm run build` (genera `frontend/config.js` desde las variables de entorno).
+
+2. **Environment Variables** (Settings → Environment Variables). Añade:
    - `EXPLAINER_SUPABASE_URL` = tu Project URL de Supabase (ej: `https://xxx.supabase.co`)
-   - `EXPLAINER_SUPABASE_ANON_KEY` = clave **anon public** de Supabase
+   - `EXPLAINER_SUPABASE_ANON_KEY` = clave **anon** de Supabase (Project Settings → API)
 
-Para que el frontend use Supabase: crea `frontend/config.js` a partir de `frontend/config.example.js`, rellena las variables, descomenta en `index.html` la línea que carga `/static/config.js` y añade `frontend/config.js` a `.gitignore`. En Vercel puedes generar `config.js` en un build step desde las variables de entorno.
+Tras cada deploy, el script `scripts/generate-config.js` crea `frontend/config.js` con esas variables, así el frontend carga Supabase sin errores de MIME ni 404. En local, copia `frontend/config.example.js` a `frontend/config.js` y rellena los valores (o usa env en tu entorno).
 
 ### Paso 5: Actualizar Backend con URL del Frontend
 
