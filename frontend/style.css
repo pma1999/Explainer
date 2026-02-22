@@ -82,11 +82,14 @@ body {
 /* ── Auth view ── */
 #view-auth {
   position: relative;
-  display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
+}
+
+#view-auth.active {
+  display: flex;
 }
 
 .auth-bg {
