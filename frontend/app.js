@@ -14,22 +14,27 @@ const state = {
   currentProject: null,
   currentPartId: null,
   activeTab: 'explicacion',
-  processingSSE: null,
+  processingSSE: null,              // EventSource activo
+  sseProjectId: null,               // projectId al que está conectado el SSE
   sseReconnectAttempts: 0,
   sseLastEventAt: 0,
+  ssePausedByVisibility: false,     // true cuando pestaña oculta
   pollProjectsInterval: null,
   pollCurrentProjectInterval: null,
   hasApiKey: false,
   session: null,
   user: null,
+  previousUserId: null,             // Para detectar cambios de usuario vs refresh de sesión
 };
 
 const SSE_RECONNECT_MAX = 5;
 const SSE_RECONNECT_DELAY_MS = 2000;
 const POLL_PROJECTS_MS = 6000;
 const POLL_CURRENT_IF_IDLE_MS = 12000;
+const VISIBILITY_RECONNECT_DELAY_MS = 800;
 
 const LOCAL_BACKUP_KEY = 'explainer.projects.backup.v1';
+const SESSION_VIEW_KEY = 'explainer.current_view.v1';
 
 function loadLocalBackup() {
   try {
@@ -100,6 +105,8 @@ const hide = (el) => el && el.classList.add('hidden');
 function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   $(viewId).classList.add('active');
+  // Save view state for tab restore
+  saveViewState();
 }
 
 function formatDate(iso) {
@@ -192,15 +199,52 @@ async function initApp() {
   state.session = session;
   state.user = session?.user ?? null;
 
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
-    state.session = session;
-    state.user = session?.user ?? null;
-    if (session) {
+  supabaseClient.auth.onAuthStateChange((_event, newSession) => {
+    const prevUserId = state.user?.id ?? null;
+    const newUserId = newSession?.user?.id ?? null;
+
+    // Update state
+    state.session = newSession;
+    state.user = newSession?.user ?? null;
+
+    // Smart navigation: only redirect on meaningful state changes
+    if (!prevUserId && newUserId) {
+      // Fresh login (was logged out, now logged in)
       showView('view-landing');
       initLanding();
       refreshApiKeyStatus();
-    } else {
+    } else if (prevUserId && !newUserId) {
+      // Logout (was logged in, now logged out)
+      // Close SSE and clean up
+      if (state.processingSSE) {
+        state.processingSSE.close();
+        state.processingSSE = null;
+        state.sseProjectId = null;
+      }
+      stopPolling();
       showView('view-auth');
+    } else if (prevUserId && newUserId && prevUserId !== newUserId) {
+      // User switched (different user logged in)
+      // Clear project state and close SSE
+      if (state.processingSSE) {
+        state.processingSSE.close();
+        state.processingSSE = null;
+        state.sseProjectId = null;
+      }
+      stopPolling();
+      state.currentProjectId = null;
+      state.currentProject = null;
+      state.currentPartId = null;
+      // Clear session storage for previous user
+      sessionStorage.removeItem('explainer.viewState');
+      showView('view-landing');
+      initLanding();
+      refreshApiKeyStatus();
+    } else if (newUserId) {
+      // Session continued or refreshed - same user
+      // DO NOT navigate - let user stay on current view
+      // Just refresh API key status in background
+      refreshApiKeyStatus();
     }
   });
 
@@ -210,9 +254,99 @@ async function initApp() {
     return;
   }
 
+  // Try to restore previous view state from sessionStorage
+  // This handles browser tab discard/recovery scenarios
+  const savedState = sessionStorage.getItem('explainer.viewState');
+  if (savedState) {
+    try {
+      const viewState = JSON.parse(savedState);
+      // Only restore if it's the same user
+      if (viewState.userId === state.user?.id) {
+        // Restore view based on saved state
+        if (viewState.view === 'view-project' && viewState.projectId) {
+          // Restore project view
+          state.currentProjectId = viewState.projectId;
+          state.currentPartId = viewState.partId || null;
+          state.activeTab = viewState.activeTab || 'explicacion';
+          // Load project and show view
+          await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab);
+          return;
+        } else if (viewState.view === 'view-projects') {
+          showView('view-projects');
+          loadProjectsView();
+          return;
+        } else if (viewState.view === 'view-landing') {
+          showView('view-landing');
+          initLanding();
+          await refreshApiKeyStatus();
+          return;
+        }
+      }
+    } catch (_) {
+      // If parsing fails, fall through to default landing
+    }
+  }
+
+  // Default: go to landing
   showView('view-landing');
   initLanding();
   await refreshApiKeyStatus();
+}
+
+// Helper to restore project view on init
+async function restoreProjectView(projectId, partId, activeTab) {
+  showView('view-project');
+  try {
+    const project = await api(`/api/projects/${projectId}`);
+    state.currentProject = project;
+
+    const refreshed = mergeProjects([project], loadLocalBackup().projects);
+    syncProjectsToLocal(refreshed);
+
+    renderProjectView(project);
+
+    // Restore part selection if specified
+    if (partId && project.segmentation?.partes?.some(p => p.numero === partId)) {
+      state.currentPartId = partId;
+      state.activeTab = activeTab;
+      selectPart(partId);
+      activateTab(activeTab);
+    }
+
+    // Restart SSE if project is still processing
+    const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
+    if (isProcessing) {
+      if (state.sseProjectId === projectId && state.processingSSE) {
+        if (state.processingSSE.readyState === EventSource.CLOSED) {
+          startSSE(projectId, { forceReconnect: true });
+        }
+      } else {
+        closeSSEIfDifferent(projectId);
+        startSSE(projectId);
+      }
+    }
+  } catch (err) {
+    // If restore fails, go to projects list
+    showView('view-projects');
+    loadProjectsView();
+    toast('No se pudo restaurar la vista anterior', 'error');
+  }
+}
+
+// Save current view state to sessionStorage
+function saveViewState() {
+  if (!state.user?.id) return;
+
+  const activeView = document.querySelector('.view.active')?.id || 'view-landing';
+  const viewState = {
+    userId: state.user.id,
+    view: activeView,
+    projectId: state.currentProjectId,
+    partId: state.currentPartId,
+    activeTab: state.activeTab,
+    savedAt: new Date().toISOString(),
+  };
+  sessionStorage.setItem('explainer.viewState', JSON.stringify(viewState));
 }
 
 async function refreshApiKeyStatus() {
@@ -680,7 +814,25 @@ async function openProjectView(projectId) {
 
     const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
     if (isProcessing) {
-      startSSE(projectId);
+      // Si ya hay SSE para este proyecto, no recrear; si es de otro, cerrar y crear nuevo
+      if (state.sseProjectId === projectId && state.processingSSE) {
+        // Reconectar si estaba cerrado por error
+        if (state.processingSSE.readyState === EventSource.CLOSED) {
+          startSSE(projectId, { forceReconnect: true });
+        }
+        // Sincronizar UI con estado actual
+        syncProcessingUIWithState();
+      } else {
+        closeSSEIfDifferent(projectId);
+        startSSE(projectId);
+      }
+    } else {
+      // Proyecto completado: cerrar SSE si estaba abierto para este proyecto
+      if (state.processingSSE && state.sseProjectId === projectId) {
+        state.processingSSE.close();
+        state.processingSSE = null;
+        state.sseProjectId = null;
+      }
     }
   } catch (err) {
     const cachedProject = getCachedProject(projectId);
@@ -698,6 +850,19 @@ async function openProjectView(projectId) {
   }
 }
 
+function syncProcessingUIWithState() {
+  const project = state.currentProject;
+  if (!project) return;
+  const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
+  if (isProcessing) {
+    showProcessingIndicator(project.status);
+  } else {
+    hideProcessingIndicator();
+  }
+  renderSidebarNav(project);
+  updateUsageUI(project.usage);
+}
+
 function renderProjectView(project) {
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
@@ -707,20 +872,20 @@ function renderProjectView(project) {
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
   if (isProcessing) {
-    show($('processing-overlay'));
-    updateProcessingOverlay(project.status);
+    showProcessingIndicator(project.status);
   } else {
-    hide($('processing-overlay'));
+    hideProcessingIndicator();
   }
 
   if (!state.currentPartId) {
     show($('main-welcome'));
     hide($('part-content'));
     const hasPartes = project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0;
-    $('welcome-title').textContent = hasPartes ? 'Selecciona una parte' : 'Procesando...';
+    const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
+    $('welcome-title').textContent = hasPartes ? 'Selecciona una parte' : (isProcessing ? 'Procesando...' : 'Sin contenido');
     $('welcome-sub').textContent = hasPartes
-      ? 'Elige una parte del sidebar para ver su contenido'
-      : 'El análisis está en curso. Los resultados aparecerán aquí.';
+      ? 'Haz clic en cualquier parte completada para ver su contenido mientras se genera el resto.'
+      : (isProcessing ? 'El análisis está en curso. Los resultados aparecerán en el sidebar.' : 'No hay partes disponibles.');
   }
 }
 
@@ -776,13 +941,16 @@ function updateProcessingOverlay(status) {
 
 function pushStreamEvent(type, desc) {
   const container = $('stream-events');
-  if (!container) return;
-  const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const el = document.createElement('div');
-  el.className = 'stream-event';
-  el.innerHTML = `<span class="event-time">${time}</span><span class="event-type">${escHtml(type)}</span><span class="event-desc">${escHtml(desc || '')}</span>`;
-  container.insertBefore(el, container.firstChild);
-  while (container.children.length > 20) container.lastChild.remove();
+  if (container) {
+    const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const el = document.createElement('div');
+    el.className = 'stream-event';
+    el.innerHTML = `<span class="event-time">${time}</span><span class="event-type">${escHtml(type)}</span><span class="event-desc">${escHtml(desc || '')}</span>`;
+    container.insertBefore(el, container.firstChild);
+    while (container.children.length > 20) container.lastChild.remove();
+  }
+  // Also update floating indicator
+  pushIndicatorStream(`${type}: ${desc || ''}`);
 }
 
 function setAgentNodeState(agentId, stateKind) {
@@ -794,7 +962,92 @@ function setAgentNodeState(agentId, stateKind) {
 }
 
 function setAllAgentsIdle() {
-  ['explainer', 'recorrido', 'resources'].forEach((id) => setAgentNodeState(id, ''));
+  ['explainer', 'recorrido', 'resources'].forEach((id) => {
+    setAgentNodeState(id, '');
+    setIndicatorAgentState(id, '');
+  });
+}
+
+// ── Non-blocking processing indicator ───────────────────
+function ensureFloatingIndicatorExists() {
+  if ($('floating-indicator')) return;
+  const indicator = document.createElement('div');
+  indicator.id = 'floating-indicator';
+  indicator.className = 'floating-indicator hidden';
+  indicator.innerHTML = `
+    <div class="fi-core">
+      <div class="fi-ring fi-ring-1"></div>
+      <div class="fi-ring fi-ring-2"></div>
+    </div>
+    <div class="fi-content">
+      <div class="fi-title">Generando...</div>
+      <div class="fi-agents">
+        <span id="fi-explainer" class="fi-agent">📖</span>
+        <span id="fi-recorrido" class="fi-agent">✍️</span>
+        <span id="fi-resources" class="fi-agent">🗺️</span>
+      </div>
+      <div class="fi-stream" id="fi-stream"></div>
+    </div>
+    <button class="fi-toggle" id="fi-toggle" title="Expandir/Colapsar">▼</button>
+  `;
+  document.body.appendChild(indicator);
+
+  // Toggle expand/collapse
+  indicator.querySelector('#fi-toggle').addEventListener('click', () => {
+    indicator.classList.toggle('collapsed');
+  });
+
+  // Click on indicator to open project if not current
+  indicator.addEventListener('click', (e) => {
+    if (e.target.closest('#fi-toggle')) return;
+    const view = document.querySelector('.view.active');
+    if (view && view.id !== 'view-project' && state.sseProjectId) {
+      openProjectView(state.sseProjectId);
+    }
+  });
+}
+
+function showProcessingIndicator(status) {
+  ensureFloatingIndicatorExists();
+  const indicator = $('floating-indicator');
+  if (!indicator) return;
+  indicator.classList.remove('hidden');
+  updateProcessingIndicator(status);
+}
+
+function hideProcessingIndicator() {
+  const indicator = $('floating-indicator');
+  if (indicator) indicator.classList.add('hidden');
+  // Also hide the old overlay if visible
+  hide($('processing-overlay'));
+}
+
+function updateProcessingIndicator(status) {
+  const titleMap = {
+    uploading: 'Subiendo PDF...',
+    segmenting: 'Segmentando...',
+    processing: 'Generando contenido...',
+    pending: 'Iniciando...',
+  };
+  const fiTitle = document.querySelector('#floating-indicator .fi-title');
+  if (fiTitle) fiTitle.textContent = titleMap[status] || 'Procesando...';
+}
+
+function pushIndicatorStream(text) {
+  const stream = $('fi-stream');
+  if (!stream) return;
+  const line = document.createElement('div');
+  line.className = 'fi-line';
+  line.textContent = text;
+  stream.appendChild(line);
+  if (stream.children.length > 5) stream.firstChild.remove();
+}
+
+function setIndicatorAgentState(agentId, stateKind) {
+  const el = document.querySelector(`#fi-${agentId}`);
+  if (!el) return;
+  el.classList.remove('active', 'completed');
+  if (stateKind) el.classList.add(stateKind);
 }
 
 function selectPart(partId) {
@@ -825,6 +1078,9 @@ function selectPart(partId) {
   renderTab('recursos', contenido);
 
   activateTab(state.activeTab);
+
+  // Save view state when selecting a part
+  saveViewState();
 }
 
 function renderTab(tabName, contenido) {
@@ -881,6 +1137,8 @@ function activateTab(tabName) {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
+  // Save view state when changing tabs
+  saveViewState();
 }
 
 // ── Renderers ──────────────────────────────────────────────
@@ -1063,6 +1321,28 @@ function renderResources(data) {
   return html;
 }
 
+// ── Page Visibility API ───────────────────────────────────
+// Mantiene SSE activo incluso al cambiar de pestaña; reconecta rápido al volver
+function initVisibilityHandling() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      state.ssePausedByVisibility = true;
+      // NO cerramos SSE, solo marcamos pausa. Al volver reconectamos si es necesario.
+    } else {
+      const wasPaused = state.ssePausedByVisibility;
+      state.ssePausedByVisibility = false;
+      if (wasPaused && state.sseProjectId && state.currentProjectId === state.sseProjectId) {
+        // Reconectar rápidamente si el SSE estaba idle o cerrado
+        const idle = Date.now() - state.sseLastEventAt > 5000;
+        const closed = !state.processingSSE || state.processingSSE.readyState === EventSource.CLOSED;
+        if (idle || closed) {
+          setTimeout(() => startSSE(state.sseProjectId, { forceReconnect: true }), VISIBILITY_RECONNECT_DELAY_MS);
+        }
+      }
+    }
+  });
+}
+
 // ── SSE (real-time) + polling fallback ──────────────────────
 function stopPolling() {
   if (state.pollProjectsInterval) {
@@ -1072,6 +1352,15 @@ function stopPolling() {
   if (state.pollCurrentProjectInterval) {
     clearInterval(state.pollCurrentProjectInterval);
     state.pollCurrentProjectInterval = null;
+  }
+}
+
+function closeSSEIfDifferent(projectId) {
+  // Solo cierra SSE si es de OTRO proyecto; si es el mismo, mantenerlo
+  if (state.processingSSE && state.sseProjectId !== projectId) {
+    state.processingSSE.close();
+    state.processingSSE = null;
+    state.sseProjectId = null;
   }
 }
 
@@ -1095,11 +1384,20 @@ function startProjectsListPolling() {
   }, POLL_PROJECTS_MS);
 }
 
-function startSSE(projectId) {
-  if (state.processingSSE) {
-    state.processingSSE.close();
-    state.processingSSE = null;
+function startSSE(projectId, opts = {}) {
+  // Si ya hay SSE para el mismo proyecto y no se fuerza reconexión, reutilizar
+  if (state.processingSSE && state.sseProjectId === projectId && !opts.forceReconnect) {
+    // Ya estamos conectados a este proyecto, solo actualizar UI
+    syncProcessingUIWithState();
+    return;
   }
+
+  // Cerrar SSE anterior si es de otro proyecto
+  if (state.processingSSE && state.sseProjectId !== projectId) {
+    state.processingSSE.close();
+  }
+
+  state.sseProjectId = projectId;
   state.sseReconnectAttempts = 0;
   state.sseLastEventAt = Date.now();
   setAllAgentsIdle();
@@ -1171,6 +1469,9 @@ function startSSE(projectId) {
           setAgentNodeState('explainer', 'active');
           setAgentNodeState('recorrido', 'active');
           setAgentNodeState('resources', 'active');
+          setIndicatorAgentState('explainer', 'active');
+          setIndicatorAgentState('recorrido', 'active');
+          setIndicatorAgentState('resources', 'active');
           break;
 
         case 'part_started':
@@ -1186,6 +1487,9 @@ function startSSE(projectId) {
           setAgentNodeState('explainer', 'active');
           setAgentNodeState('recorrido', 'active');
           setAgentNodeState('resources', 'active');
+          setIndicatorAgentState('explainer', 'active');
+          setIndicatorAgentState('recorrido', 'active');
+          setIndicatorAgentState('resources', 'active');
           pushStreamEvent('Parte', `Parte ${payload.part_id} iniciada`);
           break;
 
@@ -1193,6 +1497,7 @@ function startSSE(projectId) {
           const key = String(payload.part_id);
           const agent = payload.agent;
           setAgentNodeState(agent, 'completed');
+          setIndicatorAgentState(agent, 'completed');
           try {
             const fresh = await api(`/api/projects/${projectId}`);
             if (!state.currentProject) return;
@@ -1404,12 +1709,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('btn-back-to-projects').addEventListener('click', () => {
-    if (state.processingSSE) {
-      state.processingSSE.close();
-      state.processingSSE = null;
-    }
-    stopPolling();
+    // NO cerrar SSE al ir a proyectos - seguimos escuchando en background
+    // Solo detener polling específico de la lista de proyectos
     loadProjectsView();
+    // Iniciar polling de la lista si hay proyectos activos (incluido el actual)
+    const localProjects = loadLocalBackup().projects;
+    const hasActive = localProjects.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
+    if (hasActive) startProjectsListPolling();
   });
 
   $('btn-delete-project').addEventListener('click', async () => {
@@ -1429,5 +1735,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Init
   initSettings();
+  initVisibilityHandling();
   initApp();
 });
