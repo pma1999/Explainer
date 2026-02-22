@@ -16,6 +16,17 @@ primary_region = 'iad'
   min_machines_running = 0
   processes = ['app']
 
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "5s"
+  method = "GET"
+  path = "/api/settings/api-key/status"
+  port = 8080
+  timeout = "2s"
+  tls_skip_verify = false
+  [http_service.checks.headers]
+    Accept = "application/json"
+
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
