@@ -17,8 +17,8 @@ COPY . .
 # Crear directorio para datos (volumen se monta aquí)
 RUN mkdir -p /app/data
 
-# Puerto que usa Fly.io
-EXPOSE 8080
+# Puerto para Koyeb (health check en 8000)
+EXPOSE 8000
 
 # Comando de inicio
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
