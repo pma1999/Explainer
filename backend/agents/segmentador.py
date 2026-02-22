@@ -26,6 +26,12 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   5. **Economía racional de partes**: Buscas el punto óptimo: ni microdivisión agotadora ni macrodivisión abrumadora. **No separas por separar**; solo creas una nueva parte cuando hay una ruptura temática real que justifica un nuevo módulo de estudio.
   6. **Marcadores estructurales**: Priorizas divisiones en cambios de tema, capítulos, secciones, o transiciones naturales del texto. Si el texto no tiene estructura clara, la identificas por cambios de argumento o contenido.
 
+  **Principios MECE (Mutually Exclusive, Collectively Exhaustive):**
+  - **Cobertura total (Collectively Exhaustive)**: Cada palabra, párrafo y tema del texto original debe pertenecer a una y solo una parte. No puede quedar contenido sin asignar.
+  - **Exclusividad mutua (Mutually Exclusive)**: Las partes no deben solaparse temáticamente. Cada tema/subtema aparece en exactamente una parte, nunca en varias.
+  - **No artificialidad**: Prohibido separar un tema que debería ser unitario solo para crear más partes, o juntar temas conceptualmente independientes solo para reducir el número de partes.
+  - **Asignación explícita**: Cada tema identificado en el texto debe quedar asignado explícitamente a una parte específica.
+
   **Tu actitud epistémica:**
   - Eres pragmático: no existe "la división perfecta universal", existe "la mejor división para este texto específico".
   - Anticipas el proceso completo: segmentación → explicación → estudio. Tu decisión facilita el trabajo downstream.
@@ -41,13 +47,15 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   3. Que no se pierda contexto esencial por divisiones artificiales (ej: separar un requisito de sus excepciones).
   4. Que el estudiante pueda estudiar parte por parte sin confusión sobre "qué entra en este módulo".
   5. Que la carga cognitiva estimada tras la explicación sea equilibrada entre partes.
-  6. Que el número total de partes sea **eficiente** (mínimo 1, máximo 6), justificando siempre la necesidad de cada división.
+  6. **Que la segmentación sea MECE**: Mutually Exclusive (cada parte cubre temas claramente diferenciados, sin solapamientos) y Collectively Exhaustive (todas las partes juntas cubren TODO el texto sin dejar nada fuera).
+  7. Que el número de partes sea el mínimo necesario para garantizar MECE - pueden ser pocas (texto corto y coherente) o muchas (texto largo con múltiples temas independientes), lo que exija la lógica del contenido.
 
   **Tu objetivo NO es:**
   - Dividir mecánicamente por número de palabras o párrafos
   - Crear partes de tamaño exactamente igual
   - Maximizar o minimizar el número de partes sin justificación
   - Ignorar la estructura interna del texto
+  - Respetar límites artificiales de número de partes
   </objectives>
 
   <quality_criteria>
@@ -59,25 +67,31 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - El número de partes está justificado por el contenido, no por alcanzar una cifra objetivo.
   - Contemplas casos especiales: si un tema al final es muy denso, puede ser una parte propia aunque sea más corta.
   - Las partes no crean "lagunas de comprensión": si A se entiende solo con B, van juntos siempre.
+  - **MECE - Collectively Exhaustive**: Las partes son conjuntamente exhaustivas; cubren TODO el texto sin dejar contenido sin asignar.
+  - **MECE - Mutually Exclusive**: Las partes son mutuamente excluyentes; cada tema/subtema aparece en exactamente una parte, sin solapamientos.
+  - Verificación MECE explícita: se puede trazar cada párrafo del texto a una y solo una parte.
 
   **Una segmentación DEFICIENTE:**
   - Divide un procedimiento paso a paso en varias partes sin justificación pedagógica.
   - Crea partes donde la primera tiene 500 palabras y la tercera 4000 sin explicar por qué.
-  - Propone 10 partes para un texto de 2000 palabras (microdivisión) sin justificar necesidad.
-  - Propone 1 parte para un texto de 8000 palabras con 5 temas diferenciados (macrodivisión).
+  - Propone una microdivisión excesiva sin justificar necesidad pedagógica.
+  - Propone una macrodivisión que agrupa temas que deberían ser independientes.
   - No considera la complejidad conceptual: trata por igual un listado simple y una argumentación densa.
   - Las divisiones son arbitrarias: "hasta aquí porque es la mitad" sin mirar el contenido.
+  - Deja contenido del texto sin asignar a ninguna parte (falla Collectively Exhaustive).
+  - Asigna el mismo contenido a múltiples partes (falla Mutually Exclusive).
+  - Separa artificialmente un tema que debería ser unitario.
+  - Junta artificialmente temas que son conceptualmente independientes.
   </quality_criteria>
 
   <segmentation_heuristics>
   **Guías heurísticas para tu razonamiento (NO fórmulas rígidas):**
 
-  **Por longitud base (texto sin explicar):**
-  - < 500 palabras: **Generalmente 1 parte** (salvo temas muy diferenciados)
-  - 500-1500 palabras: **1-2 partes** (depende de unidad temática)
-  - 1500-3000 palabras: **2-4 partes** (busca transiciones naturales)
-  - 3000-5000 palabras: **3-5 partes** (equilibra coherencia y manejo)
-  - > 5000 palabras: **4-6 partes** (evita crear demasiadas partes; máximo absoluto de 6)
+  **Por unidad temática (criterio principal):**
+  - Cada parte debe corresponder a un tema o conjunto de subtemas estrechamente relacionados.
+  - La cantidad de partes depende de cuántos temas independientes identifiques, no del tamaño del texto.
+  - Un texto corto con 5 temas claros puede necesitar 5 partes.
+  - Un texto largo pero monotemático puede necesitar solo 1 parte.
 
   **Por estructura del texto:**
   - Texto con capítulos/apartados numerados → Agrupar apartados relacionados en partes
@@ -86,9 +100,9 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Texto científico (introducción-métodos-resultados-discusión) → Cada sección principal puede ser 1 parte
 
   **Por complejidad conceptual:**
-  - Texto denso (muchos conceptos/requisitos/excepciones) → Más partes para digestión
-  - Texto narrativo/expositivo simple → Menos partes, puede manejarse en bloques mayores
-  - Texto con alto número de términos técnicos → Considerar partes más pequeñas
+  - Texto denso (muchos conceptos/requisitos/excepciones) → Dividir por temas para facilitar digestión
+  - Texto narrativo/expositivo simple → Puede manejarse en bloques mayores si el tema es coherente
+  - Texto con alto número de términos técnicos → Considerar separar por áreas temáticas
 
   **Factor de expansión:**
   Recuerda: el asistente explicativo expandirá ~5-10x. Una parte de 1000 palabras podría convertirse en 5000-10000 palabras explicadas. Una parte de 2500 palabras podría convertirse en 12500-25000 palabras. Ajusta tu segmentación para que ninguna parte genere explicaciones superiores a ~15000-20000 palabras (evitar abrumar en una sesión).
@@ -97,7 +111,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - **Tablas/listas extensas**: Si una parte terminaría siendo solo una tabla enorme, considérala como una parte completa si tiene entidad propia, o inclúyela con el tema que contextualiza.
   - **Introducción/Conclusión**: Generalmente van con la parte temática que introducen o concluyen, no aisladas.
   - **Tema final denso**: Si el último tema es conceptualmente complejo, merece ser una parte aunque sea más corto que las anteriores.
-  - **Mínimo de partes**: Si el texto es muy pequeño o monolítico, 1 sola parte es perfectamente aceptable y eficiente.
+  - **Número de partes**: Determinado exclusivamente por la estructura lógica del contenido. Puede ser 1 parte o muchas partes; la IA decide inteligentemente según MECE.
   </segmentation_heuristics>
 
   <thinking_protocol>
@@ -107,15 +121,16 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
 - Lee el texto completo proporcionado
 - Identifica longitud aproximada (número de palabras/párrafos)
 - Detecta si tiene estructura explícita (apartados, capítulos, secciones numeradas) o es monolítico
-- Si tiene estructura, anota TODOS los capítulos/secciones/apartados con sus títulos y numeración completos
+    - Si tiene estructura, anota TODOS los capítulos/secciones/apartados con sus títulos y numeración completos
 - Clasifica el tipo de contenido (legal, científico, histórico, técnico, expositivo...)
 
 **PASO 2 - IDENTIFICACIÓN TEMÁTICA:**
-- Lista los temas principales que aborda el texto
+- Crea una lista numerada y exhaustiva de **TODOS** los temas y subtemas que aborda el texto
+- Incluye desde temas principales hasta subtemas significativos. Esta lista debe ser completa: si hay 10 temas, lista los 10; si hay 50, lista los 50. Cada tema debe ser lo suficientemente granular para poder asignarse a una unica parte
 - Marca transiciones entre temas (¿dónde cambia el foco?)
 - Evalúa la independencia/interdependencia de cada tema
-  - ¿Este tema requiere haber entendido el anterior?
-  - ¿O son temas paralelos que podrían estudiarse en cualquier orden?
+    - ¿Este tema requiere haber entendido el anterior?
+    - ¿O son temas paralelos que podrían estudiarse en cualquier orden?
 
 **PASO 3 - EVALUACIÓN DE COMPLEJIDAD:**
 - Para cada tema identificado, evalúa su densidad conceptual:
@@ -139,7 +154,9 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
   - Balance entre coherencia y manejo
   - Evitar partes que generarían explicaciones > 20000 palabras
   - Evitar partes < 200 palabras salvo justificación especial
-  - Número de partes razonable (mínimo 1, máximo 6)
+  - Verificación MECE: cada tema de tu lista aparece en exactamente una parte (sin solapamientos)
+  - Verificación de cobertura total: ningún párrafo del texto queda sin asignar a una parte
+  - El número de partes es el mínimo necesario para garantizar MECE según el contenido
 - Articula por qué esta opción es mejor que las otras
 
 **PASO 6 - DEFINICIÓN PRECISA DE IDENTIFICACIÓN:**
@@ -160,6 +177,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
     required=[
         "analisis_texto",
+        "temas_identificados",
         "decision_num_partes",
         "decision_justificacion",
         "partes",
@@ -170,13 +188,18 @@ RESPONSE_SCHEMA = genai.types.Schema(
             type=genai.types.Type.STRING,
             description="2-3 frases: longitud aproximada, tipo de contenido, si tiene estructura explícita o no.",
         ),
+        "temas_identificados": genai.types.Schema(
+            type=genai.types.Type.ARRAY,
+            items=genai.types.Schema(type=genai.types.Type.STRING),
+            description="Lista completa y exhaustiva de todos los temas y subtemas identificados en el texto. Esta lista debe incluir cada tema que aparece en el documento, desde principales hasta subtemas significativos.",
+        ),
         "decision_num_partes": genai.types.Schema(
             type=genai.types.Type.INTEGER,
-            description="Número total de partes propuesto (mínimo 1, máximo 6).",
+            description="Número total de partes propuesto. Determinado por la estructura lógica del contenido para garantizar MECE - pueden ser pocas o muchas según el texto.",
         ),
         "decision_justificacion": genai.types.Schema(
             type=genai.types.Type.STRING,
-            description="1 frase justificando por qué este número de partes.",
+            description="Justificación del número de partes incluyendo verificación MECE: por qué esta división garantiza cobertura total sin solapamientos.",
         ),
         "partes": genai.types.Schema(
             type=genai.types.Type.ARRAY,
@@ -187,6 +210,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
                     "titulo",
                     "contenido",
                     "identificacion",
+                    "temas_cubiertos",
                     "extension_estimada",
                     "complejidad",
                     "expansion_prevista",
@@ -209,6 +233,11 @@ RESPONSE_SCHEMA = genai.types.Schema(
                             "de inicio y fin, capítulo/sección y páginas si las hay."
                         ),
                     ),
+                    "temas_cubiertos": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        items=genai.types.Schema(type=genai.types.Type.STRING),
+                        description="Lista de temas (de temas_identificados) que cubre esta parte específica. Cada tema de temas_identificados debe aparecer en exactamente una parte.",
+                    ),
                     "extension_estimada": genai.types.Schema(type=genai.types.Type.STRING),
                     "complejidad": genai.types.Schema(type=genai.types.Type.STRING),
                     "expansion_prevista": genai.types.Schema(type=genai.types.Type.STRING),
@@ -217,7 +246,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
         ),
         "consideraciones_estudiante": genai.types.Schema(
             type=genai.types.Type.STRING,
-            description="2-3 frases sobre la lógica global de la división.",
+            description="2-3 frases sobre la lógica global de la división incluyendo verificación MECE.",
         ),
     },
 )
