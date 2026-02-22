@@ -7,10 +7,13 @@
 │  VERCEL (Frontend) — $0                                     │
 │  └── explainer.vercel.app                                   │
 ├─────────────────────────────────────────────────────────────┤
+│  SUPABASE — Auth + Postgres + Storage                       │
+│  └── Usuarios, proyectos, PDFs                              │
+├─────────────────────────────────────────────────────────────┤
 │  FLY.IO (Backend API) — $0                                  │
 │  └── explainer-api.fly.dev                                  │
-│  ├── Datos en volumen persistente (JSON)                    │
-│  └── Siempre activo (nunca duerme)                          │
+│  ├── Auth JWT + Supabase (proyectos y PDFs en la nube)     │
+│  └── API key Gemini en disco/volumen                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,6 +35,36 @@ openssl rand -base64 32
 ```
 
 Guarda este valor; lo necesitarás en Fly.io.
+
+---
+
+## Configuración de Supabase (obligatorio)
+
+La app usa Supabase para usuarios, proyectos y almacenamiento de PDFs.
+
+### 1. Crear proyecto en Supabase
+
+1. Entra en [supabase.com](https://supabase.com) y crea un proyecto.
+2. En **Project Settings → API** anota:
+   - **Project URL** → `SUPABASE_URL`
+   - **anon public** → `SUPABASE_ANON_KEY` (frontend)
+   - **service_role** → `SUPABASE_SERVICE_ROLE_KEY` (backend)
+   - **JWT Secret** → `SUPABASE_JWT_SECRET`
+
+### 2. Ejecutar la migración
+
+En el **SQL Editor** de Supabase, ejecuta el contenido de:
+
+`supabase/migrations/20260222100000_initial_explainer.sql`
+
+Eso crea la tabla `projects`, RLS y el bucket `project-pdfs`. Si el bucket no se crea por SQL, créalo manualmente en **Storage → New bucket** con nombre `project-pdfs` (privado).
+
+### 3. URLs de redirección (Auth)
+
+En **Authentication → URL Configuration**:
+
+- **Site URL**: tu frontend (ej: `https://explainer.vercel.app`)
+- **Redirect URLs**: añade la misma URL si usas redirects tras magic link
 
 ---
 
@@ -58,11 +91,17 @@ flyctl volumes create explainer_data --region mad --size 1
 ### Paso 4: Configurar Secrets
 
 ```bash
-# Variable obligatoria (encriptación de la API key)
+# Encriptación de la API key de Gemini
 flyctl secrets set APP_ENCRYPTION_KEY="tu_key_aqui" -a explainer-api
+
+# Supabase (obligatorio para proyectos y auth)
+flyctl secrets set SUPABASE_URL="https://TU_PROYECTO.supabase.co" -a explainer-api
+flyctl secrets set SUPABASE_SERVICE_ROLE_KEY="eyJ..." -a explainer-api
+flyctl secrets set SUPABASE_JWT_SECRET="tu-jwt-secret" -a explainer-api
 
 # Opcionales
 flyctl secrets set ENVIRONMENT="production" -a explainer-api
+flyctl secrets set FRONTEND_URL="https://tu-frontend.vercel.app" -a explainer-api
 ```
 
 ### Paso 5: Deploy
@@ -111,8 +150,11 @@ Sigue las instrucciones:
 Ve al dashboard de Vercel:
 1. Selecciona tu proyecto
 2. Ve a "Settings" → "Environment Variables"
-3. Añade:
-   - `FRONTEND_URL` = URL de tu frontend (ej: `https://explainer.vercel.app`)
+3. Añade (para que el frontend pueda usar Supabase Auth):
+   - `EXPLAINER_SUPABASE_URL` = tu Project URL de Supabase (ej: `https://xxx.supabase.co`)
+   - `EXPLAINER_SUPABASE_ANON_KEY` = clave **anon public** de Supabase
+
+Para que el frontend use Supabase: crea `frontend/config.js` a partir de `frontend/config.example.js`, rellena las variables, descomenta en `index.html` la línea que carga `/static/config.js` y añade `frontend/config.js` a `.gitignore`. En Vercel puedes generar `config.js` en un build step desde las variables de entorno.
 
 ### Paso 5: Actualizar Backend con URL del Frontend
 

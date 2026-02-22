@@ -1,6 +1,12 @@
 /* ============================================================
-   EXPLAINER — Frontend SPA con Autenticación
+   EXPLAINER — Frontend SPA con Supabase Auth
    ============================================================ */
+
+const SUPABASE_URL = window.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
+const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
 
 // ── State ──────────────────────────────────────────────────
 const state = {
@@ -10,6 +16,8 @@ const state = {
   activeTab: 'explicacion',
   processingSSE: null,
   hasApiKey: false,
+  session: null,
+  user: null,
 };
 
 const LOCAL_BACKUP_KEY = 'explainer.projects.backup.v1';
@@ -128,12 +136,31 @@ function toast(msg, type = '') {
 }
 
 // ── API ────────────────────────────────────────────────────
-// URL del backend (cambiar si tu backend tiene otra URL)
 const API_BASE_URL = window.EXPLAINER_API_BASE_URL || '';
+
+function getAccessToken() {
+  return state.session?.access_token || null;
+}
 
 async function api(path, options = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
-  const res = await fetch(url, options);
+  const headers = { ...(options.headers || {}) };
+  const token = getAccessToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    if (supabase) {
+      await supabase.auth.signOut();
+      state.session = null;
+      state.user = null;
+      showView('view-auth');
+      toast('Sesión expirada. Inicia sesión de nuevo.', 'error');
+    }
+    const err = await res.json().catch(() => ({ detail: 'No autorizado' }));
+    throw new Error(err.detail || 'No autorizado');
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Error desconocido' }));
@@ -145,15 +172,48 @@ async function api(path, options = {}) {
 
 // ── APP INIT ───────────────────────────────────────────────
 async function initApp() {
-  try {
-    const status = await api('/api/settings/api-key/status');
-    state.hasApiKey = Boolean(status.has_api_key);
-  } catch (err) {
-    state.hasApiKey = false;
+  if (!supabase) {
+    showView('view-auth');
+    document.querySelector('.auth-subtitle').textContent = 'Supabase no configurado. Define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY.';
+    initAuth();
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  state.session = session;
+  state.user = session?.user ?? null;
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    state.session = session;
+    state.user = session?.user ?? null;
+    if (session) {
+      showView('view-landing');
+      initLanding();
+      refreshApiKeyStatus();
+    } else {
+      showView('view-auth');
+    }
+  });
+
+  if (!state.session) {
+    showView('view-auth');
+    initAuth();
+    return;
   }
 
   showView('view-landing');
   initLanding();
+  await refreshApiKeyStatus();
+}
+
+async function refreshApiKeyStatus() {
+  try {
+    const status = await api('/api/settings/api-key/status');
+    state.hasApiKey = Boolean(status.has_api_key);
+  } catch (_) {
+    state.hasApiKey = false;
+  }
+  if (typeof updateApiKeyUI === 'function') updateApiKeyUI();
 }
 
 // ── SETTINGS / API KEY ─────────────────────────────────────
@@ -234,12 +294,113 @@ function initSettings() {
 }
 
 async function showSettings() {
-  // Muestra el modal de settings con datos actualizados.
-  // Update UI
-  $('settings-email').textContent = 'Modo local';
+  $('settings-email').textContent = state.user?.email || '—';
   updateApiKeyUI();
-
   show($('modal-settings'));
+}
+
+// ── AUTH (login / register) ───────────────────────────────
+function initAuth() {
+  const formLogin = $('form-login');
+  const formRegister = $('form-register');
+  const loginError = $('auth-login-error');
+  const registerError = $('auth-register-error');
+
+  document.querySelectorAll('.auth-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.authTab;
+      document.querySelectorAll('.auth-tab').forEach((t) => t.classList.toggle('active', t.dataset.authTab === target));
+      if (target === 'login') {
+        show(formLogin);
+        hide(formRegister);
+        loginError.textContent = '';
+      } else {
+        hide(formLogin);
+        show(formRegister);
+        registerError.textContent = '';
+      }
+    });
+  });
+
+  formLogin.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    loginError.textContent = '';
+    const email = $('login-email').value.trim();
+    const password = $('login-password').value;
+    if (!email || !password) {
+      loginError.textContent = 'Completa email y contraseña';
+      return;
+    }
+    const btn = $('btn-login');
+    btn.disabled = true;
+    btn.querySelector('.btn-text').textContent = 'Entrando...';
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      state.session = data.session;
+      state.user = data.user;
+      showView('view-landing');
+      initLanding();
+      await refreshApiKeyStatus();
+      toast('Sesión iniciada', 'success');
+    } catch (err) {
+      loginError.textContent = err.message || 'Error al iniciar sesión';
+    } finally {
+      btn.disabled = false;
+      btn.querySelector('.btn-text').textContent = 'Iniciar sesión';
+    }
+  });
+
+  formRegister.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    registerError.textContent = '';
+    const email = $('register-email').value.trim();
+    const password = $('register-password').value;
+    const confirm = $('register-password-confirm').value;
+    if (!email || !password) {
+      registerError.textContent = 'Completa email y contraseña';
+      return;
+    }
+    if (password !== confirm) {
+      registerError.textContent = 'Las contraseñas no coinciden';
+      return;
+    }
+    if (password.length < 6) {
+      registerError.textContent = 'La contraseña debe tener al menos 6 caracteres';
+      return;
+    }
+    const btn = $('btn-register');
+    btn.disabled = true;
+    btn.querySelector('.btn-text').textContent = 'Creando cuenta...';
+    try {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) throw error;
+      state.session = data.session;
+      state.user = data.user;
+      showView('view-landing');
+      initLanding();
+      await refreshApiKeyStatus();
+      toast('Cuenta creada. Ya puedes usar Explainer.', 'success');
+    } catch (err) {
+      registerError.textContent = err.message || 'Error al registrarse';
+    } finally {
+      btn.disabled = false;
+      btn.querySelector('.btn-text').textContent = 'Crear cuenta';
+    }
+  });
+
+  $('btn-logout').addEventListener('click', async () => {
+    if (state.processingSSE) {
+      state.processingSSE.close();
+      state.processingSSE = null;
+    }
+    await supabase.auth.signOut();
+    state.session = null;
+    state.user = null;
+    hide($('modal-settings'));
+    showView('view-auth');
+    toast('Sesión cerrada', 'success');
+  });
 }
 
 function hideSettings() {
@@ -866,7 +1027,10 @@ function startSSE(projectId) {
     state.processingSSE.close();
   }
 
-  const evtSource = new EventSource(`${API_BASE_URL}/api/projects/${projectId}/events`);
+  const token = getAccessToken();
+  const base = `${API_BASE_URL}/api/projects/${projectId}/events`;
+  const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  const evtSource = new EventSource(url);
   state.processingSSE = evtSource;
 
   evtSource.onmessage = async (e) => {
