@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
 from dotenv import load_dotenv
@@ -15,11 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv(override=True)
 
-DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.environ.get("FLY_APP_NAME") else "data"))
-os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
-
 from backend.auth import get_current_user_id, get_user_id_from_token
-from backend.local_data import init_local_data
 from backend.supabase_data import (
     create_project as supabase_create_project,
     get_project,
@@ -49,10 +44,7 @@ from backend.middleware import SecurityHeadersMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (DATA_DIR / "projects").mkdir(parents=True, exist_ok=True)
-    init_local_data()
-    print(f"[Startup] Persistencia local inicializada en {DATA_DIR}")
+    print("[Startup] Explainer API iniciada - Persistencia en Supabase")
     yield
     print("[Shutdown] Cerrando aplicación")
 

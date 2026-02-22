@@ -14,9 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código
 COPY . .
 
-# Crear directorio para datos (volumen se monta aquí)
-RUN mkdir -p /app/data
-
 # Puerto para Koyeb (health check en 8000)
 EXPOSE 8000
 
