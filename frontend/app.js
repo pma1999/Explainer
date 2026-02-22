@@ -15,10 +15,19 @@ const state = {
   currentPartId: null,
   activeTab: 'explicacion',
   processingSSE: null,
+  sseReconnectAttempts: 0,
+  sseLastEventAt: 0,
+  pollProjectsInterval: null,
+  pollCurrentProjectInterval: null,
   hasApiKey: false,
   session: null,
   user: null,
 };
+
+const SSE_RECONNECT_MAX = 5;
+const SSE_RECONNECT_DELAY_MS = 2000;
+const POLL_PROJECTS_MS = 6000;
+const POLL_CURRENT_IF_IDLE_MS = 12000;
 
 const LOCAL_BACKUP_KEY = 'explainer.projects.backup.v1';
 
@@ -622,6 +631,10 @@ function renderProjectsList(projects) {
   grid.querySelectorAll('.project-card').forEach(card => {
     card.addEventListener('click', () => openProjectView(card.dataset.id));
   });
+
+  const hasActive = projects.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
+  if (hasActive) startProjectsListPolling();
+  else stopPolling();
 }
 
 function updateUsageUI(usage) {
@@ -744,15 +757,44 @@ function renderSidebarNav(project) {
 
 function updateProcessingOverlay(status) {
   const titles = {
-    uploading: 'Subiendo documento...', segmenting: 'Segmentando el texto...',
-    processing: 'Generando contenido...', pending: 'Iniciando...',
+    uploading: 'Subiendo documento...',
+    segmenting: 'Segmentando el texto...',
+    processing: 'Generando contenido...',
+    pending: 'Iniciando...',
   };
   const subs = {
-    uploading: 'Enviando el PDF a la IA', segmenting: 'El Segmentador está dividiendo el texto en partes',
-    processing: 'Explainer, Recorrido y Recursos trabajando en paralelo', pending: 'Preparando',
+    uploading: 'Enviando el PDF a la IA',
+    segmenting: 'El Segmentador está dividiendo el texto en partes',
+    processing: 'Explainer, Recorrido y Recursos trabajando en paralelo',
+    pending: 'Preparando',
   };
-  $('processing-title').textContent = titles[status] || 'Procesando...';
-  $('processing-sub').textContent = subs[status] || '';
+  const titleEl = $('processing-title');
+  const subEl = $('processing-sub');
+  if (titleEl) titleEl.textContent = titles[status] || 'Procesando...';
+  if (subEl) subEl.textContent = subs[status] || '';
+}
+
+function pushStreamEvent(type, desc) {
+  const container = $('stream-events');
+  if (!container) return;
+  const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const el = document.createElement('div');
+  el.className = 'stream-event';
+  el.innerHTML = `<span class="event-time">${time}</span><span class="event-type">${escHtml(type)}</span><span class="event-desc">${escHtml(desc || '')}</span>`;
+  container.insertBefore(el, container.firstChild);
+  while (container.children.length > 20) container.lastChild.remove();
+}
+
+function setAgentNodeState(agentId, stateKind) {
+  const node = $(`agent-${agentId}`);
+  if (!node) return;
+  node.classList.remove('active', 'completed');
+  if (stateKind === 'active') node.classList.add('active');
+  if (stateKind === 'completed') node.classList.add('completed');
+}
+
+function setAllAgentsIdle() {
+  ['explainer', 'recorrido', 'resources'].forEach((id) => setAgentNodeState(id, ''));
 }
 
 function selectPart(partId) {
@@ -1021,127 +1063,268 @@ function renderResources(data) {
   return html;
 }
 
-// ── SSE ────────────────────────────────────────────────────
+// ── SSE (real-time) + polling fallback ──────────────────────
+function stopPolling() {
+  if (state.pollProjectsInterval) {
+    clearInterval(state.pollProjectsInterval);
+    state.pollProjectsInterval = null;
+  }
+  if (state.pollCurrentProjectInterval) {
+    clearInterval(state.pollCurrentProjectInterval);
+    state.pollCurrentProjectInterval = null;
+  }
+}
+
+function startProjectsListPolling() {
+  stopPolling();
+  state.pollProjectsInterval = setInterval(async () => {
+    const view = document.querySelector('.view.active');
+    if (!view || view.id !== 'view-projects') return;
+    try {
+      const serverProjects = await api('/api/projects');
+      const localProjects = loadLocalBackup().projects;
+      const merged = mergeProjects(serverProjects, localProjects);
+      const hasActive = merged.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
+      syncProjectsToLocal(merged);
+      renderProjectsList(merged);
+      if (!hasActive && state.pollProjectsInterval) {
+        clearInterval(state.pollProjectsInterval);
+        state.pollProjectsInterval = null;
+      }
+    } catch (_) { /* ignore */ }
+  }, POLL_PROJECTS_MS);
+}
+
 function startSSE(projectId) {
   if (state.processingSSE) {
     state.processingSSE.close();
+    state.processingSSE = null;
   }
+  state.sseReconnectAttempts = 0;
+  state.sseLastEventAt = Date.now();
+  setAllAgentsIdle();
+  const streamEvents = $('stream-events');
+  if (streamEvents) streamEvents.innerHTML = '';
 
-  const token = getAccessToken();
-  const base = `${API_BASE_URL}/api/projects/${projectId}/events`;
-  const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
-  const evtSource = new EventSource(url);
-  state.processingSSE = evtSource;
+  function connect() {
+    const token = getAccessToken();
+    const base = `${API_BASE_URL}/api/projects/${projectId}/events`;
+    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+    const evtSource = new EventSource(url);
+    state.processingSSE = evtSource;
 
-  evtSource.onmessage = async (e) => {
-    let payload;
-    try { payload = JSON.parse(e.data); } catch { return; }
+    evtSource.onmessage = async (e) => {
+      state.sseLastEventAt = Date.now();
+      let payload;
+      try {
+        payload = JSON.parse(e.data);
+      } catch {
+        return;
+      }
 
-    const project = state.currentProject;
-    if (!project) return;
+      const project = state.currentProject;
+      if (!project || state.currentProjectId !== projectId) return;
 
-    switch (payload.type) {
-      case 'ping': break;
+      switch (payload.type) {
+        case 'ping':
+          break;
 
-      case 'usage_update':
-        if (state.currentProject) {
-          state.currentProject.usage = payload.usage;
-          updateUsageUI(payload.usage);
-        }
-        break;
+        case 'usage_update':
+          if (state.currentProject) {
+            state.currentProject.usage = payload.usage;
+            updateUsageUI(payload.usage);
+          }
+          pushStreamEvent('Uso', `$${(payload.usage?.total_cost || 0).toFixed(2)}`);
+          break;
 
-      case 'uploading':
-        project.status = 'uploading';
-        updateProcessingOverlay('uploading');
-        $('sidebar-status').innerHTML = `<span class="card-status-badge status-uploading">Subiendo</span>`;
-        break;
+        case 'uploading':
+          project.status = 'uploading';
+          updateProcessingOverlay('uploading');
+          pushStreamEvent('Subida', 'Enviando PDF a la IA');
+          if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-uploading">Subiendo</span>`;
+          setAllAgentsIdle();
+          break;
 
-      case 'segmenting':
-        project.status = 'segmenting';
-        updateProcessingOverlay('segmenting');
-        $('sidebar-status').innerHTML = `<span class="card-status-badge status-segmenting">Segmentando</span>`;
-        break;
+        case 'segmenting':
+          project.status = 'segmenting';
+          updateProcessingOverlay('segmenting');
+          pushStreamEvent('Segmentación', 'Dividiendo el texto en partes');
+          if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-segmenting">Segmentando</span>`;
+          setAllAgentsIdle();
+          break;
 
-      case 'segmented':
-        project.status = 'processing';
-        try {
-          const fresh = await api(`/api/projects/${projectId}`);
-          state.currentProject = fresh;
-          project.segmentation = fresh.segmentation;
-          project.partes_contenido = fresh.partes_contenido;
-        } catch { }
-        renderSidebarNav(state.currentProject);
-        updateProcessingOverlay('processing');
-        $('sidebar-status').innerHTML = `<span class="card-status-badge status-processing">Procesando</span>`;
-        $('welcome-title').textContent = 'Generando contenido';
-        $('welcome-sub').textContent = 'Los 3 agentes están trabajando en paralelo para cada parte.';
-        break;
+        case 'segmented':
+          project.status = 'processing';
+          try {
+            const fresh = await api(`/api/projects/${projectId}`);
+            state.currentProject = fresh;
+            Object.assign(project, { segmentation: fresh.segmentation, partes_contenido: fresh.partes_contenido || {} });
+          } catch (_) {}
+          renderSidebarNav(state.currentProject);
+          updateProcessingOverlay('processing');
+          if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-processing">Procesando</span>`;
+          const welcomeTitle = $('welcome-title');
+          const welcomeSub = $('welcome-sub');
+          if (welcomeTitle) welcomeTitle.textContent = 'Generando contenido';
+          if (welcomeSub) welcomeSub.textContent = 'Los 3 agentes están trabajando en paralelo para cada parte.';
+          pushStreamEvent('Segmentado', `${(project.segmentation?.partes?.length || 0)} partes`);
+          setAgentNodeState('explainer', 'active');
+          setAgentNodeState('recorrido', 'active');
+          setAgentNodeState('resources', 'active');
+          break;
 
-      case 'part_started':
-        if (project.partes_contenido) {
+        case 'part_started':
+          if (project.partes_contenido) {
+            const key = String(payload.part_id);
+            if (!project.partes_contenido[key]) {
+              project.partes_contenido[key] = { status: 'processing', explainer: null, recorrido: null, resources: null };
+            } else {
+              project.partes_contenido[key].status = 'processing';
+            }
+            renderSidebarNav(state.currentProject);
+          }
+          setAgentNodeState('explainer', 'active');
+          setAgentNodeState('recorrido', 'active');
+          setAgentNodeState('resources', 'active');
+          pushStreamEvent('Parte', `Parte ${payload.part_id} iniciada`);
+          break;
+
+        case 'agent_completed': {
           const key = String(payload.part_id);
-          if (!project.partes_contenido[key]) {
-            project.partes_contenido[key] = { status: 'processing', explainer: null, recorrido: null, resources: null };
-          } else {
-            project.partes_contenido[key].status = 'processing';
+          const agent = payload.agent;
+          setAgentNodeState(agent, 'completed');
+          try {
+            const fresh = await api(`/api/projects/${projectId}`);
+            if (!state.currentProject) return;
+            state.currentProject.usage = fresh.usage || state.currentProject.usage;
+            if (fresh.partes_contenido && fresh.partes_contenido[key]) {
+              if (!state.currentProject.partes_contenido[key]) state.currentProject.partes_contenido[key] = {};
+              state.currentProject.partes_contenido[key][agent] = fresh.partes_contenido[key][agent];
+              state.currentProject.partes_contenido[key].status = fresh.partes_contenido[key].status;
+            }
+            updateUsageUI(state.currentProject.usage);
+            const contenido = state.currentProject.partes_contenido[key];
+            if (state.currentPartId === payload.part_id && contenido) {
+              renderTab('explicacion', contenido);
+              renderTab('recorrido', contenido);
+              renderTab('recursos', contenido);
+            }
+            renderSidebarNav(state.currentProject);
+          } catch (_) {}
+          const agentLabel = agent === 'explainer' ? 'Explicación' : agent === 'recorrido' ? 'Recorrido' : 'Recursos';
+          pushStreamEvent(agentLabel, `Parte ${payload.part_id} lista`);
+          break;
+        }
+
+        case 'part_completed': {
+          const key = String(payload.part_id);
+          if (project.partes_contenido && project.partes_contenido[key]) {
+            project.partes_contenido[key].status = 'completed';
           }
           renderSidebarNav(state.currentProject);
-        }
-        break;
-
-      case 'agent_completed': {
-        const key = String(payload.part_id);
-        try {
-          const fresh = await api(`/api/projects/${projectId}`);
-          if (fresh.partes_contenido && fresh.partes_contenido[key]) {
-            if (!project.partes_contenido[key]) project.partes_contenido[key] = {};
-            const agentKey = payload.agent;
-            project.partes_contenido[key][agentKey] = fresh.partes_contenido[key][agentKey];
-          }
           if (state.currentPartId === payload.part_id) {
-            renderTab(payload.agent === 'explainer' ? 'explicacion' : payload.agent === 'recorrido' ? 'recorrido' : 'recursos', project.partes_contenido[key]);
+            selectPart(payload.part_id);
           }
-        } catch { }
-        break;
-      }
-
-      case 'part_completed': {
-        const key = String(payload.part_id);
-        if (project.partes_contenido && project.partes_contenido[key]) {
-          project.partes_contenido[key].status = 'completed';
+          setAllAgentsIdle();
+          pushStreamEvent('Parte completada', `Parte ${payload.part_id}`);
+          break;
         }
-        renderSidebarNav(state.currentProject);
-        if (state.currentPartId === payload.part_id) {
-          selectPart(payload.part_id);
-        }
-        break;
+
+        case 'completed':
+          project.status = 'completed';
+          if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-completed">Completado</span>`;
+          setAllAgentsIdle();
+          pushStreamEvent('Completado', 'Análisis finalizado');
+          hide($('processing-overlay'));
+          toast('¡Análisis completo! Ya puedes estudiar todo el contenido.', 'success');
+          evtSource.close();
+          state.processingSSE = null;
+          stopPolling();
+          break;
+
+        case 'error':
+          project.status = 'error';
+          if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-error">Error</span>`;
+          hide($('processing-overlay'));
+          pushStreamEvent('Error', payload.message || 'Error');
+          toast('Error: ' + (payload.message || 'Error desconocido'), 'error');
+          evtSource.close();
+          state.processingSSE = null;
+          stopPolling();
+          break;
+
+        case 'stream_end':
+          evtSource.close();
+          state.processingSSE = null;
+          break;
       }
+    };
 
-      case 'completed':
-        project.status = 'completed';
-        $('sidebar-status').innerHTML = `<span class="card-status-badge status-completed">Completado</span>`;
-        hide($('processing-overlay'));
-        toast('¡Análisis completo! Ya puedes estudiar todo el contenido.', 'success');
-        evtSource.close();
-        break;
+    evtSource.onerror = () => {
+      evtSource.close();
+      state.processingSSE = null;
+      if (state.currentProjectId !== projectId) return;
+      const isActive = state.currentProject && ['pending', 'uploading', 'segmenting', 'processing'].includes(state.currentProject.status);
+      if (!isActive) return;
+      if (state.sseReconnectAttempts < SSE_RECONNECT_MAX) {
+        state.sseReconnectAttempts += 1;
+        setTimeout(connect, SSE_RECONNECT_DELAY_MS);
+      } else {
+        startCurrentProjectPolling(projectId);
+      }
+    };
+  }
 
-      case 'error':
-        project.status = 'error';
-        $('sidebar-status').innerHTML = `<span class="card-status-badge status-error">Error</span>`;
-        hide($('processing-overlay'));
-        toast('Error: ' + (payload.message || 'Error desconocido'), 'error');
-        evtSource.close();
-        break;
+  connect();
 
-      case 'stream_end':
-        evtSource.close();
-        break;
-    }
-  };
+  function startCurrentProjectPolling(pid) {
+    if (state.pollCurrentProjectInterval) return;
+    state.pollCurrentProjectInterval = setInterval(async () => {
+      if (state.currentProjectId !== pid || !state.currentProject) return;
+      const status = state.currentProject.status;
+      if (!['pending', 'uploading', 'segmenting', 'processing'].includes(status)) {
+        clearInterval(state.pollCurrentProjectInterval);
+        state.pollCurrentProjectInterval = null;
+        return;
+      }
+      try {
+        const fresh = await api(`/api/projects/${pid}`);
+        state.currentProject = fresh;
+        renderProjectView(fresh);
+        renderSidebarNav(fresh);
+        updateUsageUI(fresh.usage);
+        if (state.currentPartId) {
+          const contenido = fresh.partes_contenido?.[String(state.currentPartId)];
+          if (contenido) {
+            renderTab('explicacion', contenido);
+            renderTab('recorrido', contenido);
+            renderTab('recursos', contenido);
+          }
+        }
+        if (fresh.status === 'completed') {
+          hide($('processing-overlay'));
+          toast('¡Análisis completo!', 'success');
+          stopPolling();
+        } else if (fresh.status === 'error') {
+          hide($('processing-overlay'));
+          stopPolling();
+        }
+      } catch (_) {}
+    }, POLL_CURRENT_IF_IDLE_MS);
+  }
 
-  evtSource.onerror = () => {
-    // Silently retry
-  };
+  if (state.sseLastEventAt > 0) {
+    const checkIdle = setInterval(() => {
+      if (!state.processingSSE || state.currentProjectId !== projectId) {
+        clearInterval(checkIdle);
+        return;
+      }
+      if (Date.now() - state.sseLastEventAt > POLL_CURRENT_IF_IDLE_MS) {
+        startCurrentProjectPolling(projectId);
+        clearInterval(checkIdle);
+      }
+    }, 4000);
+  }
 }
 
 
@@ -1225,6 +1408,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.processingSSE.close();
       state.processingSSE = null;
     }
+    stopPolling();
     loadProjectsView();
   });
 

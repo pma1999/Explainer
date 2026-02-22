@@ -7,6 +7,7 @@ aiofiles==24.1.0
 
 # Auth (Supabase JWT)
 PyJWT>=2.8.0
+requests>=2.31.0
 
 # Supabase (Postgres + Storage)
 supabase>=2.0.0
