@@ -254,27 +254,42 @@ RESPONSE_SCHEMA = genai.types.Schema(
 
 
 @gemini_retry(max_retries=5)
-def run_segmentador(api_key: str, file_uri: str, description: str) -> tuple[dict[str, Any], Any]:
+def run_segmentador(api_key: str, file_uri: str, description: str, cache_name: str | None = None) -> tuple[dict[str, Any], Any]:
     """Run the Segmentador agent and return (structured_result, usage_metadata)."""
     client = genai.Client(api_key=api_key)
     model = get_model_name()
 
-    contents = [
-        types.Content(
-            role="user",
-            parts=[
-                types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
-                types.Part.from_text(text=description),
-            ],
-        ),
-    ]
-
-    config = types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
-        response_mime_type="application/json",
-        response_schema=RESPONSE_SCHEMA,
-        system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
-    )
+    if cache_name:
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=f"SYSTEM INSTRUCTION:\n{SYSTEM_INSTRUCTION}\n\n---\n\n{description}"),
+                ],
+            ),
+        ]
+        config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+            response_mime_type="application/json",
+            response_schema=RESPONSE_SCHEMA,
+            cached_content=cache_name,
+        )
+    else:
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
+                    types.Part.from_text(text=description),
+                ],
+            ),
+        ]
+        config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+            response_mime_type="application/json",
+            response_schema=RESPONSE_SCHEMA,
+            system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
+        )
 
     response = generate_content_with_retry(
         client=client,
