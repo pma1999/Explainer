@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import uuid
@@ -11,6 +12,8 @@ from typing import Any, Optional
 from supabase import create_client, Client
 
 from backend.crypto import encrypt_user_api_key, decrypt_user_api_key
+
+logger = logging.getLogger("backend.supabase_data")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -198,8 +201,11 @@ def has_user_api_key(user_id: str) -> bool:
     client = _client()
     try:
         r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
-        return bool(r and r.data)
-    except Exception:
+        result = bool(r and r.data)
+        logger.info(f"[has_user_api_key] user={user_id[:8]}... result={result}")
+        return result
+    except Exception as e:
+        logger.error(f"[has_user_api_key] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
         return False
 
 
@@ -300,8 +306,9 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
                 "provider": r.data.get("provider"),
                 "updated_at": r.data.get("updated_at"),
             }
-    except Exception:
-        pass
+        logger.warning(f"[API Key Status] No data found for user {user_id[:8]}... r={r}")
+    except Exception as e:
+        logger.error(f"[API Key Status] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
 
     return {
         "has_api_key": False,
