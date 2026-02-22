@@ -4,8 +4,7 @@ Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta 
 
 ## ✨ Características
 
-- **🔐 Autenticación segura**: JWT con cookies httpOnly
-- **🔑 API keys por usuario**: Cada usuario usa su propia API key de Gemini, encriptada con AES-256
+- **🔑 API key encriptada**: Una API key de Gemini por instalación, almacenada encriptada en local
 - **📄 Procesamiento de PDFs**: Upload y análisis automático con Gemini File API
 - **🤖 4 Agentes IA**: Segmentador, Explainer, Recorrido Anotado y Recursos
 - **📊 Progreso en tiempo real**: Server-Sent Events (SSE) para ver el avance
@@ -18,8 +17,8 @@ Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta 
 Frontend (Vercel)          Backend (Fly.io)           Gemini API
 ┌─────────────┐            ┌─────────────────┐       ┌────────────┐
 │  HTML/CSS   │  HTTPS     │  FastAPI        │       │  Google    │
-│  Vanilla JS │◄──────────►│  SQLite (vol)   │◄─────►│  Gemini    │
-│             │   SSE      │  JWT Auth       │       │  File API  │
+│  Vanilla JS │◄──────────►│  Persistencia   │◄─────►│  Gemini    │
+│             │   SSE      │  local (JSON)   │       │  File API  │
 └─────────────┘            └─────────────────┘       └────────────┘
 ```
 
@@ -87,9 +86,8 @@ explainer/
 ├── DEPLOY.md                  # Guía de despliegue
 │
 ├── backend/
-│   ├── database.py           # SQLAlchemy models
-│   ├── auth.py               # JWT y password hashing
-│   ├── crypto.py             # Encriptación AES
+│   ├── local_data.py         # Persistencia en JSON (proyectos, API key)
+│   ├── crypto.py             # Encriptación de API key
 │   ├── sse_manager.py        # Server-Sent Events
 │   ├── rate_limit.py         # Rate limiting
 │   ├── middleware.py         # Security headers
@@ -108,11 +106,10 @@ explainer/
 
 ## 🔒 Seguridad
 
-- **Encriptación**: API keys encriptadas con AES-256-GCM, clave única por usuario
-- **Autenticación**: JWT en cookies httpOnly (no accesibles por JS)
-- **CSRF**: Cookies SameSite=Strict
-- **XSS**: CSP headers y escaping de HTML
-- **Rate limiting**: Protección contra brute force
+- **Encriptación**: API key de Gemini encriptada con AES (clave de aplicación)
+- **Headers**: CSP, X-Frame-Options, HSTS, Referrer-Policy
+- **XSS**: Escaping de HTML en salida
+- **Rate limiting**: Límite por IP en creación de proyectos
 
 ## 💰 Costos
 
@@ -120,14 +117,13 @@ explainer/
 |----------|-------|
 | Fly.io (Hobby) | **$0/mes** |
 | Vercel (Hobby) | **$0/mes** |
-| Gemini API | **Cada usuario paga el suyo** |
+| Gemini API | **Paga quien use la app** |
 
 ## 🛠️ Tecnologías
 
 **Backend:**
 - FastAPI
-- SQLAlchemy (SQLite/PostgreSQL)
-- Passlib + python-jose
+- Persistencia local (JSON)
 - Cryptography (Fernet)
 
 **Frontend:**

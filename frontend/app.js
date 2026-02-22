@@ -236,7 +236,7 @@ function initSettings() {
 async function showSettings() {
   // Muestra el modal de settings con datos actualizados.
   // Update UI
-  $('settings-email').textContent = 'Acceso abierto (sin login)';
+  $('settings-email').textContent = 'Modo local';
   updateApiKeyUI();
 
   show($('modal-settings'));
