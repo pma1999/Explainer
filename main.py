@@ -337,7 +337,6 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 os.unlink(pdf_temp_path)
             except OSError:
                 pass
-
         await sse_manager.end_stream(project_id)
 
 
