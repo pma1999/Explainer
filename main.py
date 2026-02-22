@@ -38,6 +38,7 @@ from backend.crypto import encrypt_global_api_key, decrypt_global_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import project_create_rate_limit
 from backend.pricing import calculate_cost, get_model_name
+from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
 from backend.agents.recorrido import run_recorrido
@@ -214,7 +215,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
             update_project(project_id, user_id, {"status": "error", "error_message": "PDF no encontrado en almacenamiento"})
             return
 
-        uploaded_file = await asyncio.to_thread(lambda: client.files.upload(file=pdf_temp_path))
+        uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
         file_uri = uploaded_file.uri
 
         update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
@@ -281,9 +282,55 @@ async def _process_project(project_id: str, user_id: str) -> None:
         update_project(project_id, user_id, {"status": "completed"})
         await send_event(project_id, {"type": "completed"})
 
+    except GeminiRateLimitError as exc:
+        # Error específico de rate limit - mensaje amigable
+        error_msg = (
+            "Se ha excedido el límite de peticiones a Gemini API (429). "
+            "El sistema reintentó automáticamente varias veces sin éxito. "
+            "Por favor, espera unos minutos e intenta de nuevo, "
+            "o considera solicitar un aumento de cuota en Google AI Studio."
+        )
+        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        await send_event(project_id, {"type": "error", "message": error_msg})
+    except GeminiError as exc:
+        # Error específico de Gemini API con código de estado
+        if exc.status_code == 500:
+            error_msg = (
+                "Error interno en Gemini API (500). "
+                "El sistema reintentó automáticamente pero el servicio sigue fallando. "
+                "Intenta con un modelo diferente (ej: cambia de Pro a Flash) o espera unos minutos."
+            )
+        elif exc.status_code == 503:
+            error_msg = (
+                "Servicio Gemini API temporalmente no disponible (503). "
+                "El sistema reintentó varias veces sin éxito. "
+                "Por favor, espera unos minutos e intenta de nuevo."
+            )
+        elif exc.status_code == 504:
+            error_msg = (
+                "Timeout procesando la petición en Gemini API (504). "
+                "El texto puede ser demasiado largo o complejo. "
+                "Intenta con un documento más pequeño o un modelo diferente."
+            )
+        elif exc.status_code == 400:
+            error_msg = f"Error en la petición a Gemini API (400): {exc.message}"
+        elif exc.status_code == 403:
+            error_msg = (
+                "Error de permisos en Gemini API (403). "
+                "Verifica que tu API key sea válida y tenga acceso al modelo seleccionado."
+            )
+        else:
+            error_msg = f"Error en Gemini API (code={exc.status_code}): {exc.message}"
+        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        await send_event(project_id, {"type": "error", "message": error_msg})
     except Exception as exc:
-        update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
-        await send_event(project_id, {"type": "error", "message": str(exc)})
+        # Error genérico - mostrar mensaje simplificado
+        error_str = str(exc)
+        if len(error_str) > 200:
+            error_str = error_str[:200] + "..."
+        error_msg = f"Error inesperado durante el procesamiento: {error_str}"
+        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
         if pdf_temp_path and os.path.isfile(pdf_temp_path):
             try:
