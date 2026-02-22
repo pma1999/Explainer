@@ -17,6 +17,9 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv(override=True)
 
+DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.environ.get("FLY_APP_NAME") else "data"))
+os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
+
 from backend.local_data import (
     init_local_data,
     get_encrypted_api_key,
@@ -42,15 +45,10 @@ from backend.middleware import SecurityHeadersMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.environ.get("FLY_APP_NAME"):
-        data_dir = Path("/app/data")
-    else:
-        data_dir = Path("data")
-
-    data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / "projects").mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "projects").mkdir(parents=True, exist_ok=True)
     init_local_data()
-    print(f"[Startup] Persistencia local inicializada en {data_dir}")
+    print(f"[Startup] Persistencia local inicializada en {DATA_DIR}")
     yield
     print("[Shutdown] Cerrando aplicación")
 
@@ -106,7 +104,7 @@ async def api_create_project(
         pdf_filename=file.filename or "documento.pdf",
     )
 
-    project_dir = Path("data/projects") / project["id"]
+    project_dir = DATA_DIR / "projects" / project["id"]
     project_dir.mkdir(parents=True, exist_ok=True)
 
     pdf_path = project_dir / project["pdf_filename"]
@@ -155,7 +153,7 @@ async def api_delete_project(project_id: str):
     if not get_project(project_id):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
-    project_dir = Path("data/projects") / project_id
+    project_dir = DATA_DIR / "projects" / project_id
     if project_dir.exists():
         shutil.rmtree(project_dir)
 
@@ -214,7 +212,7 @@ async def _process_project(project_id: str) -> None:
         await send_event(project_id, {"type": "uploading"})
         update_project(project_id, {"status": "uploading"})
 
-        pdf_path = Path("data/projects") / project_id / project["pdf_filename"]
+        pdf_path = DATA_DIR / "projects" / project_id / project["pdf_filename"]
         uploaded_file = await asyncio.to_thread(lambda: client.files.upload(file=str(pdf_path)))
         file_uri = uploaded_file.uri
 

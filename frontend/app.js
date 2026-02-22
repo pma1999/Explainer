@@ -12,6 +12,69 @@ const state = {
   hasApiKey: false,
 };
 
+const LOCAL_BACKUP_KEY = 'explainer.projects.backup.v1';
+
+function loadLocalBackup() {
+  try {
+    const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
+    if (!raw) return { version: 1, projects: [] };
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.projects)) return { version: 1, projects: [] };
+    return parsed;
+  } catch (_) {
+    return { version: 1, projects: [] };
+  }
+}
+
+function saveLocalBackup(payload) {
+  const safePayload = {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    projects: Array.isArray(payload?.projects) ? payload.projects : [],
+  };
+  localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(safePayload));
+}
+
+function mergeProjects(serverProjects = [], localProjects = []) {
+  const byId = new Map();
+  [...localProjects, ...serverProjects].forEach((project) => {
+    if (!project || !project.id) return;
+    const current = byId.get(project.id);
+    if (!current) {
+      byId.set(project.id, project);
+      return;
+    }
+
+    const currentUpdated = new Date(current.updated_at || current.created_at || 0).getTime();
+    const candidateUpdated = new Date(project.updated_at || project.created_at || 0).getTime();
+    byId.set(project.id, candidateUpdated >= currentUpdated ? project : current);
+  });
+
+  return Array.from(byId.values()).sort((a, b) =>
+    new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  );
+}
+
+function syncProjectsToLocal(projects) {
+  saveLocalBackup({ projects });
+}
+
+function getCachedProject(projectId) {
+  const backup = loadLocalBackup();
+  return backup.projects.find((p) => p.id === projectId) || null;
+}
+
+function payloadToJsonFile(payload, filename = 'explainer-sync.json') {
+  return new File([JSON.stringify(payload, null, 2)], filename, { type: 'application/json' });
+}
+
+async function rehydrateProjectToServer(project) {
+  const fd = new FormData();
+  fd.append('file', payloadToJsonFile({ version: 1, projects: [project] }));
+  await api('/api/projects/import', { method: 'POST', body: fd });
+}
+
+
 // ── Helpers ────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 const show = (el) => el && el.classList.remove('hidden');
@@ -303,6 +366,8 @@ async function handleUpload() {
     fd.append('file', selectedFile);
 
     const project = await api('/api/projects', { method: 'POST', body: fd });
+    const mergedAfterCreate = mergeProjects([project], loadLocalBackup().projects);
+    syncProjectsToLocal(mergedAfterCreate);
     toast('Proyecto creado. Iniciando análisis...', 'success');
 
     // Reset form
@@ -326,10 +391,19 @@ async function handleUpload() {
 // ── PROJECTS LIST VIEW ─────────────────────────────────────
 async function loadProjectsView() {
   showView('view-projects');
+  const localProjects = loadLocalBackup().projects;
+
   try {
-    const projects = await api('/api/projects');
-    renderProjectsList(projects);
+    const serverProjects = await api('/api/projects');
+    const merged = mergeProjects(serverProjects, localProjects);
+    syncProjectsToLocal(merged);
+    renderProjectsList(merged);
   } catch (err) {
+    if (localProjects.length > 0) {
+      renderProjectsList(localProjects);
+      toast('Servidor no disponible. Mostrando copia local de tus proyectos.', 'error');
+      return;
+    }
     toast('Error cargando proyectos: ' + err.message, 'error');
   }
 }
@@ -424,6 +498,10 @@ async function openProjectView(projectId) {
   try {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
+
+    const refreshed = mergeProjects([project], loadLocalBackup().projects);
+    syncProjectsToLocal(refreshed);
+
     renderProjectView(project);
 
     const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
@@ -431,6 +509,17 @@ async function openProjectView(projectId) {
       startSSE(projectId);
     }
   } catch (err) {
+    const cachedProject = getCachedProject(projectId);
+
+    if (cachedProject) {
+      state.currentProject = cachedProject;
+      renderProjectView(cachedProject);
+      toast('Proyecto recuperado desde copia local. Intentando sincronizar en segundo plano…', 'success');
+
+      rehydrateProjectToServer(cachedProject).catch(() => {});
+      return;
+    }
+
     toast('Error cargando proyecto: ' + err.message, 'error');
   }
 }
@@ -895,7 +984,21 @@ function startSSE(projectId) {
 
 async function exportProjectsBackup() {
   try {
-    const payload = await api('/api/projects/export');
+    const localProjects = loadLocalBackup().projects;
+    let payload = { version: 1, exported_at: new Date().toISOString(), projects: localProjects };
+
+    try {
+      const serverPayload = await api('/api/projects/export');
+      payload = {
+        ...serverPayload,
+        projects: mergeProjects(serverPayload.projects || [], localProjects),
+      };
+    } catch (_) {
+      // Si el servidor falla, exportamos desde la copia local sin bloquear al usuario.
+    }
+
+    syncProjectsToLocal(payload.projects);
+
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -911,8 +1014,17 @@ async function exportProjectsBackup() {
 
 async function importProjectsBackup(file) {
   try {
+    const parsed = JSON.parse(await file.text());
+    if (!parsed || !Array.isArray(parsed.projects)) {
+      throw new Error('Formato inválido: el backup no contiene una lista de proyectos');
+    }
+
+    const localMerged = mergeProjects(parsed.projects, loadLocalBackup().projects);
+    syncProjectsToLocal(localMerged);
+
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', payloadToJsonFile(parsed, file.name || 'explainer-import.json'));
+
     const result = await api('/api/projects/import', { method: 'POST', body: fd });
     toast(`Importación completada: ${result.imported} importados, ${result.skipped} omitidos`, 'success');
     loadProjectsView();
@@ -957,6 +1069,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!confirm('¿Eliminar este proyecto y todo su contenido? Esta acción no se puede deshacer.')) return;
     try {
       await api(`/api/projects/${state.currentProjectId}`, { method: 'DELETE' });
+      const remaining = loadLocalBackup().projects.filter((p) => p.id !== state.currentProjectId);
+      syncProjectsToLocal(remaining);
       toast('Proyecto eliminado.', 'success');
       if (state.processingSSE) { state.processingSSE.close(); state.processingSSE = null; }
       loadProjectsView();
