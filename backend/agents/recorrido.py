@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from backend.pricing import get_model_name
+from backend.gemini_client import gemini_retry, generate_content_with_retry
 
 from google import genai
 from google.genai import types
@@ -336,9 +337,9 @@ RESPONSE_SCHEMA = genai.types.Schema(
 )
 
 
+@gemini_retry(max_retries=5)
 def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dict[str, Any], Any]:
     """Run the Recorrido Anotado agent and return (structured_result, usage_metadata)."""
-    import os
     client = genai.Client(api_key=api_key)
     model = get_model_name()
 
@@ -359,10 +360,12 @@ def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dic
         system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
     )
 
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client=client,
         model=model,
         contents=contents,
         config=config,
+        max_retries=5,
     )
 
     return json.loads(response.text), response.usage_metadata
