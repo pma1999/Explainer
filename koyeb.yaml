@@ -5,9 +5,9 @@
 # - Scale-to-zero: App stops after inactivity to save resources (free)
 # - Autoscaling: Automatically scales up when needed
 # - Region: Frankfurt (fra) - close to Supabase EU regions
-# - Port: 8080 (matches the app's internal port)
+# - Port: 8000 (Koyeb free tier health check requirement)
 
-name: explainer-api
+name: explainer
 region: fra
 type: web
 
@@ -15,25 +15,25 @@ type: web
 docker:
   dockerfile: Dockerfile
 
-# Port configuration
+# Port configuration - Koyeb free tier requires port 8000
 ports:
-  - port: 8080
+  - port: 8000
     protocol: http
     expose: true
 
 # Routes
 routes:
   - path: /
-    port: 8080
+    port: 8000
 
 # Static environment variables (non-sensitive)
 env:
   - name: ENVIRONMENT
     value: production
   - name: PORT
-    value: "8080"
+    value: "8000"
   - name: KOYEB_APP_NAME
-    value: explainer-api
+    value: explainer
 
 # Scaling configuration for free tier
 scaling:
@@ -43,10 +43,10 @@ scaling:
     - type: cpu
       value: 80  # Scale up when CPU reaches 80%
 
-# Health check
+# Health check - must be on port 8000 for free tier
 healthcheck:
   protocol: http
-  port: 8080
+  port: 8000
   path: /api/settings/api-key/status
   method: GET
   grace_period: 30

@@ -4,7 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "frontend",
   "rewrites": [
-    {"source": "/api/(.*)", "destination": "https://explainer-api-pablo.fly.dev/api/$1"}
+    {"source": "/api/(.*)", "destination": "https://criminal-leoline-pma00-1cbf79ad.koyeb.app/api/$1"}
   ],
   "headers": [
     {"source": "/(.*)", "headers": [

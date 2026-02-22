@@ -11,10 +11,11 @@
 │  ├── Usuarios, proyectos, PDFs                              │
 │  └── 🔐 API Keys encriptadas por usuario (BYOK)            │
 ├─────────────────────────────────────────────────────────────┤
-│  FLY.IO (Backend API) — $0                                  │
-│  └── explainer-api.fly.dev                                  │
+│  KOYEB (Backend API) — $0                                   │
+│  └── criminal-leoline-pma00-1cbf79ad.koyeb.app             │
 │  ├── Auth JWT + Supabase (proyectos, PDFs, API keys)       │
-│  └── Encriptación AES-128 (Fernet) con clave maestra       │
+│  ├── Encriptación AES-128 (Fernet) con clave maestra       │
+│  └── Scale-to-zero (se detiene tras inactividad)           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,7 +52,7 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 ## Requisitos
 
 - [Node.js](https://nodejs.org/) (para Vercel CLI)
-- [Fly.io CLI](https://fly.io/docs/hands-on/install-flyctl/)
+- [Koyeb CLI](https://www.koyeb.com/docs/cli/installation)
 - [Git](https://git-scm.com/)
 
 ## Configuración Inicial
@@ -65,7 +66,7 @@ Genera la clave de encriptación para la API key de Gemini:
 openssl rand -base64 32
 ```
 
-Guarda este valor; lo necesitarás en Fly.io.
+Guarda este valor; lo necesitarás en Koyeb.
 
 ---
 
@@ -104,56 +105,106 @@ En **Authentication → URL Configuration**:
 
 ---
 
-## Despliegue a Fly.io (Backend)
+## Despliegue a Koyeb (Backend)
 
-### Paso 1: Login en Fly.io (CLI)
+Koyeb ofrece un plan **Starter gratuito** con:
+- 1 Web Service gratuito (suficiente para esta app)
+- Scale-to-zero (la app se detiene tras ~5 min de inactividad)
+- Autoscaling (se reinicia automáticamente al recibir tráfico)
+- 100GB/mo de ancho de banda
 
+### Paso 1: Instalar Koyeb CLI
+
+**macOS/Linux:**
 ```bash
-flyctl auth login
+brew install koyeb/tap/koyeb
 ```
 
-### Paso 2: Crear la App
-
-```bash
-flyctl apps create explainer-api
+**Windows (PowerShell):**
+```powershell
+iwr https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.ps1 -useb | iex
 ```
 
-### Paso 3: Crear el Volumen (para datos locales)
+**O descarga desde:** https://github.com/koyeb/koyeb-cli/releases
+
+### Paso 2: Login en Koyeb
 
 ```bash
-flyctl volumes create explainer_data --region mad --size 1
+koyeb login
 ```
+
+Se abrirá el navegador para autenticación con GitHub.
+
+### Paso 3: Crear el Servicio
+
+Opción A: **Desde el archivo koyeb.yaml** (recomendado)
+```bash
+koyeb service create -f koyeb.yaml
+```
+
+Opción B: **Desde el dashboard web**
+1. Ve a https://app.koyeb.com
+2. Click "Create Service"
+3. Selecciona tu repositorio GitHub
+4. Selecciona **Dockerfile** como builder
+5. Configura:
+   - **Instance**: Free (0.1 vCPU, 512MB RAM)
+   - **Region**: Frankfurt (fra)
+   - **Scaling**: Autoscaling 0-1 instances
+   - **Port**: 8080
+   - **Health Check**: Puerto 8080, path `/api/settings/api-key/status`
 
 ### Paso 4: Configurar Secrets
 
+En el dashboard de Koyeb (tu servicio → Settings → Environment Variables):
+
+| Secret | Descripción |
+|--------|-------------|
+| `APP_ENCRYPTION_KEY` | Clave maestra para encriptar API keys (32 bytes base64) |
+| `SUPABASE_URL` | URL del proyecto Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key de Supabase |
+| `SUPABASE_JWT_SECRET` | JWT secret de Supabase |
+| `FRONTEND_URL` | URL del frontend en Vercel (para CORS) |
+| `ENVIRONMENT` | `production` |
+
+**O vía CLI:**
 ```bash
-# Encriptación de la API key de Gemini
-flyctl secrets set APP_ENCRYPTION_KEY="tu_key_aqui" -a explainer-api
+koyeb secret create APP_ENCRYPTION_KEY --value "tu-key-aqui"
+koyeb secret create SUPABASE_URL --value "https://xxx.supabase.co"
+koyeb secret create SUPABASE_SERVICE_ROLE_KEY --value "eyJ..."
+koyeb secret create SUPABASE_JWT_SECRET --value "tu-jwt-secret"
+koyeb secret create FRONTEND_URL --value "https://tu-frontend.vercel.app"
 
-# Supabase (obligatorio para proyectos y auth)
-flyctl secrets set SUPABASE_URL="https://TU_PROYECTO.supabase.co" -a explainer-api
-flyctl secrets set SUPABASE_SERVICE_ROLE_KEY="eyJ..." -a explainer-api
-flyctl secrets set SUPABASE_JWT_SECRET="tu-jwt-secret" -a explainer-api
-
-# Opcionales
-flyctl secrets set ENVIRONMENT="production" -a explainer-api
-flyctl secrets set FRONTEND_URL="https://tu-frontend.vercel.app" -a explainer-api
+# Luego adjunta al servicio
+koyeb service update explainer/explainer \
+  --secret APP_ENCRYPTION_KEY \
+  --secret SUPABASE_URL \
+  --secret SUPABASE_SERVICE_ROLE_KEY \
+  --secret SUPABASE_JWT_SECRET \
+  --secret FRONTEND_URL
 ```
 
 ### Paso 5: Deploy
 
-```bash
-flyctl deploy
+El servicio se desplegará automáticamente. La URL será:
+```
+https://[nombre-servicio]-[org].koyeb.app
 ```
 
 ### Paso 6: Verificar
 
 ```bash
-flyctl status
-flyctl logs
+# Ver logs
+koyeb service logs explainer/explainer
+
+# Ver status
+koyeb service get explainer/explainer
 ```
 
-La API estará disponible en: `https://explainer-api.fly.dev`
+Prueba el health check:
+```bash
+curl https://tu-app.koyeb.app/api/settings/api-key/status
+```
 
 ---
 
@@ -194,15 +245,17 @@ En el dashboard de Vercel (tu proyecto → Settings):
 
 Tras cada deploy, el script `scripts/generate-config.js` crea `frontend/config.js` con esas variables, así el frontend carga Supabase sin errores de MIME ni 404. En local, copia `frontend/config.example.js` a `frontend/config.js` y rellena los valores (o usa env en tu entorno).
 
-### Paso 5: Actualizar Backend con URL del Frontend
+### Paso 5: Actualizar vercel.json con URL de backend
 
-```bash
-flyctl secrets set FRONTEND_URL="https://explainer.vercel.app" -a explainer-api
+El archivo `vercel.json` ya tiene configurada la URL de Koyeb. Si cambia, actualízalo:
+
+```json
+{
+  "rewrites": [
+    {"source": "/api/(.*)", "destination": "https://tu-app.koyeb.app/api/$1"}
+  ]
+}
 ```
-
-### Paso 6: Actualizar vercel.json
-
-Edita `vercel.json` y reemplaza `explainer-api.fly.dev` con tu URL real de Fly.io si es diferente.
 
 ---
 
@@ -238,23 +291,23 @@ SELECT * FROM user_api_keys; -- Debe retornar 0 rows
 
 ## Comandos Útiles
 
-### Fly.io
+### Koyeb
 
 ```bash
 # Ver logs en tiempo real
-flyctl logs -a explainer-api
+koyeb service logs explainer/explainer
 
-# Restart app
-flyctl apps restart explainer-api
+# Ver status del servicio
+koyeb service get explainer/explainer
 
-# SSH al container
-flyctl ssh console -a explainer-api
+# Redeploy (tras push a main)
+koyeb service update explainer/explainer --git-branch main
 
-# Ver status
-flyctl status -a explainer-api
+# Listar todos los servicios
+koyeb service list
 
-# Escalar (si necesitas más recursos)
-flyctl scale vm shared-cpu-2x --memory 1024 -a explainer-api
+# Ver secrets configurados
+koyeb secret list
 ```
 
 ### Vercel
@@ -274,15 +327,17 @@ vercel logs
 
 ## Actualizaciones
 
-### Actualizar Backend
+### Actualizar Backend (Koyeb)
 
 ```bash
 # Hacer cambios en el código
 git add .
 git commit -m "Update: ..."
+git push origin main
 
-# Deploy
-flyctl deploy
+# El deploy es automático si tienes GitHub integration,
+# o manualmente:
+koyeb service update explainer/explainer --git-branch main
 ```
 
 ### Actualizar Frontend
@@ -291,6 +346,7 @@ flyctl deploy
 # Hacer cambios
 git add .
 git commit -m "Update: ..."
+git push origin main
 
 # Deploy
 vercel --prod
@@ -303,8 +359,18 @@ vercel --prod
 ### "Failed to fetch"
 
 Verifica en Vercel:
-1. Los rewrites en `vercel.json` apuntan a la URL correcta de Fly.io
-2. Fly.io está corriendo (`flyctl status`)
+1. Los rewrites en `vercel.json` apuntan a la URL correcta de Koyeb
+2. Koyeb está corriendo (revisa el dashboard)
+
+### La app en Koyeb tarda en responder
+
+**Esto es normal** - Koyeb usa **scale-to-zero** (gratis). La app se detiene tras ~5 min de inactividad y tarda 5-15 segundos en reiniciarse cuando llega una petición. Esto ahorra costos.
+
+Para evitar cold starts en momentos importantes, puedes hacer ping periódico o usar un plan de pago que mantenga la app siempre activa.
+
+### Errores de CORS
+
+Verifica que `FRONTEND_URL` en los secrets de Koyeb coincida exactamente con tu URL de Vercel (incluyendo `https://`).
 
 ---
 
@@ -312,15 +378,17 @@ Verifica en Vercel:
 
 | Servicio | Costo |
 |----------|-------|
-| Fly.io (512MB RAM, shared CPU) | **$0/mes** (hobby plan) |
+| Koyeb (Starter - scale-to-zero) | **$0/mes** |
 | Vercel (Hobby) | **$0/mes** |
 | Gemini API | **Paga cada usuario** (tú no pagas) |
 | **Total** | **$0/mes** |
+
+**Nota**: Koyeb cobra por segundo de uso después del free tier, pero con scale-to-zero y uso personal/development, el costo será $0.
 
 ---
 
 ## Recursos
 
-- [Fly.io Docs](https://fly.io/docs/)
+- [Koyeb Docs](https://www.koyeb.com/docs)
 - [Vercel Docs](https://vercel.com/docs)
 - [Gemini API Docs](https://ai.google.dev/docs)
