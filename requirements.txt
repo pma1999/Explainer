@@ -5,6 +5,12 @@ python-multipart==0.0.20
 python-dotenv==1.0.1
 aiofiles==24.1.0
 
+# Auth (Supabase JWT)
+PyJWT>=2.8.0
+
+# Supabase (Postgres + Storage)
+supabase>=2.0.0
+
 # Gemini
 google-genai>=1.0.0
 

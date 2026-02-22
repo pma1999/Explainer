@@ -36,6 +36,9 @@ venv.bak/
 *.swo
 *~
 
+# Frontend config con secretos (copiar desde config.example.js)
+frontend/config.js
+
 # Datos locales
 data/
 *.db

@@ -11,6 +11,60 @@
 </head>
 <body>
 
+  <!-- ===== AUTH VIEW (login / register) ===== -->
+  <div id="view-auth" class="view">
+    <div class="auth-bg">
+      <div class="bg-glow bg-glow-1"></div>
+      <div class="grain-overlay"></div>
+    </div>
+    <div class="auth-card">
+      <div class="logo auth-logo">
+        <span class="logo-mark">⬡</span>
+        <span class="logo-text">Explainer</span>
+      </div>
+      <p class="auth-subtitle">Inicia sesión o regístrate para guardar tus proyectos en la nube</p>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-auth-tab="login">Iniciar sesión</button>
+        <button type="button" class="auth-tab" data-auth-tab="register">Registrarse</button>
+      </div>
+
+      <form id="form-login" class="auth-form">
+        <div class="form-group">
+          <label for="login-email" class="form-label">Email</label>
+          <input type="email" id="login-email" class="form-input" placeholder="tu@email.com" required autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="login-password" class="form-label">Contraseña</label>
+          <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+        <p class="form-error" id="auth-login-error"></p>
+        <button type="submit" class="btn-primary btn-block" id="btn-login">
+          <span class="btn-text">Iniciar sesión</span>
+        </button>
+      </form>
+
+      <form id="form-register" class="auth-form hidden">
+        <div class="form-group">
+          <label for="register-email" class="form-label">Email</label>
+          <input type="email" id="register-email" class="form-input" placeholder="tu@email.com" required autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="register-password" class="form-label">Contraseña</label>
+          <input type="password" id="register-password" class="form-input" placeholder="Mín. 6 caracteres" required minlength="6" autocomplete="new-password" />
+        </div>
+        <div class="form-group">
+          <label for="register-password-confirm" class="form-label">Repetir contraseña</label>
+          <input type="password" id="register-password-confirm" class="form-input" placeholder="••••••••" required minlength="6" autocomplete="new-password" />
+        </div>
+        <p class="form-error" id="auth-register-error"></p>
+        <button type="submit" class="btn-primary btn-block" id="btn-register">
+          <span class="btn-text">Crear cuenta</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
   <!-- ===== LANDING / UPLOAD VIEW ===== -->
   <div id="view-landing" class="view">
     <div class="landing-bg">
@@ -286,11 +340,12 @@
       <div class="modal-body">
         <!-- User Info -->
         <div class="settings-section">
-          <h4 class="settings-section-title">Modo de acceso</h4>
+          <h4 class="settings-section-title">Cuenta</h4>
           <div class="settings-item">
-            <span class="settings-label">Estado</span>
-            <span class="settings-value" id="settings-email">Modo local</span>
+            <span class="settings-label">Email</span>
+            <span class="settings-value" id="settings-email">—</span>
           </div>
+          <button type="button" class="btn-ghost btn-block" id="btn-logout">Cerrar sesión</button>
         </div>
 
         <!-- API Key -->
@@ -340,6 +395,13 @@
   <!-- ===== TOAST ===== -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- Supabase: config.js define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY -->
+  <script src="/static/config.js"></script>
+  <script>
+    window.SUPABASE_URL = window.EXPLAINER_SUPABASE_URL || '';
+    window.SUPABASE_ANON_KEY = window.EXPLAINER_SUPABASE_ANON_KEY || '';
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

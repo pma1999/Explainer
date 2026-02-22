@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {}
+    },
+    "playwright": {
+      "command": "mcp-server-playwright"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "docs-langchain": {
+      "url": "https://docs.langchain.com/mcp"
+    },
+    "stripe": {
+      "url": "https://mcp.stripe.com",
+      "headers": {}
+    },
+    "exa": {
+      "type": "http",
+      "url": "https://server.smithery.ai/exa/mcp?api_key=b0e4678f-8d75-4f04-b984-534b2c5fdf9d&config=eyJkZWJ1ZyI6dHJ1ZX0%3D",
+      "headers": {}
+    },
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp"
+    }
+  }
+}

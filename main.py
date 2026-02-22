@@ -1,16 +1,14 @@
-"""Explainer API simplificada sin autenticación de usuarios."""
+"""Explainer API con autenticación Supabase y persistencia en Postgres + Storage."""
 
 import asyncio
 import json
 import os
-import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
-import aiofiles
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,17 +18,21 @@ load_dotenv(override=True)
 DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.environ.get("FLY_APP_NAME") else "data"))
 os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
 
+from backend.auth import get_current_user_id, get_user_id_from_token
 from backend.local_data import (
     init_local_data,
     get_encrypted_api_key,
     set_encrypted_api_key,
-    create_project,
+)
+from backend.supabase_data import (
+    create_project as supabase_create_project,
     get_project,
     list_projects,
     update_project,
     delete_project,
     export_projects_payload,
     import_projects_payload,
+    download_pdf_to_temp,
 )
 from backend.crypto import encrypt_global_api_key, decrypt_global_api_key
 from backend.sse_manager import sse_manager, send_event
@@ -70,17 +72,19 @@ if os.environ.get("ENVIRONMENT") != "production":
 
 
 @app.post("/api/settings/api-key")
-async def api_set_api_key(api_key: str = Form(...)):
+async def api_set_api_key(
+    user_id: Annotated[str, get_current_user_id()],
+    api_key: str = Form(...),
+):
     if not api_key.startswith("AIza") or len(api_key) < 20:
         raise HTTPException(status_code=400, detail="API key de Gemini inválida")
-
     encrypted = encrypt_global_api_key(api_key)
     set_encrypted_api_key(encrypted)
     return {"ok": True}
 
 
 @app.delete("/api/settings/api-key")
-async def api_delete_api_key():
+async def api_delete_api_key(user_id: Annotated[str, get_current_user_id()]):
     set_encrypted_api_key(None)
     return {"ok": True}
 
@@ -93,77 +97,75 @@ async def api_api_key_status():
 @app.post("/api/projects")
 @project_create_rate_limit
 async def api_create_project(
-    request: Request,
+    user_id: Annotated[str, get_current_user_id()],
     name: str = Form(...),
     description: str = Form(...),
     file: UploadFile = File(...),
 ):
-    project = create_project(
+    pdf_filename = file.filename or "documento.pdf"
+    pdf_content = await file.read()
+    project = supabase_create_project(
+        user_id=user_id,
         name=name,
         description=description,
-        pdf_filename=file.filename or "documento.pdf",
+        pdf_filename=pdf_filename,
+        pdf_content=pdf_content,
     )
-
-    project_dir = DATA_DIR / "projects" / project["id"]
-    project_dir.mkdir(parents=True, exist_ok=True)
-
-    pdf_path = project_dir / project["pdf_filename"]
-    async with aiofiles.open(pdf_path, "wb") as f:
-        content = await file.read()
-        await f.write(content)
-
     return project
 
 
 @app.get("/api/projects")
-async def api_list_projects():
-    return list_projects()
+async def api_list_projects(user_id: Annotated[str, get_current_user_id()]):
+    return list_projects(user_id)
 
 
 @app.get("/api/projects/export")
-async def api_export_projects():
-    return export_projects_payload()
+async def api_export_projects(user_id: Annotated[str, get_current_user_id()]):
+    return export_projects_payload(user_id)
 
 
 @app.post("/api/projects/import")
-async def api_import_projects(file: UploadFile = File(...)):
+async def api_import_projects(
+    user_id: Annotated[str, get_current_user_id()],
+    file: UploadFile = File(...),
+):
     if not file.filename or not file.filename.lower().endswith(".json"):
         raise HTTPException(status_code=400, detail="Debes subir un archivo JSON")
-
     raw = await file.read()
     try:
         payload = json.loads(raw.decode("utf-8"))
-        result = import_projects_payload(payload)
+        result = import_projects_payload(user_id, payload)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Backup inválido: {exc}") from exc
-
     return {"ok": True, **result}
 
 
 @app.get("/api/projects/{project_id}")
-async def api_get_project(project_id: str):
-    project = get_project(project_id)
+async def api_get_project(
+    user_id: Annotated[str, get_current_user_id()],
+    project_id: str,
+):
+    project = get_project(project_id, user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
 
 
 @app.delete("/api/projects/{project_id}")
-async def api_delete_project(project_id: str):
-    if not get_project(project_id):
+async def api_delete_project(
+    user_id: Annotated[str, get_current_user_id()],
+    project_id: str,
+):
+    if not get_project(project_id, user_id):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-
-    project_dir = DATA_DIR / "projects" / project_id
-    if project_dir.exists():
-        shutil.rmtree(project_dir)
-
-    delete_project(project_id)
+    delete_project(project_id, user_id)
     return {"ok": True}
 
 
-async def _process_project(project_id: str) -> None:
+async def _process_project(project_id: str, user_id: str) -> None:
+    pdf_temp_path = None
     try:
-        project = get_project(project_id)
+        project = get_project(project_id, user_id)
         if not project:
             await send_event(project_id, {"type": "error", "message": "Proyecto no encontrado"})
             return
@@ -171,14 +173,14 @@ async def _process_project(project_id: str) -> None:
         encrypted_key = get_encrypted_api_key()
         if not encrypted_key:
             await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada."})
-            update_project(project_id, {"status": "error", "error_message": "API key no configurada"})
+            update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
         try:
             api_key = decrypt_global_api_key(encrypted_key)
         except Exception as e:
             await send_event(project_id, {"type": "error", "message": "Error al leer API key. Vuelve a configurarla."})
-            update_project(project_id, {"status": "error", "error_message": str(e)})
+            update_project(project_id, user_id, {"status": "error", "error_message": str(e)})
             return
 
         from google import genai
@@ -196,27 +198,30 @@ async def _process_project(project_id: str) -> None:
         def _update_usage(usage_meta):
             if not usage_meta:
                 return
-
             p = getattr(usage_meta, "prompt_token_count", 0)
             c = getattr(usage_meta, "candidates_token_count", 0)
             t = getattr(usage_meta, "thoughts_token_count", 0)
             tt = getattr(usage_meta, "total_token_count", 0)
-
             cumulative_usage["prompt_tokens"] += p
             cumulative_usage["candidates_tokens"] += c
             cumulative_usage["thoughts_tokens"] += t
             cumulative_usage["total_tokens"] += tt
             cumulative_usage["total_cost"] += calculate_cost(model_name, usage_meta)
-            update_project(project_id, {"usage": cumulative_usage})
+            update_project(project_id, user_id, {"usage": cumulative_usage})
 
         await send_event(project_id, {"type": "uploading"})
-        update_project(project_id, {"status": "uploading"})
+        update_project(project_id, user_id, {"status": "uploading"})
 
-        pdf_path = DATA_DIR / "projects" / project_id / project["pdf_filename"]
-        uploaded_file = await asyncio.to_thread(lambda: client.files.upload(file=str(pdf_path)))
+        pdf_temp_path = download_pdf_to_temp(project_id, user_id)
+        if not pdf_temp_path:
+            await send_event(project_id, {"type": "error", "message": "No se pudo descargar el PDF."})
+            update_project(project_id, user_id, {"status": "error", "error_message": "PDF no encontrado en almacenamiento"})
+            return
+
+        uploaded_file = await asyncio.to_thread(lambda: client.files.upload(file=pdf_temp_path))
         file_uri = uploaded_file.uri
 
-        update_project(project_id, {"file_uri": file_uri, "status": "segmenting"})
+        update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
         await send_event(project_id, {"type": "segmenting"})
 
         segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"])
@@ -224,7 +229,6 @@ async def _process_project(project_id: str) -> None:
         await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
         partes_preview = [{"numero": p["numero"], "titulo": p["titulo"]} for p in segmentation["partes"]]
-
         partes_contenido = {}
         for parte in segmentation["partes"]:
             partes_contenido[str(parte["numero"])] = {
@@ -234,7 +238,7 @@ async def _process_project(project_id: str) -> None:
                 "resources": None,
             }
 
-        update_project(project_id, {
+        update_project(project_id, user_id, {
             "segmentation": segmentation,
             "partes_contenido": partes_contenido,
             "status": "processing",
@@ -244,9 +248,8 @@ async def _process_project(project_id: str) -> None:
         for parte in segmentation["partes"]:
             part_id = parte["numero"]
             identificacion = parte["identificacion"]
-
             partes_contenido[str(part_id)]["status"] = "processing"
-            update_project(project_id, {"partes_contenido": partes_contenido})
+            update_project(project_id, user_id, {"partes_contenido": partes_contenido})
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
             results = await asyncio.gather(
@@ -259,11 +262,9 @@ async def _process_project(project_id: str) -> None:
             explainer_data, usage_e = results[0] if not isinstance(results[0], Exception) else (results[0], None)
             recorrido_data, usage_rec = results[1] if not isinstance(results[1], Exception) else (results[1], None)
             resources_data, usage_res = results[2] if not isinstance(results[2], Exception) else (results[2], None)
-
             for u in [usage_e, usage_rec, usage_res]:
                 if u:
                     _update_usage(u)
-
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             for result, agent_name in [
@@ -275,42 +276,53 @@ async def _process_project(project_id: str) -> None:
                     partes_contenido[str(part_id)][agent_name] = {"error": str(result)}
                 else:
                     partes_contenido[str(part_id)][agent_name] = result
-
                 await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": agent_name})
 
             partes_contenido[str(part_id)]["status"] = "completed"
-            update_project(project_id, {"partes_contenido": partes_contenido})
+            update_project(project_id, user_id, {"partes_contenido": partes_contenido})
             await send_event(project_id, {"type": "part_completed", "part_id": part_id})
 
-        update_project(project_id, {"status": "completed"})
+        update_project(project_id, user_id, {"status": "completed"})
         await send_event(project_id, {"type": "completed"})
 
     except Exception as exc:
-        update_project(project_id, {"status": "error", "error_message": str(exc)})
+        update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
         await send_event(project_id, {"type": "error", "message": str(exc)})
     finally:
+        if pdf_temp_path and os.path.isfile(pdf_temp_path):
+            try:
+                os.unlink(pdf_temp_path)
+            except OSError:
+                pass
         await sse_manager.end_stream(project_id)
 
 
 @app.post("/api/projects/{project_id}/process")
-async def api_process_project(project_id: str, background_tasks: BackgroundTasks):
-    project = get_project(project_id)
+async def api_process_project(
+    user_id: Annotated[str, get_current_user_id()],
+    project_id: str,
+    background_tasks: BackgroundTasks,
+):
+    project = get_project(project_id, user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-
     if project["status"] not in ("pending", "error"):
         raise HTTPException(status_code=400, detail=f"El proyecto ya está en estado '{project['status']}'")
-
     if not get_encrypted_api_key():
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
-
-    background_tasks.add_task(_process_project, project_id)
+    background_tasks.add_task(_process_project, project_id, user_id)
     return {"ok": True, "status": "started"}
 
 
 @app.get("/api/projects/{project_id}/events")
-async def api_project_events(project_id: str):
-    if not get_project(project_id):
+async def api_project_events(
+    project_id: str,
+    token: str | None = Query(None, alias="token"),
+):
+    user_id = get_user_id_from_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token requerido (query: token=...)")
+    if not get_project(project_id, user_id):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     async def generate() -> AsyncGenerator[str, None]:
