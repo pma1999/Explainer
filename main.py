@@ -37,7 +37,7 @@ from backend.supabase_data import (
 from backend.crypto import encrypt_global_api_key, decrypt_global_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import project_create_rate_limit
-from backend.pricing import calculate_cost, get_model_name
+from backend.pricing import calculate_cost, get_model_name, calculate_storage_cost
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
@@ -161,6 +161,10 @@ async def api_delete_project(
 
 async def _process_project(project_id: str, user_id: str) -> None:
     pdf_temp_path = None
+    cache_name = None
+    cache_start_time = None
+    cached_token_count = 0
+    client = None
     try:
         project = get_project(project_id, user_id)
         if not project:
@@ -181,6 +185,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
             return
 
         from google import genai
+        from google.genai import types
         client = genai.Client(api_key=api_key)
         model_name = get_model_name()
 
@@ -218,10 +223,31 @@ async def _process_project(project_id: str, user_id: str) -> None:
         uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
         file_uri = uploaded_file.uri
 
+        # Intentar crear un caché explícito para reutilizar el procesamiento del PDF
+        try:
+            print(f"[Caching] Intentando crear cache para {file_uri}...")
+            def _create_cache():
+                return client.caches.create(
+                    model=model_name,
+                    config=types.CreateCachedContentConfig(
+                        contents=[uploaded_file],
+                        ttl="3600s",
+                    )
+                )
+            cache = await asyncio.to_thread(_create_cache)
+            cache_name = cache.name
+            import time
+            cache_start_time = time.time()
+            print(f"[Caching] Caché explícito creado con éxito: {cache_name}")
+        except Exception as cache_exc:
+            print(f"[Caching] No se pudo crear caché explícito (posiblemente documento muy corto o error API). Fallback activado. Detalles: {cache_exc}")
+
         update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
         await send_event(project_id, {"type": "segmenting"})
 
-        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"])
+        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"], cache_name)
+        if cache_name and usage_meta:
+            cached_token_count = getattr(usage_meta, "cached_content_token_count", 0) or getattr(usage_meta, "get", lambda x, y: 0)("cached_content_token_count", 0)
         _update_usage(usage_meta)
         await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
@@ -250,9 +276,9 @@ async def _process_project(project_id: str, user_id: str) -> None:
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion),
-                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion),
-                asyncio.to_thread(run_resources, api_key, file_uri, identificacion),
+                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion, cache_name),
+                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion, cache_name),
+                asyncio.to_thread(run_resources, api_key, file_uri, identificacion, cache_name),
                 return_exceptions=True,
             )
 
@@ -337,6 +363,32 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 os.unlink(pdf_temp_path)
             except OSError:
                 pass
+        
+        if cache_name and client:
+            try:
+                def _delete_cache():
+                    client.caches.delete(name=cache_name)
+                await asyncio.to_thread(_delete_cache)
+                print(f"[Caching] Caché {cache_name} eliminado con éxito tras finalizar el proyecto.")
+                
+                # Calcular y registrar el coste de almacenamiento de la caché por el tiempo que estuvo viva
+                if cache_start_time and cached_token_count > 0:
+                    import time
+                    duration_seconds = time.time() - cache_start_time
+                    storage_cost = calculate_storage_cost(model_name, cached_token_count, duration_seconds)
+                    if storage_cost > 0:
+                        cumulative_usage["total_cost"] += storage_cost
+                        update_project(project_id, user_id, {"usage": cumulative_usage})
+                        # Como estamos en block finally y es async, solo forzamos un evento extra
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(send_event(project_id, {"type": "usage_update", "usage": cumulative_usage}))
+                        except Exception as inner_e:
+                            pass
+                        
+            except Exception as e:
+                print(f"[Caching] Error al eliminar caché {cache_name}: {e}")
+
         await sse_manager.end_stream(project_id)
 
 
