@@ -4,7 +4,7 @@ Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta 
 
 ## ✨ Características
 
-- **🔑 API key encriptada**: Una API key de Gemini por instalación, almacenada encriptada en local
+- **🔑 BYOK (Bring Your Own Key)**: Cada usuario almacena su API key de Gemini encriptada en Supabase, disponible en todos sus dispositivos
 - **📄 Procesamiento de PDFs**: Upload y análisis automático con Gemini File API
 - **🤖 4 Agentes IA**: Segmentador, Explainer, Recorrido Anotado y Recursos
 - **📊 Progreso en tiempo real**: Server-Sent Events (SSE) para ver el avance
