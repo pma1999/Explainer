@@ -2339,3 +2339,178 @@ body {
     font-size: 13px;
   }
 }
+
+/* ============================================================
+   FLOATING PROCESSING INDICATOR (non-blocking)
+   ============================================================ */
+.floating-indicator {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(13, 17, 23, 0.95);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.1),
+    0 12px 40px rgba(0, 0, 0, 0.6),
+    0 0 30px rgba(245, 158, 11, 0.1);
+  z-index: 1001;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s;
+  max-width: 320px;
+  backdrop-filter: blur(8px);
+}
+
+.floating-indicator:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 11, 0.2),
+    0 16px 48px rgba(0, 0, 0, 0.7),
+    0 0 40px rgba(245, 158, 11, 0.15);
+}
+
+.floating-indicator.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+}
+
+.floating-indicator.collapsed .fi-content {
+  display: none;
+}
+
+.floating-indicator.collapsed .fi-toggle {
+  transform: rotate(-90deg);
+}
+
+.fi-core {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.fi-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+}
+
+.fi-ring-1 {
+  border-top-color: var(--amber);
+  border-right-color: rgba(245, 158, 11, 0.25);
+  animation: coreSpin 2.5s linear infinite;
+}
+
+.fi-ring-2 {
+  inset: 8px;
+  border-bottom-color: rgba(139, 92, 246, 0.5);
+  animation: coreSpin 1.8s linear infinite reverse;
+}
+
+.fi-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.fi-title {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fi-agents {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.fi-agent {
+  font-size: 16px;
+  opacity: 0.4;
+  transition: all 0.3s ease;
+  filter: grayscale(0.8);
+}
+
+.fi-agent.active {
+  opacity: 1;
+  filter: grayscale(0);
+  animation: agentPulse 1.5s ease-in-out infinite;
+}
+
+.fi-agent.completed {
+  opacity: 1;
+  filter: grayscale(0) brightness(1.2);
+}
+
+@keyframes agentPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.fi-stream {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-height: 60px;
+  overflow: hidden;
+}
+
+.fi-line {
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: fiLineIn 0.2s ease;
+}
+
+@keyframes fiLineIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.fi-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+  transition: transform 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+.fi-toggle:hover {
+  color: var(--amber);
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .floating-indicator {
+    bottom: 16px;
+    right: 16px;
+    left: 16px;
+    max-width: none;
+    padding: 12px 14px;
+  }
+
+  .fi-core {
+    width: 36px;
+    height: 36px;
+  }
+
+  .fi-title {
+    font-size: 12px;
+  }
+}
