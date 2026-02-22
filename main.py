@@ -15,11 +15,15 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv(override=True)
 
-DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if (os.environ.get("FLY_APP_NAME") or os.environ.get("KOYEB_APP_NAME")) else "data"))
+DATA_DIR = Path(os.environ.get("EXPLAINER_DATA_DIR") or ("/app/data" if os.environ.get("FLY_APP_NAME") else "data"))
 os.environ["EXPLAINER_DATA_DIR"] = str(DATA_DIR)
 
 from backend.auth import get_current_user_id, get_user_id_from_token
-from backend.local_data import init_local_data
+from backend.local_data import (
+    init_local_data,
+    get_encrypted_api_key,
+    set_encrypted_api_key,
+)
 from backend.supabase_data import (
     create_project as supabase_create_project,
     get_project,
@@ -29,16 +33,11 @@ from backend.supabase_data import (
     export_projects_payload,
     import_projects_payload,
     download_pdf_to_temp,
-    get_user_api_key,
-    set_user_api_key,
-    delete_user_api_key,
-    has_user_api_key,
-    get_user_api_key_status,
 )
-from backend.crypto import mask_api_key
+from backend.crypto import encrypt_global_api_key, decrypt_global_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import project_create_rate_limit
-from backend.pricing import calculate_cost, get_model_name, calculate_storage_cost
+from backend.pricing import calculate_cost, get_model_name
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
@@ -74,38 +73,22 @@ async def api_set_api_key(
     user_id: Annotated[str, Depends(get_current_user_id)],
     api_key: str = Form(...),
 ):
-    """Store user's API key (BYOK - Bring Your Own Key).
-
-    The API key is encrypted with a user-specific key before storage.
-    The plaintext key is never stored or logged.
-    """
     if not api_key.startswith("AIza") or len(api_key) < 20:
         raise HTTPException(status_code=400, detail="API key de Gemini inválida")
-
-    # Store encrypted API key for this user (BYOK)
-    set_user_api_key(user_id, api_key, provider="google_gemini")
-
-    # Log only masked version for security
-    print(f"[API Key] User {user_id[:8]}... configured API key: {mask_api_key(api_key)}")
-
+    encrypted = encrypt_global_api_key(api_key)
+    set_encrypted_api_key(encrypted)
     return {"ok": True}
 
 
 @app.delete("/api/settings/api-key")
 async def api_delete_api_key(user_id: Annotated[str, Depends(get_current_user_id)]):
-    """Delete user's API key."""
-    delete_user_api_key(user_id)
-    print(f"[API Key] User {user_id[:8]}... deleted their API key")
+    set_encrypted_api_key(None)
     return {"ok": True}
 
 
 @app.get("/api/settings/api-key/status")
-async def api_api_key_status(user_id: Annotated[str, Depends(get_current_user_id)]):
-    """Get API key status for the authenticated user.
-
-    Returns only status info, never the actual API key.
-    """
-    return get_user_api_key_status(user_id)
+async def api_api_key_status():
+    return {"has_api_key": bool(get_encrypted_api_key())}
 
 
 @app.post("/api/projects")
@@ -178,28 +161,26 @@ async def api_delete_project(
 
 async def _process_project(project_id: str, user_id: str) -> None:
     pdf_temp_path = None
-    cache_name = None
-    cache_start_time = None
-    cached_token_count = 0
-    client = None
     try:
         project = get_project(project_id, user_id)
         if not project:
             await send_event(project_id, {"type": "error", "message": "Proyecto no encontrado"})
             return
 
-        # Get user's API key (BYOK) from Supabase
-        api_key = get_user_api_key(user_id)
-        if not api_key:
-            await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada. Configúrala en Ajustes."})
+        encrypted_key = get_encrypted_api_key()
+        if not encrypted_key:
+            await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada."})
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
-        # Log masked version only for security
-        print(f"[Process] Using API key for user {user_id[:8]}...: {mask_api_key(api_key)}")
+        try:
+            api_key = decrypt_global_api_key(encrypted_key)
+        except Exception as e:
+            await send_event(project_id, {"type": "error", "message": "Error al leer API key. Vuelve a configurarla."})
+            update_project(project_id, user_id, {"status": "error", "error_message": str(e)})
+            return
 
         from google import genai
-        from google.genai import types
         client = genai.Client(api_key=api_key)
         model_name = get_model_name()
 
@@ -237,31 +218,10 @@ async def _process_project(project_id: str, user_id: str) -> None:
         uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
         file_uri = uploaded_file.uri
 
-        # Intentar crear un caché explícito para reutilizar el procesamiento del PDF
-        try:
-            print(f"[Caching] Intentando crear cache para {file_uri}...")
-            def _create_cache():
-                return client.caches.create(
-                    model=model_name,
-                    config=types.CreateCachedContentConfig(
-                        contents=[uploaded_file],
-                        ttl="3600s",
-                    )
-                )
-            cache = await asyncio.to_thread(_create_cache)
-            cache_name = cache.name
-            import time
-            cache_start_time = time.time()
-            print(f"[Caching] Caché explícito creado con éxito: {cache_name}")
-        except Exception as cache_exc:
-            print(f"[Caching] No se pudo crear caché explícito (posiblemente documento muy corto o error API). Fallback activado. Detalles: {cache_exc}")
-
         update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
         await send_event(project_id, {"type": "segmenting"})
 
-        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"], cache_name)
-        if cache_name and usage_meta:
-            cached_token_count = getattr(usage_meta, "cached_content_token_count", 0) or getattr(usage_meta, "get", lambda x, y: 0)("cached_content_token_count", 0)
+        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"])
         _update_usage(usage_meta)
         await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
@@ -290,8 +250,8 @@ async def _process_project(project_id: str, user_id: str) -> None:
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion, cache_name),
-                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion, cache_name),
+                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion),
+                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion),
                 asyncio.to_thread(run_resources, api_key, file_uri, identificacion),
                 return_exceptions=True,
             )
@@ -377,31 +337,6 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 os.unlink(pdf_temp_path)
             except OSError:
                 pass
-        
-        if cache_name and client:
-            try:
-                def _delete_cache():
-                    client.caches.delete(name=cache_name)
-                await asyncio.to_thread(_delete_cache)
-                print(f"[Caching] Caché {cache_name} eliminado con éxito tras finalizar el proyecto.")
-                
-                # Calcular y registrar el coste de almacenamiento de la caché por el tiempo que estuvo viva
-                if cache_start_time and cached_token_count > 0:
-                    import time
-                    duration_seconds = time.time() - cache_start_time
-                    storage_cost = calculate_storage_cost(model_name, cached_token_count, duration_seconds)
-                    if storage_cost > 0:
-                        cumulative_usage["total_cost"] += storage_cost
-                        update_project(project_id, user_id, {"usage": cumulative_usage})
-                        # Como estamos en block finally y es async, solo forzamos un evento extra
-                        try:
-                            loop = asyncio.get_running_loop()
-                            loop.create_task(send_event(project_id, {"type": "usage_update", "usage": cumulative_usage}))
-                        except Exception as inner_e:
-                            pass
-                        
-            except Exception as e:
-                print(f"[Caching] Error al eliminar caché {cache_name}: {e}")
 
         await sse_manager.end_stream(project_id)
 
@@ -412,17 +347,13 @@ async def api_process_project(
     project_id: str,
     background_tasks: BackgroundTasks,
 ):
-    """Start processing a project using the user's own API key (BYOK)."""
     project = get_project(project_id, user_id)
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     if project["status"] not in ("pending", "error"):
         raise HTTPException(status_code=400, detail=f"El proyecto ya está en estado '{project['status']}'")
-
-    # Check if user has configured their API key (BYOK)
-    if not has_user_api_key(user_id):
+    if not get_encrypted_api_key():
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
-
     background_tasks.add_task(_process_project, project_id, user_id)
     return {"ok": True, "status": "started"}
 

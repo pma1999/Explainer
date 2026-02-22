@@ -255,24 +255,25 @@ def run_resources(api_key: str, file_uri: str, identificacion: str) -> tuple[dic
 
     tools = [types.Tool(googleSearch=types.GoogleSearch())]
 
-    prompt_text = (
-        f"Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
-        f"{identificacion}\n\n"
-        f"Busca y recomienda los mejores recursos disponibles (libros, artículos, "
-        f"documentales, podcasts, sitios web, cursos) para profundizar en los temas "
-        f"de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
-        f"verificables con alta confianza."
-    )
-
     contents = [
         types.Content(
             role="user",
             parts=[
                 types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
-                types.Part.from_text(text=prompt_text),
+                types.Part.from_text(
+                    text=(
+                        f"Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
+                        f"{identificacion}\n\n"
+                        f"Busca y recomienda los mejores recursos disponibles (libros, artículos, "
+                        f"documentales, podcasts, sitios web, cursos) para profundizar en los temas "
+                        f"de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
+                        f"verificables con alta confianza."
+                    )
+                ),
             ],
         ),
     ]
+
     config = types.GenerateContentConfig(
         thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         tools=tools,
