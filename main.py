@@ -67,10 +67,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if os.environ.get("ENVIRONMENT") != "production":
-    app.mount("/static", StaticFiles(directory="frontend"), name="static")
-
-
 @app.post("/api/settings/api-key")
 async def api_set_api_key(
     user_id: Annotated[str, get_current_user_id()],
@@ -338,9 +334,12 @@ async def api_project_events(
     )
 
 
-@app.get("/")
-async def root():
-    return FileResponse("frontend/index.html")
+if os.environ.get("ENVIRONMENT") != "production":
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+else:
+    @app.get("/")
+    async def root():
+        return FileResponse("frontend/index.html")
 
 
 if __name__ == "__main__":
