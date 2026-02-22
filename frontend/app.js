@@ -4,7 +4,7 @@
 
 const SUPABASE_URL = window.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || '';
-const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+const supabaseClient = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
@@ -151,8 +151,8 @@ async function api(path, options = {}) {
   const res = await fetch(url, { ...options, headers });
 
   if (res.status === 401) {
-    if (supabase) {
-      await supabase.auth.signOut();
+    if (supabaseClient) {
+      await supabaseClient.auth.signOut();
       state.session = null;
       state.user = null;
       showView('view-auth');
@@ -172,18 +172,18 @@ async function api(path, options = {}) {
 
 // ── APP INIT ───────────────────────────────────────────────
 async function initApp() {
-  if (!supabase) {
+  if (!supabaseClient) {
     showView('view-auth');
     document.querySelector('.auth-subtitle').textContent = 'Supabase no configurado. Define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY.';
     initAuth();
     return;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await supabaseClient.auth.getSession();
   state.session = session;
   state.user = session?.user ?? null;
 
-  supabase.auth.onAuthStateChange((_event, session) => {
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
     state.session = session;
     state.user = session?.user ?? null;
     if (session) {
@@ -335,7 +335,7 @@ function initAuth() {
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Entrando...';
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error) throw error;
       state.session = data.session;
       state.user = data.user;
@@ -373,7 +373,7 @@ function initAuth() {
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Creando cuenta...';
     try {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabaseClient.auth.signUp({ email, password });
       if (error) throw error;
       state.session = data.session;
       state.user = data.user;
@@ -394,7 +394,7 @@ function initAuth() {
       state.processingSSE.close();
       state.processingSSE = null;
     }
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     state.session = null;
     state.user = null;
     hide($('modal-settings'));
