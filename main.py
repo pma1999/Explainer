@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -69,7 +69,7 @@ app.add_middleware(
 
 @app.post("/api/settings/api-key")
 async def api_set_api_key(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     api_key: str = Form(...),
 ):
     if not api_key.startswith("AIza") or len(api_key) < 20:
@@ -80,7 +80,7 @@ async def api_set_api_key(
 
 
 @app.delete("/api/settings/api-key")
-async def api_delete_api_key(user_id: Annotated[str, get_current_user_id()]):
+async def api_delete_api_key(user_id: Annotated[str, Depends(get_current_user_id)]):
     set_encrypted_api_key(None)
     return {"ok": True}
 
@@ -93,7 +93,7 @@ async def api_api_key_status():
 @app.post("/api/projects")
 @project_create_rate_limit
 async def api_create_project(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     name: str = Form(...),
     description: str = Form(...),
     file: UploadFile = File(...),
@@ -111,18 +111,18 @@ async def api_create_project(
 
 
 @app.get("/api/projects")
-async def api_list_projects(user_id: Annotated[str, get_current_user_id()]):
+async def api_list_projects(user_id: Annotated[str, Depends(get_current_user_id)]):
     return list_projects(user_id)
 
 
 @app.get("/api/projects/export")
-async def api_export_projects(user_id: Annotated[str, get_current_user_id()]):
+async def api_export_projects(user_id: Annotated[str, Depends(get_current_user_id)]):
     return export_projects_payload(user_id)
 
 
 @app.post("/api/projects/import")
 async def api_import_projects(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     file: UploadFile = File(...),
 ):
     if not file.filename or not file.filename.lower().endswith(".json"):
@@ -138,7 +138,7 @@ async def api_import_projects(
 
 @app.get("/api/projects/{project_id}")
 async def api_get_project(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
 ):
     project = get_project(project_id, user_id)
@@ -149,7 +149,7 @@ async def api_get_project(
 
 @app.delete("/api/projects/{project_id}")
 async def api_delete_project(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
 ):
     if not get_project(project_id, user_id):
@@ -295,7 +295,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
 @app.post("/api/projects/{project_id}/process")
 async def api_process_project(
-    user_id: Annotated[str, get_current_user_id()],
+    user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
     background_tasks: BackgroundTasks,
 ):
