@@ -234,13 +234,40 @@
       <!-- Main content -->
       <main class="project-main" id="project-main">
 
-        <!-- Processing overlay -->
+        <!-- Processing overlay (Neural Forge — real-time) -->
         <div class="processing-overlay hidden" id="processing-overlay">
           <div class="processing-card">
-            <div class="processing-spinner"></div>
+            <div class="processing-neural-core" id="processing-neural-core">
+              <div class="core-ring core-ring-1"></div>
+              <div class="core-ring core-ring-2"></div>
+              <div class="core-ring core-ring-3"></div>
+            </div>
             <h3 class="processing-title" id="processing-title">Analizando documento...</h3>
             <p class="processing-sub" id="processing-sub">Preparando la carga del archivo</p>
-            <div class="processing-steps" id="processing-steps"></div>
+            <div class="processing-agents" id="processing-agents">
+              <div class="agent-node" id="agent-explainer" data-agent="explainer">
+                <span class="agent-signal"></span>
+                <div class="agent-icon">📖</div>
+                <div class="agent-name">Explicación</div>
+              </div>
+              <div class="agent-node" id="agent-recorrido" data-agent="recorrido">
+                <span class="agent-signal"></span>
+                <div class="agent-icon">✍️</div>
+                <div class="agent-name">Recorrido</div>
+              </div>
+              <div class="agent-node" id="agent-resources" data-agent="resources">
+                <span class="agent-signal"></span>
+                <div class="agent-icon">🗺️</div>
+                <div class="agent-name">Recursos</div>
+              </div>
+            </div>
+            <div class="processing-stream" id="processing-stream">
+              <div class="stream-header">
+                <span class="stream-dot"></span>
+                En vivo
+              </div>
+              <div class="stream-events" id="stream-events"></div>
+            </div>
           </div>
         </div>
 
