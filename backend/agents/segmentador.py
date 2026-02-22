@@ -126,7 +126,7 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
 
 **PASO 2 - IDENTIFICACIÓN TEMÁTICA:**
 - Crea una lista numerada y exhaustiva de **TODOS** los temas y subtemas que aborda el texto
-- Incluye desde temas principales hasta subtemas significativos. Esta lista debe ser completa: si hay 10 temas, lista los 10; si hay 50, lista los 50. Cada tema debe ser lo suficientemente granular para poder asignarse a una unica parte
+- Incluye desde temas principales hasta subtemas significativos. Esta lista debe ser completa: si hay 10 temas, lista los 10; si hay 50, lista los 50. Cada tema debe ser lo suficientemente granular para poder asignarse a una única parte
 - Marca transiciones entre temas (¿dónde cambia el foco?)
 - Evalúa la independencia/interdependencia de cada tema
     - ¿Este tema requiere haber entendido el anterior?
