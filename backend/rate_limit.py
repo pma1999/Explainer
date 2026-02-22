@@ -97,9 +97,9 @@ def rate_limit(max_requests: int = 5, window_seconds: int = 60):
         window_seconds: Ventana de tiempo en segundos
 
     Ejemplo:
-        @app.post("/auth/login")
-        @rate_limit(max_requests=5, window_seconds=60)
-        async def login(...):
+        @app.post("/api/projects")
+        @rate_limit(max_requests=10, window_seconds=60)
+        async def create_project(...):
             ...
     """
     def decorator(func: Callable):
@@ -136,16 +136,6 @@ def rate_limit(max_requests: int = 5, window_seconds: int = 60):
 
 
 # Rate limits predefinidos para endpoints comunes
-
-def login_rate_limit(func: Callable):
-    """Rate limit para login: 5 intentos por minuto."""
-    return rate_limit(max_requests=5, window_seconds=60)(func)
-
-
-def register_rate_limit(func: Callable):
-    """Rate limit para registro: 3 intentos por hora."""
-    return rate_limit(max_requests=3, window_seconds=3600)(func)
-
 
 def api_rate_limit(func: Callable):
     """Rate limit general para API: 100 requests por minuto."""

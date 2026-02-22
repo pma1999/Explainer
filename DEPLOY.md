@@ -9,7 +9,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │  FLY.IO (Backend API) — $0                                  │
 │  └── explainer-api.fly.dev                                  │
-│  ├── SQLite en volumen persistente                          │
+│  ├── Datos en volumen persistente (JSON)                    │
 │  └── Siempre activo (nunca duerme)                          │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -24,23 +24,20 @@
 
 ### 1. Variables de Entorno de Seguridad
 
-Genera las claves de encriptación:
+Genera la clave de encriptación para la API key de Gemini:
 
 ```bash
-# Master key para encriptar API keys (32 bytes base64)
-openssl rand -base64 32
-
-# JWT Secret (cualquier string largo aleatorio)
+# Master key para encriptar la API key (32 bytes base64)
 openssl rand -base64 32
 ```
 
-Guarda estos valores, los necesitarás en Fly.io.
+Guarda este valor; lo necesitarás en Fly.io.
 
 ---
 
 ## Despliegue a Fly.io (Backend)
 
-### Paso 1: Login en Fly.io
+### Paso 1: Login en Fly.io (CLI)
 
 ```bash
 flyctl auth login
@@ -52,7 +49,7 @@ flyctl auth login
 flyctl apps create explainer-api
 ```
 
-### Paso 3: Crear el Volumen (para SQLite)
+### Paso 3: Crear el Volumen (para datos locales)
 
 ```bash
 flyctl volumes create explainer_data --region mad --size 1
@@ -61,11 +58,10 @@ flyctl volumes create explainer_data --region mad --size 1
 ### Paso 4: Configurar Secrets
 
 ```bash
-# Variables obligatorias
+# Variable obligatoria (encriptación de la API key)
 flyctl secrets set APP_ENCRYPTION_KEY="tu_key_aqui" -a explainer-api
-flyctl secrets set JWT_SECRET="tu_secret_aqui" -a explainer-api
 
-# Variables opcionales (para notificaciones/debug)
+# Opcionales
 flyctl secrets set ENVIRONMENT="production" -a explainer-api
 ```
 
@@ -132,19 +128,13 @@ Edita `vercel.json` y reemplaza `explainer-api.fly.dev` con tu URL real de Fly.i
 
 ## Verificación Post-Despliegue
 
-### Test de Seguridad
-
-1. **Registro de usuario**: Crea una cuenta en `/`
-2. **Configurar API key**: Ve a "Ajustes" y guarda tu API key de Gemini
-3. **Crear proyecto**: Sube un PDF y verifica que procesa correctamente
-4. **Aislamiento**: Intenta acceder a un proyecto de otro usuario (debe dar 404)
-
 ### Test Funcional
 
-1. Procesamiento completo de un PDF
-2. Verificar que SSE muestra progreso en tiempo real
-3. Verificar que los costos se calculan correctamente
-4. Cerrar sesión y verificar que no se puede acceder sin login
+1. **Configurar API key**: Ve a "Ajustes" y guarda tu API key de Gemini
+2. **Crear proyecto**: Sube un PDF y verifica que procesa correctamente
+3. Procesamiento completo: segmentación, explicaciones, recorrido, recursos
+4. Verificar que SSE muestra progreso en tiempo real
+5. Verificar que los costos se calculan correctamente
 
 ---
 
@@ -211,19 +201,6 @@ vercel --prod
 ---
 
 ## Solución de Problemas
-
-### "Database is locked" (SQLite)
-
-Esto puede pasar con muchas requests concurrentes. Soluciones:
-1. Reducir `max_connections` en `database.py`
-2. Usar WAL mode (ya está configurado por defecto en SQLite)
-
-### "No autenticado" en frontend
-
-Verifica:
-1. Las cookies están habilitadas en el navegador
-2. El dominio del backend coincide con el CORS config
-3. `credentials: 'include'` está en las requests fetch
 
 ### "Failed to fetch"
 
