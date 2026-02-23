@@ -1743,9 +1743,9 @@ function initObsidianExport() {
     const files = [];
     const baseMeta = `---\nAutor: ${autor}\nObra: ${obra}\nSecciones: ${partName}\nTema: Análisis\n---\n\n`;
 
-    if (tabs.includes('explicacion') && partData.explicacion) {
+    if (tabs.includes('explicacion') && partData.explainer) {
       files.push({
-        markdown: baseMeta + formatExplicacionMd(partData.explicacion),
+        markdown: baseMeta + formatExplicacionMd(partData.explainer),
         filename: `${autor} - ${obra} - ${partName} - Explicacion.md`.replace(/[/\\?%*:|"<>]/g, '-')
       });
     }
@@ -1755,9 +1755,9 @@ function initObsidianExport() {
         filename: `${autor} - ${obra} - ${partName} - Recorrido.md`.replace(/[/\\?%*:|"<>]/g, '-')
       });
     }
-    if (tabs.includes('recursos') && partData.recursos) {
+    if (tabs.includes('recursos') && partData.resources) {
       files.push({
-        markdown: baseMeta + formatRecursosMd(partData.recursos),
+        markdown: baseMeta + formatRecursosMd(partData.resources),
         filename: `${autor} - ${obra} - ${partName} - Recursos.md`.replace(/[/\\?%*:|"<>]/g, '-')
       });
     }
