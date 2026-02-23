@@ -1741,24 +1741,23 @@ function initObsidianExport() {
     const tabs = scope === 'current' ? [state.activeTab] : ['explicacion', 'recorrido', 'recursos'];
 
     const files = [];
-    const baseMeta = `---\nAutor: ${autor}\nObra: ${obra}\nSecciones: ${partName}\nTema: Análisis\n---\n\n`;
 
     if (tabs.includes('explicacion') && partData.explainer) {
       files.push({
-        markdown: baseMeta + formatExplicacionMd(partData.explainer),
-        filename: `${autor} - ${obra} - ${partName} - Explicacion.md`.replace(/[/\\?%*:|"<>]/g, '-')
+        markdown: formatExplicacionMd(partData.explainer, autor, obra, partName),
+        filename: `explicacion.md`
       });
     }
     if (tabs.includes('recorrido') && partData.recorrido) {
       files.push({
-        markdown: baseMeta + formatRecorridoMd(partData.recorrido),
-        filename: `${autor} - ${obra} - ${partName} - Recorrido.md`.replace(/[/\\?%*:|"<>]/g, '-')
+        markdown: formatRecorridoMd(partData.recorrido, autor, obra, partName),
+        filename: `recorrido-anotado.md`
       });
     }
     if (tabs.includes('recursos') && partData.resources) {
       files.push({
-        markdown: baseMeta + formatRecursosMd(partData.resources),
-        filename: `${autor} - ${obra} - ${partName} - Recursos.md`.replace(/[/\\?%*:|"<>]/g, '-')
+        markdown: formatRecursosMd(partData.resources, autor, obra, partName),
+        filename: `recursos.md`
       });
     }
 
@@ -1815,7 +1814,7 @@ function initObsidianExport() {
       }
 
       // Strategy 2: Mobile & Safari - Web Share API
-      const fileObjects = files.map(f => new File([f.markdown], f.filename, { type: 'text/markdown' }));
+      const fileObjects = files.map(f => new File([f.markdown], f.filename, { type: 'text/plain' }));
       if (navigator.canShare && navigator.canShare({ files: fileObjects })) {
         try {
           await navigator.share({
@@ -1844,9 +1843,12 @@ function initObsidianExport() {
           a.download = file.filename;
           document.body.appendChild(a);
           a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, index * 300);
+          // Leave it in the DOM longer and delay revocation for mobile browsers
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 10000);
+        }, index * 1000); // More spacing between downloads
       });
 
       toast(`Descargando ${files.length} archivo(s) localmente`, 'success');
@@ -1858,12 +1860,14 @@ function initObsidianExport() {
   });
 }
 
-function formatExplicacionMd(data) {
-  let md = `# Explicación Exhaustiva\n\n`;
+function formatExplicacionMd(data, autor, obra, partName) {
+  let md = ``;
 
   if (data.introduccion) {
-    md += `> [!summary] Introducción\n> ${data.introduccion.replace(/\n/g, '\n> ')}\n\n`;
+    md += `> [!summary] Introducción\n> ${data.introduccion.replace(/\n/g, '\n> ')}\n\n---\n\n`;
   }
+
+  md += `# DESARROLLO TEMÁTICO DETALLADO\n\n`;
 
   if (data.desarrollo && data.desarrollo.length > 0) {
     data.desarrollo.forEach((sec, i) => {
@@ -1877,91 +1881,111 @@ function formatExplicacionMd(data) {
           md += `${subsec.explicacion_detallada}\n\n`;
         });
       }
+      md += `---\n\n`;
     });
   }
 
   if (data.conclusion) {
-    md += `## Conclusión\n\n${data.conclusion}\n\n`;
+    md += `> [!summary] Conclusión\n> ${data.conclusion.replace(/\n/g, '\n> ')}\n\n`;
   }
 
   if (data.conexiones_contextuales && data.conexiones_contextuales.length > 0) {
-    md += `## Conexiones Contextuales\n\n`;
+    md += `\n---\n\n## Conexiones Contextuales\n\n`;
     data.conexiones_contextuales.forEach(cx => {
       md += `### ${cx.seccion_temario_relacionada}\n\n${cx.descripcion_conexion}\n\n`;
     });
   }
 
-  return md;
+  return md.trim() + '\n';
 }
 
-function formatRecorridoMd(data) {
-  let md = `# Recorrido Anotado\n\n`;
+function formatRecorridoMd(data, autor, obra, partName) {
+  let md = `# ${autor} — Recorrido Anotado (${partName})\n\n`;
+
+  md += `> [!summary] Introducción orientadora\n> Recorrido analítico correspondiente a la sección **${partName}** de la obra **${obra}** por **${autor}**.\n\n---\n\n`;
+
+  md += `## Recorrido Anotado\n\n`;
 
   if (data.recorrido_anotado && data.recorrido_anotado.length > 0) {
     data.recorrido_anotado.forEach(entry => {
-      md += `### ${entry.ubicacion}\n\n`;
-
-      if (entry.cita_textual) {
-        md += `> [!quote] Cita Original\n> ${entry.cita_textual.replace(/\n/g, '\n> ')}\n\n`;
+      if (entry.cita_textual && entry.cita_textual.trim().length > 0) {
+        md += `> [!quote] ${autor}, *${obra}*, ${entry.ubicacion}\n> «${entry.cita_textual.replace(/\n/g, '\n> ')}»\n\n`;
+      } else {
+        md += `> [!quote] ${autor}, *${obra}*, ${entry.ubicacion}\n> *(Contenido no citado textualmente)*\n\n`;
       }
       if (entry.traduccion) {
-        md += `> [!cite]- Traducción\n> ${entry.traduccion.replace(/\n/g, '\n> ')}\n\n`;
+        md += `> [!cite]- **Traducción**\n> «${entry.traduccion.replace(/\n/g, '\n> ')}»\n\n`;
       }
       if (entry.apuntes_traductologicos) {
-        md += `**Apunte traductológico:** *${entry.apuntes_traductologicos}*\n\n`;
+        md += `> *Apunte traductológico:* ${entry.apuntes_traductologicos}\n\n`;
       }
       if (entry.anotacion) {
-        md += `> [!info]+ Anotación\n> ${entry.anotacion.replace(/\n/g, '\n> ')}\n\n`;
+        md += `> [!info]+ **Anotación**\n> ${entry.anotacion.replace(/\n/g, '\n> ')}\n\n`;
       }
       md += `---\n\n`;
     });
   }
 
   if (data.sintesis_de_cobertura) {
-    md += `## Síntesis de cobertura\n\n`;
+    md += `## Síntesis de Cobertura\n\n`;
+    md += `> [!summary] Alcance del recorrido\n`;
     const s = data.sintesis_de_cobertura;
-    if (s.secciones_procesadas) md += `- **Secciones procesadas:** ${s.secciones_procesadas}\n`;
-    if (s.alcance) md += `- **Alcance:** ${s.alcance}\n`;
-    if (s.contenido_excluido) md += `- **Contenido excluido:** ${s.contenido_excluido}\n`;
-    if (s.idioma_original) md += `- **Idioma original:** ${s.idioma_original}\n`;
-    if (s.observaciones_globales) md += `- **Observaciones:** ${s.observaciones_globales}\n`;
-    md += `\n`;
+    if (s.secciones_procesadas) md += `> **Secciones procesadas:** ${s.secciones_procesadas}\n`;
+    if (s.alcance) md += `> **Alcance:** ${s.alcance}\n`;
+    if (s.contenido_excluido) md += `> **Contenido excluido:** ${s.contenido_excluido}\n`;
+    if (s.idioma_original) md += `> **Idioma original:** ${s.idioma_original}\n>\n`;
+
+    if (s.observaciones_globales) {
+      md += `> [!abstract] Observaciones globales\n> ${s.observaciones_globales.replace(/\n/g, '\n> ')}\n\n`;
+    }
   }
 
-  return md;
+  return md.trim() + '\n';
 }
 
-function formatRecursosMd(data) {
-  let md = `# ${data.titulo_mapa || 'Mapa de Recursos'}\n\n`;
+function formatRecursosMd(data, autor, obra, partName) {
+  let md = `# MAPA DE RECURSOS: ${data.titulo_mapa || partName}\n\n`;
+  md += `**Autor:** ${autor}  \n**Obra:** *${obra}*\n\n---\n\n`;
 
   if (data.vision_general) {
-    md += `> [!summary] Visión General\n> ${data.vision_general.replace(/\n/g, '\n> ')}\n\n`;
+    md += `${data.vision_general}\n\n---\n\n`;
   }
 
   if (data.ejes_tematicos && data.ejes_tematicos.length > 0) {
-    data.ejes_tematicos.forEach(eje => {
-      md += `## ${eje.nombre_eje}\n\n`;
+    data.ejes_tematicos.forEach((eje, i) => {
+      md += `## ${i + 1}. ${eje.nombre_eje}\n\n`;
+
       if (eje.recursos && eje.recursos.length > 0) {
         eje.recursos.forEach(r => {
-          const icon = formatIconForResource(r.formato);
-          md += `> [!tip]+ ${icon} ${r.titulo}\n`;
-          md += `> **Autor/Creador:** ${r.autor_creador}\n`;
-          md += `> **Tipo y Datos:** ${r.tipo_y_datos || 'N/A'}\n`;
-          md += `> **Nivel y Accesibilidad:** ${r.nivel_y_accesibilidad || 'N/A'}\n`;
-          if (r.idioma) md += `> **Idioma:** ${r.idioma}\n`;
-          if (r.conexion_con_texto) md += `> \n> **Conexión con el texto:**\n> ${r.conexion_con_texto.replace(/\n/g, '\n> ')}\n`;
-          if (r.nota) md += `> \n> ⚠️ **Nota:** ${r.nota.replace(/\n/g, '\n> ')}\n`;
-          md += `\n`;
+          let tipoIcon = r.formato === 'documental' ? '🎬' : r.formato.includes('video') ? '🎥' : r.formato.includes('podcast') ? '🎧' : '📚';
+          md += `> [!tip]+ ${tipoIcon} ${r.titulo}\n`;
+          md += `> **Autor/Creador:** ${r.autor_creador}  \n`;
+          if (r.tipo_y_datos) md += `> **Tipo:** ${r.tipo_y_datos}  \n`;
+          if (r.idioma) md += `> **Idioma:** ${r.idioma}  \n`;
+          md += `> \n`;
+          if (r.conexion_con_texto) {
+            md += `> **Conexión con el texto:**  \n> ${r.conexion_con_texto.replace(/\n/g, '\n> ')}\n> \n`;
+          }
+          if (r.nivel_y_accesibilidad) {
+            md += `> **Nivel y accesibilidad:**  \n> ${r.nivel_y_accesibilidad.replace(/\n/g, '\n> ')}\n`;
+          }
+          if (r.nota) {
+            md += `> \n> **Nota:** ${r.nota.replace(/\n/g, '\n> ')}\n`;
+          }
+          md += `\n---\n\n`;
         });
       }
     });
   }
 
   if (data.nota_de_integridad) {
-    md += `> [!warning] Nota de integridad\n> ${data.nota_de_integridad.replace(/\n/g, '\n> ')}\n\n`;
+    md += `> [!abstract] Nota de integridad\n> ${data.nota_de_integridad.replace(/\n/g, '\n> ')}\n\n---\n\n`;
   }
 
-  return md;
+  let d = new Date();
+  md += `**Fecha de creación:** ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}\n`;
+
+  return md.trim() + '\n';
 }
 
 // ── Navigation buttons ─────────────────────────────────────
