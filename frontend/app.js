@@ -575,6 +575,25 @@ function updateApiKeyUI() {
 
 // ── LANDING VIEW ───────────────────────────────────────────
 let selectedFile = null;
+let currentSourceType = 'pdf'; // 'pdf' or 'youtube'
+
+function extractYouTubeVideoId(url) {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /^([a-zA-Z0-9_-]{11})$/
+  ];
+
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+function isValidYouTubeUrl(url) {
+  if (!url || url.trim().length === 0) return false;
+  return extractYouTubeVideoId(url) !== null;
+}
 
 function initLanding() {
   updateApiKeyUI();
@@ -584,12 +603,55 @@ function initLanding() {
   const btnUpload = $('btn-upload');
   const nameInput = $('project-name');
   const descInput = $('project-description');
+  const youtubeUrlInput = $('youtube-url');
 
-  function checkReady() {
-    const ready = selectedFile && nameInput.value.trim() && descInput.value.trim();
-    btnUpload.disabled = !ready;
+  // Source tabs handling
+  const tabPdf = $('tab-pdf');
+  const tabYoutube = $('tab-youtube');
+  const panelPdf = $('panel-pdf');
+  const panelYoutube = $('panel-youtube');
+
+  function switchSourceType(type) {
+    currentSourceType = type;
+
+    // Update tab styles
+    tabPdf.classList.toggle('active', type === 'pdf');
+    tabYoutube.classList.toggle('active', type === 'youtube');
+
+    // Show/hide panels
+    if (type === 'pdf') {
+      show(panelPdf);
+      hide(panelYoutube);
+    } else {
+      hide(panelPdf);
+      show(panelYoutube);
+    }
+
+    // Clear errors
+    $('upload-error').textContent = '';
+    $('youtube-url-error').textContent = '';
+    hide($('youtube-url-error'));
+
+    validateForm();
   }
 
+  tabPdf.addEventListener('click', () => switchSourceType('pdf'));
+  tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
+
+  function checkReady() {
+    const hasNameAndDesc = nameInput.value.trim() && descInput.value.trim();
+
+    if (currentSourceType === 'pdf') {
+      const ready = selectedFile && hasNameAndDesc;
+      btnUpload.disabled = !ready;
+    } else {
+      const url = youtubeUrlInput.value.trim();
+      const ready = isValidYouTubeUrl(url) && hasNameAndDesc;
+      btnUpload.disabled = !ready;
+    }
+  }
+
+  // PDF upload handling
   zone.addEventListener('click', () => fileInput.click());
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -608,6 +670,21 @@ function initLanding() {
   $('btn-remove-file').addEventListener('click', (e) => {
     e.stopPropagation();
     clearFile();
+  });
+
+  // YouTube URL handling
+  youtubeUrlInput.addEventListener('input', () => {
+    const url = youtubeUrlInput.value.trim();
+    const urlError = $('youtube-url-error');
+
+    if (url && !isValidYouTubeUrl(url)) {
+      urlError.textContent = 'URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID';
+      show(urlError);
+    } else {
+      urlError.textContent = '';
+      hide(urlError);
+    }
+    checkReady();
   });
 
   nameInput.addEventListener('input', checkReady);
@@ -637,8 +714,17 @@ function clearFile() {
 function validateForm() {
   const nameInput = $('project-name');
   const descInput = $('project-description');
-  const ready = selectedFile && nameInput.value.trim() && descInput.value.trim();
-  $('btn-upload').disabled = !ready;
+  const youtubeUrlInput = $('youtube-url');
+  const hasNameAndDesc = nameInput.value.trim() && descInput.value.trim();
+
+  if (currentSourceType === 'pdf') {
+    const ready = selectedFile && hasNameAndDesc;
+    $('btn-upload').disabled = !ready;
+  } else {
+    const url = youtubeUrlInput.value.trim();
+    const ready = isValidYouTubeUrl(url) && hasNameAndDesc;
+    $('btn-upload').disabled = !ready;
+  }
 }
 
 async function handleUpload() {
@@ -646,11 +732,6 @@ async function handleUpload() {
   const description = $('project-description').value.trim();
   const errEl = $('upload-error');
   errEl.textContent = '';
-
-  if (!selectedFile || !name || !description) {
-    errEl.textContent = 'Completa todos los campos y selecciona un PDF.';
-    return;
-  }
 
   // Verificar que tenga API key
   if (!state.hasApiKey) {
@@ -661,13 +742,30 @@ async function handleUpload() {
 
   const btn = $('btn-upload');
   btn.disabled = true;
-  btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
 
   try {
     const fd = new FormData();
     fd.append('name', name);
     fd.append('description', description);
-    fd.append('file', selectedFile);
+
+    if (currentSourceType === 'pdf') {
+      if (!selectedFile) {
+        errEl.textContent = 'Selecciona un archivo PDF.';
+        btn.disabled = false;
+        return;
+      }
+      btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
+      fd.append('file', selectedFile);
+    } else {
+      const youtubeUrl = $('youtube-url').value.trim();
+      if (!isValidYouTubeUrl(youtubeUrl)) {
+        errEl.textContent = 'URL de YouTube inválida.';
+        btn.disabled = false;
+        return;
+      }
+      btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
+      fd.append('youtube_url', youtubeUrl);
+    }
 
     const project = await api('/api/projects', { method: 'POST', body: fd });
     const mergedAfterCreate = mergeProjects([project], loadLocalBackup().projects);
@@ -678,6 +776,7 @@ async function handleUpload() {
     clearFile();
     $('project-name').value = '';
     $('project-description').value = '';
+    $('youtube-url').value = '';
 
     // Start processing
     await api(`/api/projects/${project.id}/process`, { method: 'POST' });

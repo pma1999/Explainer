@@ -116,26 +116,51 @@
       </div>
 
       <div class="upload-card" id="upload-card">
-        <div class="upload-zone" id="upload-zone">
-          <div class="upload-icon">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5"
-                stroke-linecap="round" stroke-linejoin="round" />
-              <path d="M8 36V40H40V36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-            </svg>
-          </div>
-          <p class="upload-label">Arrastra tu PDF aquí</p>
-          <p class="upload-sub">o haz clic para seleccionar</p>
-          <input type="file" id="file-input" accept=".pdf" hidden />
+        <!-- Source Type Tabs -->
+        <div class="source-tabs" id="source-tabs">
+          <button type="button" class="source-tab active" data-source="pdf" id="tab-pdf">
+            <span class="tab-icon">📄</span> Subir PDF
+          </button>
+          <button type="button" class="source-tab" data-source="youtube" id="tab-youtube">
+            <span class="tab-icon">📺</span> Video de YouTube
+          </button>
         </div>
 
-        <div class="upload-file-preview hidden" id="file-preview">
-          <div class="file-icon">📄</div>
-          <div class="file-info">
-            <span class="file-name" id="file-name-display"></span>
-            <span class="file-size" id="file-size-display"></span>
+        <!-- PDF Upload Section -->
+        <div class="source-panel" id="panel-pdf">
+          <div class="upload-zone" id="upload-zone">
+            <div class="upload-icon">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5"
+                  stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M8 36V40H40V36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+              </svg>
+            </div>
+            <p class="upload-label">Arrastra tu PDF aquí</p>
+            <p class="upload-sub">o haz clic para seleccionar</p>
+            <input type="file" id="file-input" accept=".pdf" hidden />
           </div>
-          <button class="file-remove" id="btn-remove-file">✕</button>
+
+          <div class="upload-file-preview hidden" id="file-preview">
+            <div class="file-icon">📄</div>
+            <div class="file-info">
+              <span class="file-name" id="file-name-display"></span>
+              <span class="file-size" id="file-size-display"></span>
+            </div>
+            <button class="file-remove" id="btn-remove-file">✕</button>
+          </div>
+        </div>
+
+        <!-- YouTube URL Section -->
+        <div class="source-panel hidden" id="panel-youtube">
+          <div class="youtube-input-section">
+            <div class="form-group">
+              <label for="youtube-url" class="form-label">URL del video de YouTube</label>
+              <input type="url" id="youtube-url" class="form-input" placeholder="https://www.youtube.com/watch?v=..." />
+              <p class="input-hint">Pega el enlace completo del video. Debe ser público.</p>
+              <p class="input-error hidden" id="youtube-url-error"></p>
+            </div>
+          </div>
         </div>
 
         <div class="form-fields">

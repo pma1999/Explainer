@@ -19,6 +19,7 @@ class ProjectSummary(BaseModel):
     created_at: str
     status: str
     pdf_filename: str
+    source_type: str = 'pdf'
     num_partes: int = 0
     total_cost: float = 0.0
 
@@ -30,6 +31,8 @@ class Project(BaseModel):
     created_at: str
     status: str
     pdf_filename: str
+    source_type: str = 'pdf'
+    source_url: Optional[str] = None
     file_uri: Optional[str] = None
     segmentation: Optional[dict[str, Any]] = None
     partes_contenido: dict[str, Any] = {}
