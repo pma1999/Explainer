@@ -37,6 +37,8 @@ def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
         "name": row["name"],
         "description": row["description"],
         "pdf_filename": row["pdf_filename"],
+        "source_type": row.get("source_type", "pdf"),
+        "source_url": row.get("source_url"),
         "file_uri": row.get("file_uri"),
         "status": row["status"],
         "segmentation": row.get("segmentation"),
@@ -53,9 +55,21 @@ def create_project(
     name: str,
     description: str,
     pdf_filename: str,
-    pdf_content: bytes,
+    pdf_content: bytes | None = None,
+    source_type: str = "pdf",
+    source_url: str | None = None,
 ) -> dict[str, Any]:
-    """Insert project and upload PDF to Storage. Returns project dict."""
+    """Insert project and optionally upload PDF to Storage. Returns project dict.
+
+    Args:
+        user_id: UUID of the user
+        name: Project name
+        description: Project description
+        pdf_filename: Filename (for PDFs) or display name (for YouTube)
+        pdf_content: PDF file bytes (only for source_type='pdf')
+        source_type: 'pdf' or 'youtube'
+        source_url: YouTube URL (only for source_type='youtube')
+    """
     client = _client()
     project_id = str(uuid.uuid4())
     now = _now_iso()
@@ -65,6 +79,8 @@ def create_project(
         "name": name,
         "description": description,
         "pdf_filename": pdf_filename,
+        "source_type": source_type,
+        "source_url": source_url,
         "file_uri": None,
         "status": "pending",
         "segmentation": None,
@@ -76,8 +92,10 @@ def create_project(
     }
     client.table("projects").insert(row).execute()
 
-    storage_path = f"{user_id}/{project_id}/{pdf_filename}"
-    client.storage.from_(BUCKET_ID).upload(path=storage_path, file=pdf_content, file_options={"content-type": "application/pdf", "upsert": "false"})
+    # Only upload to storage for PDF source type
+    if source_type == "pdf" and pdf_content:
+        storage_path = f"{user_id}/{project_id}/{pdf_filename}"
+        client.storage.from_(BUCKET_ID).upload(path=storage_path, file=pdf_content, file_options={"content-type": "application/pdf", "upsert": "false"})
 
     return _row_to_project(row)
 
@@ -103,7 +121,7 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     project = get_project(project_id, user_id)
     if not project:
         return None
-    allowed = {"name", "description", "pdf_filename", "file_uri", "status", "segmentation", "partes_contenido", "usage", "error_message"}
+    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "error_message"}
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
     client = _client()
@@ -112,15 +130,19 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
 
 
 def delete_project(project_id: str, user_id: str) -> bool:
-    """Delete project row and its PDF from Storage. Returns True if deleted."""
+    """Delete project row and its PDF from Storage (if PDF type). Returns True if deleted."""
     project = get_project(project_id, user_id)
     if not project:
         return False
-    storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"
-    try:
-        _client().storage.from_(BUCKET_ID).remove([storage_path])
-    except Exception:
-        pass
+
+    # Only delete from storage for PDF projects
+    if project.get("source_type") == "pdf":
+        storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"
+        try:
+            _client().storage.from_(BUCKET_ID).remove([storage_path])
+        except Exception:
+            pass
+
     _client().table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
     return True
 
@@ -159,6 +181,8 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
             "name": project["name"],
             "description": project["description"],
             "pdf_filename": project["pdf_filename"],
+            "source_type": project.get("source_type", "pdf"),
+            "source_url": project.get("source_url"),
             "file_uri": project.get("file_uri"),
             "status": project.get("status", "completed"),
             "segmentation": project.get("segmentation"),
@@ -177,10 +201,18 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
 
 
 def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
-    """Download project PDF from Storage to a temp file. Returns temp file path or None. Caller must unlink."""
+    """Download project PDF from Storage to a temp file. Returns temp file path or None. Caller must unlink.
+
+    Returns None for YouTube projects (no PDF to download).
+    """
     project = get_project(project_id, user_id)
     if not project:
         return None
+
+    # YouTube projects don't have a PDF to download
+    if project.get("source_type") == "youtube":
+        return None
+
     storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"
     try:
         data = _client().storage.from_(BUCKET_ID).download(storage_path)

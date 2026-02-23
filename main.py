@@ -89,23 +89,76 @@ async def api_api_key_status(user_id: Annotated[str, Depends(get_current_user_id
     return get_user_api_key_status(user_id)
 
 
+def _extract_youtube_video_id(url: str) -> str | None:
+    """Extract YouTube video ID from various URL formats."""
+    import re
+
+    patterns = [
+        r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
+        r'^([a-zA-Z0-9_-]{11})$',  # Just the video ID
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _is_valid_youtube_url(url: str) -> bool:
+    """Check if URL is a valid YouTube video URL."""
+    return _extract_youtube_video_id(url) is not None
+
+
 @app.post("/api/projects")
 @project_create_rate_limit
 async def api_create_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
     name: str = Form(...),
     description: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    youtube_url: str | None = Form(None),
 ):
-    pdf_filename = file.filename or "documento.pdf"
-    pdf_content = await file.read()
-    project = supabase_create_project(
-        user_id=user_id,
-        name=name,
-        description=description,
-        pdf_filename=pdf_filename,
-        pdf_content=pdf_content,
-    )
+    """Create a project from either a PDF file or a YouTube URL."""
+
+    # Validate that exactly one source is provided
+    if file and youtube_url:
+        raise HTTPException(status_code=400, detail="Proporciona solo un archivo PDF o una URL de YouTube, no ambos")
+
+    if not file and not youtube_url:
+        raise HTTPException(status_code=400, detail="Debes proporcionar un archivo PDF o una URL de YouTube")
+
+    if file:
+        # PDF source
+        pdf_filename = file.filename or "documento.pdf"
+        pdf_content = await file.read()
+        project = supabase_create_project(
+            user_id=user_id,
+            name=name,
+            description=description,
+            pdf_filename=pdf_filename,
+            pdf_content=pdf_content,
+            source_type="pdf",
+            source_url=None,
+        )
+    else:
+        # YouTube source
+        if not _is_valid_youtube_url(youtube_url):
+            raise HTTPException(status_code=400, detail="URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID")
+
+        video_id = _extract_youtube_video_id(youtube_url)
+        pdf_filename = f"YouTube: {video_id}"
+
+        project = supabase_create_project(
+            user_id=user_id,
+            name=name,
+            description=description,
+            pdf_filename=pdf_filename,
+            pdf_content=None,
+            source_type="youtube",
+            source_url=youtube_url,
+        )
+
     return project
 
 
@@ -200,20 +253,38 @@ async def _process_project(project_id: str, user_id: str) -> None:
             cumulative_usage["total_cost"] += calculate_cost(model_name, usage_meta)
             update_project(project_id, user_id, {"usage": cumulative_usage})
 
-        await send_event(project_id, {"type": "uploading"})
-        update_project(project_id, user_id, {"status": "uploading"})
+        # Determine source type and get file_uri
+        source_type = project.get("source_type", "pdf")
+        file_uri = None
 
-        pdf_temp_path = download_pdf_to_temp(project_id, user_id)
-        if not pdf_temp_path:
-            await send_event(project_id, {"type": "error", "message": "No se pudo descargar el PDF."})
-            update_project(project_id, user_id, {"status": "error", "error_message": "PDF no encontrado en almacenamiento"})
-            return
+        if source_type == "youtube":
+            # For YouTube, use the source_url directly as file_uri
+            file_uri = project.get("source_url")
+            if not file_uri:
+                await send_event(project_id, {"type": "error", "message": "URL de YouTube no encontrada en el proyecto"})
+                update_project(project_id, user_id, {"status": "error", "error_message": "URL de YouTube no configurada"})
+                return
 
-        uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
-        file_uri = uploaded_file.uri
+            # Skip "uploading" phase for YouTube - just update status to segmenting
+            update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
+            await send_event(project_id, {"type": "segmenting"})
 
-        update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
-        await send_event(project_id, {"type": "segmenting"})
+        else:
+            # PDF source type
+            await send_event(project_id, {"type": "uploading"})
+            update_project(project_id, user_id, {"status": "uploading"})
+
+            pdf_temp_path = download_pdf_to_temp(project_id, user_id)
+            if not pdf_temp_path:
+                await send_event(project_id, {"type": "error", "message": "No se pudo descargar el PDF."})
+                update_project(project_id, user_id, {"status": "error", "error_message": "PDF no encontrado en almacenamiento"})
+                return
+
+            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
+            file_uri = uploaded_file.uri
+
+            update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
+            await send_event(project_id, {"type": "segmenting"})
 
         segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"])
         _update_usage(usage_meta)
