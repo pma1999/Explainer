@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Explainer — Estudio con IA</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
+
 <body>
 
   <!-- ===== AUTH VIEW (login / register) ===== -->
@@ -32,11 +36,13 @@
       <form id="form-login" class="auth-form">
         <div class="form-group">
           <label for="login-email" class="form-label">Email</label>
-          <input type="email" id="login-email" class="form-input" placeholder="tu@email.com" required autocomplete="email" />
+          <input type="email" id="login-email" class="form-input" placeholder="tu@email.com" required
+            autocomplete="email" />
         </div>
         <div class="form-group">
           <label for="login-password" class="form-label">Contraseña</label>
-          <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password" />
+          <input type="password" id="login-password" class="form-input" placeholder="••••••••" required
+            autocomplete="current-password" />
         </div>
         <p class="form-error" id="auth-login-error"></p>
         <button type="submit" class="btn-primary btn-block" id="btn-login">
@@ -47,15 +53,18 @@
       <form id="form-register" class="auth-form hidden">
         <div class="form-group">
           <label for="register-email" class="form-label">Email</label>
-          <input type="email" id="register-email" class="form-input" placeholder="tu@email.com" required autocomplete="email" />
+          <input type="email" id="register-email" class="form-input" placeholder="tu@email.com" required
+            autocomplete="email" />
         </div>
         <div class="form-group">
           <label for="register-password" class="form-label">Contraseña</label>
-          <input type="password" id="register-password" class="form-input" placeholder="Mín. 6 caracteres" required minlength="6" autocomplete="new-password" />
+          <input type="password" id="register-password" class="form-input" placeholder="Mín. 6 caracteres" required
+            minlength="6" autocomplete="new-password" />
         </div>
         <div class="form-group">
           <label for="register-password-confirm" class="form-label">Repetir contraseña</label>
-          <input type="password" id="register-password-confirm" class="form-input" placeholder="••••••••" required minlength="6" autocomplete="new-password" />
+          <input type="password" id="register-password-confirm" class="form-input" placeholder="••••••••" required
+            minlength="6" autocomplete="new-password" />
         </div>
         <p class="form-error" id="auth-register-error"></p>
         <button type="submit" class="btn-primary btn-block" id="btn-register">
@@ -79,19 +88,19 @@
       </div>
       <div class="header-actions">
         <button class="btn-ghost" id="btn-settings">⚙️ Ajustes</button>
-                <button class="btn-ghost" id="btn-go-projects">Mis proyectos →</button>
+        <button class="btn-ghost" id="btn-go-projects">Mis proyectos →</button>
       </div>
     </header>
     <main class="landing-main">
       <div class="landing-hero">
         <p class="hero-eyebrow">Estudio inteligente</p>
         <h1 class="hero-title">
-          Comprende cualquier<br/>
-          <em>texto académico</em><br/>
+          Comprende cualquier<br />
+          <em>texto académico</em><br />
           con profundidad total
         </h1>
         <p class="hero-subtitle">
-          Sube un PDF y nuestra IA lo segmenta, explica exhaustivamente,<br/>
+          Sube un PDF y nuestra IA lo segmenta, explica exhaustivamente,<br />
           lo recorre con anotaciones expertas y mapea recursos externos.
         </p>
       </div>
@@ -110,8 +119,9 @@
         <div class="upload-zone" id="upload-zone">
           <div class="upload-icon">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M8 36V40H40V36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M24 8L24 32M24 8L16 16M24 8L32 16" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M8 36V40H40V36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
             </svg>
           </div>
           <p class="upload-label">Arrastra tu PDF aquí</p>
@@ -131,24 +141,15 @@
         <div class="form-fields">
           <div class="form-group">
             <label for="project-name" class="form-label">Nombre del proyecto</label>
-            <input
-              type="text"
-              id="project-name"
-              class="form-input"
-              placeholder="Ej: Are Prisons Obsolete — Davis"
-            />
+            <input type="text" id="project-name" class="form-input" placeholder="Ej: Are Prisons Obsolete — Davis" />
           </div>
           <div class="form-group">
             <label for="project-description" class="form-label">
               Descripción para el Segmentador
               <span class="label-hint">¿Qué parte o capítulos del texto quieres estudiar?</span>
             </label>
-            <textarea
-              id="project-description"
-              class="form-input form-textarea"
-              rows="3"
-              placeholder="Ej: Capítulos 1, 2 y 6 del libro completo"
-            ></textarea>
+            <textarea id="project-description" class="form-input form-textarea" rows="3"
+              placeholder="Ej: Capítulos 1, 2 y 6 del libro completo"></textarea>
           </div>
         </div>
 
@@ -177,7 +178,7 @@
       </div>
       <div class="header-actions">
         <button class="btn-ghost" id="btn-settings-projects">⚙️ Ajustes</button>
-                <button class="btn-ghost" id="btn-export-projects">Exportar</button>
+        <button class="btn-ghost" id="btn-export-projects">Exportar</button>
         <label class="btn-ghost" for="import-projects-input">Importar</label>
         <input type="file" id="import-projects-input" accept="application/json,.json" hidden />
         <button class="btn-primary btn-sm" id="btn-new-project">+ Nuevo proyecto</button>
@@ -209,7 +210,7 @@
         <div class="sidebar-header">
           <button class="btn-back" id="btn-back-to-projects">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
             Proyectos
           </button>
@@ -285,7 +286,17 @@
             <div class="part-meta">
               <h2 class="part-title" id="content-part-title"></h2>
               <p class="part-description" id="content-part-description"></p>
-              <div class="part-badges" id="content-part-badges"></div>
+              <div class="part-meta-actions">
+                <div class="part-badges" id="content-part-badges"></div>
+                <button class="btn-ghost btn-sm" id="btn-open-export">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" class="btn-icon-left">
+                    <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                  </svg>
+                  Exportar a Obsidian
+                </button>
+              </div>
             </div>
             <div class="part-usage-card" id="project-usage-card">
               <div class="usage-card-header">
@@ -357,6 +368,60 @@
     </div>
   </div>
 
+  <!-- ===== OBSIDIAN EXPORT MODAL ===== -->
+  <div class="modal-overlay hidden" id="modal-export-obsidian">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Exportar a Obsidian</h3>
+        <button class="modal-close" id="btn-close-export">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="settings-description">
+          Ajusta los metadatos para la exportación. Estos aparecerán en el encabezado del archivo Markdown.
+        </p>
+
+        <form id="form-export-obsidian" class="settings-form">
+          <div class="form-group">
+            <label for="export-autor" class="form-label">Autor</label>
+            <input type="text" id="export-autor" class="form-input" placeholder="Ej: James Rachels" required />
+          </div>
+          <div class="form-group">
+            <label for="export-obra" class="form-label">Obra</label>
+            <input type="text" id="export-obra" class="form-input" placeholder="Ej: Punishment and Desert" required />
+          </div>
+
+          <div class="form-group" style="margin-top: 1.5rem;">
+            <label class="form-label">Contenido a exportar</label>
+            <div style="display: flex; gap: 1rem; margin-top: 0.5rem;">
+              <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-2);">
+                <input type="radio" name="export-scope" value="current" checked />
+                <span>Solo la pestaña activa</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-2);">
+                <input type="radio" name="export-scope" value="all" />
+                <span>Todo (Explicación + Recorrido + Recursos)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-actions" style="margin-top: 2rem;">
+            <button type="button" class="btn-ghost" id="btn-copy-obsidian">
+              <span class="btn-text">Copiar al portapapeles</span>
+            </button>
+            <button type="submit" class="btn-primary" id="btn-download-obsidian">
+              <span class="btn-text">Descargar .md</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="margin-left: 0.5rem;">
+                <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== SETTINGS MODAL ===== -->
   <div class="modal-overlay hidden" id="modal-settings">
     <div class="modal">
@@ -380,7 +445,8 @@
           <h4 class="settings-section-title">API Key de Gemini</h4>
           <p class="settings-description">
             Tu API key se almacena de forma segura y encriptada. Nunca la compartimos ni la enviamos a nadie.
-            Obtén tu API key en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+            Obtén tu API key en <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google
+              AI Studio</a>.
           </p>
 
           <div id="api-key-not-set" class="api-key-status hidden">
@@ -396,13 +462,7 @@
           <form id="form-api-key" class="settings-form">
             <div class="form-group">
               <label for="api-key-input" class="form-label">API Key</label>
-              <input
-                type="password"
-                id="api-key-input"
-                class="form-input"
-                placeholder="AIza..."
-                autocomplete="off"
-              />
+              <input type="password" id="api-key-input" class="form-input" placeholder="AIza..." autocomplete="off" />
             </div>
             <div class="form-actions">
               <button type="submit" class="btn-primary" id="btn-save-api-key">
@@ -431,4 +491,5 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="/app.js"></script>
 </body>
+
 </html>

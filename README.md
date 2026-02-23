@@ -14,12 +14,12 @@ Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta 
 ## 🏗️ Arquitectura
 
 ```
-Frontend (Vercel)          Backend (Fly.io)           Gemini API
-┌─────────────┐            ┌─────────────────┐       ┌────────────┐
-│  HTML/CSS   │  HTTPS     │  FastAPI        │       │  Google    │
-│  Vanilla JS │◄──────────►│  Persistencia   │◄─────►│  Gemini    │
-│             │   SSE      │  local (JSON)   │       │  File API  │
-└─────────────┘            └─────────────────┘       └────────────┘
+Frontend (Vercel)          Backend (Koyeb)            Supabase              Gemini API
+┌─────────────┐            ┌───────────────┐        ┌──────────────┐       ┌────────────┐
+│  HTML/CSS   │  HTTPS     │  FastAPI      │        │  PostgreSQL  │       │  Google    │
+│  Vanilla JS │◄──────────►│  BYOK Auth    │◄──────►│  Auth        │◄─────►│  Gemini    │
+│             │   SSE      │               │        │  Storage     │       │  File API  │
+└─────────────┘            └───────────────┘        └──────────────┘       └────────────┘
 ```
 
 ## 🚀 Despliegue Rápido
@@ -27,9 +27,9 @@ Frontend (Vercel)          Backend (Fly.io)           Gemini API
 ### Requisitos
 
 - Python 3.11+
-- Node.js (para Vercel CLI)
-- Cuenta en [Fly.io](https://fly.io)
-- Cuenta en [Vercel](https://vercel.com)
+- Cuenta en [Supabase](https://supabase.com) (base de datos, auth, storage)
+- Cuenta en [Koyeb](https://koyeb.com) o [Fly.io](https://fly.io) (backend)
+- Cuenta en [Vercel](https://vercel.com) (frontend)
 
 ### 1. Clonar y configurar
 
@@ -86,8 +86,7 @@ explainer/
 ├── DEPLOY.md                  # Guía de despliegue
 │
 ├── backend/
-│   ├── local_data.py         # Persistencia en JSON (proyectos, API key)
-│   ├── crypto.py             # Encriptación de API key
+│   ├── crypto.py             # Encriptación de API key (BYOK)
 │   ├── sse_manager.py        # Server-Sent Events
 │   ├── rate_limit.py         # Rate limiting
 │   ├── middleware.py         # Security headers
@@ -115,9 +114,10 @@ explainer/
 
 | Servicio | Costo |
 |----------|-------|
-| Fly.io (Hobby) | **$0/mes** |
+| Supabase (Free tier) | **$0/mes** (500MB DB, 1GB Storage) |
+| Koyeb / Fly.io (Hobby) | **$0/mes** |
 | Vercel (Hobby) | **$0/mes** |
-| Gemini API | **Paga quien use la app** |
+| Gemini API | **Paga cada usuario con su propia key** |
 
 ## 🛠️ Tecnologías
 

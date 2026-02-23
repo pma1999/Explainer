@@ -842,7 +842,7 @@ async function openProjectView(projectId) {
       renderProjectView(cachedProject);
       toast('Proyecto recuperado desde copia local. Intentando sincronizar en segundo plano…', 'success');
 
-      rehydrateProjectToServer(cachedProject).catch(() => {});
+      rehydrateProjectToServer(cachedProject).catch(() => { });
       return;
     }
 
@@ -1457,7 +1457,7 @@ function startSSE(projectId, opts = {}) {
             const fresh = await api(`/api/projects/${projectId}`);
             state.currentProject = fresh;
             Object.assign(project, { segmentation: fresh.segmentation, partes_contenido: fresh.partes_contenido || {} });
-          } catch (_) {}
+          } catch (_) { }
           renderSidebarNav(state.currentProject);
           updateProcessingOverlay('processing');
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-processing">Procesando</span>`;
@@ -1515,7 +1515,7 @@ function startSSE(projectId, opts = {}) {
               renderTab('recursos', contenido);
             }
             renderSidebarNav(state.currentProject);
-          } catch (_) {}
+          } catch (_) { }
           const agentLabel = agent === 'explainer' ? 'Explicación' : agent === 'recorrido' ? 'Recorrido' : 'Recursos';
           pushStreamEvent(agentLabel, `Parte ${payload.part_id} lista`);
           break;
@@ -1614,7 +1614,7 @@ function startSSE(projectId, opts = {}) {
           hide($('processing-overlay'));
           stopPolling();
         }
-      } catch (_) {}
+      } catch (_) { }
     }, POLL_CURRENT_IF_IDLE_MS);
   }
 
@@ -1684,6 +1684,213 @@ async function importProjectsBackup(file) {
     toast('Error importando backup: ' + err.message, 'error');
   }
 }
+// ── OBSIDIAN EXPORT ────────────────────────────────────────
+
+function initObsidianExport() {
+  const modal = $('modal-export-obsidian');
+  const btnOpen = $('btn-open-export');
+  const btnClose = $('btn-close-export');
+  const btnCopy = $('btn-copy-obsidian');
+  const form = $('form-export-obsidian');
+  const inputAutor = $('export-autor');
+  const inputObra = $('export-obra');
+
+  if (!modal || !btnOpen || !btnClose || !btnCopy || !form) return;
+
+  btnOpen.addEventListener('click', () => {
+    // Try to pre-fill autor and obra from project name if formatted like "Autor - Obra"
+    if (state.currentProject && state.currentProject.name) {
+      const parts = state.currentProject.name.split(/[-—]/);
+      if (parts.length >= 2) {
+        inputAutor.value = parts[0].trim();
+        inputObra.value = parts.slice(1).join('-').trim();
+      } else {
+        inputObra.value = state.currentProject.name;
+        inputAutor.value = '';
+      }
+    }
+    show(modal);
+  });
+
+  const closeModal = () => {
+    hide(modal);
+  };
+
+  btnClose.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  const getExportData = () => {
+    if (!state.currentProject || !state.currentPartId) {
+      toast('No hay contenido seleccionado para exportar.', 'error');
+      return null;
+    }
+
+    const partData = state.currentProject.partes_contenido?.[String(state.currentPartId)];
+    if (!partData) {
+      toast('El contenido de esta parte aún no está listo.', 'warning');
+      return null;
+    }
+
+    const autor = inputAutor.value.trim() || 'Desconocido';
+    const obra = inputObra.value.trim() || 'Desconocida';
+    const partName = state.currentProject.partes?.find(p => String(p.id) === String(state.currentPartId))?.name || `Parte ${state.currentPartId}`;
+
+    const scope = document.querySelector('input[name="export-scope"]:checked').value; // 'current' or 'all'
+    const tabs = scope === 'current' ? [state.activeTab] : ['explicacion', 'recorrido', 'recursos'];
+
+    let markdown = `---\nAutor: ${autor}\nObra: ${obra}\nSecciones: ${partName}\nTema: Análisis\n---\n\n`;
+
+    if (tabs.includes('explicacion') && partData.explicacion) {
+      markdown += formatExplicacionMd(partData.explicacion);
+    }
+    if (tabs.includes('recorrido') && partData.recorrido) {
+      markdown += formatRecorridoMd(partData.recorrido);
+    }
+    if (tabs.includes('recursos') && partData.recursos) {
+      markdown += formatRecursosMd(partData.recursos);
+    }
+
+    return { markdown, filename: `${autor} - ${obra} - ${partName}.md`.replace(/[/\\?%*:|"<>]/g, '-') };
+  };
+
+  btnCopy.addEventListener('click', () => {
+    const data = getExportData();
+    if (!data) return;
+
+    navigator.clipboard.writeText(data.markdown).then(() => {
+      toast('Copiado al portapapeles', 'success');
+      closeModal();
+    }).catch(err => {
+      toast('Error al copiar: ' + err, 'error');
+    });
+  });
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const data = getExportData();
+    if (!data) return;
+
+    const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = data.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    toast('Archivo exportado', 'success');
+    closeModal();
+  });
+}
+
+function formatExplicacionMd(data) {
+  let md = `# Explicación Exhaustiva\n\n`;
+
+  if (data.introduccion) {
+    md += `> [!summary] Introducción\n> ${data.introduccion.replace(/\n/g, '\n> ')}\n\n`;
+  }
+
+  if (data.desarrollo && data.desarrollo.length > 0) {
+    data.desarrollo.forEach((sec, i) => {
+      md += `## ${i + 1}. ${sec.titulo_seccion}\n\n`;
+      if (sec.explicacion_introductoria) {
+        md += `${sec.explicacion_introductoria}\n\n`;
+      }
+      if (sec.subsecciones && sec.subsecciones.length > 0) {
+        sec.subsecciones.forEach((subsec, j) => {
+          md += `### ${i + 1}.${j + 1}. ${subsec.titulo_subseccion}\n\n`;
+          md += `${subsec.explicacion_detallada}\n\n`;
+        });
+      }
+    });
+  }
+
+  if (data.conclusion) {
+    md += `## Conclusión\n\n${data.conclusion}\n\n`;
+  }
+
+  if (data.conexiones_contextuales && data.conexiones_contextuales.length > 0) {
+    md += `## Conexiones Contextuales\n\n`;
+    data.conexiones_contextuales.forEach(cx => {
+      md += `### ${cx.seccion_temario_relacionada}\n\n${cx.descripcion_conexion}\n\n`;
+    });
+  }
+
+  return md;
+}
+
+function formatRecorridoMd(data) {
+  let md = `# Recorrido Anotado\n\n`;
+
+  if (data.recorrido_anotado && data.recorrido_anotado.length > 0) {
+    data.recorrido_anotado.forEach(entry => {
+      md += `### ${entry.ubicacion}\n\n`;
+
+      if (entry.cita_textual) {
+        md += `> [!quote] Cita Original\n> ${entry.cita_textual.replace(/\n/g, '\n> ')}\n\n`;
+      }
+      if (entry.traduccion) {
+        md += `> [!cite]- Traducción\n> ${entry.traduccion.replace(/\n/g, '\n> ')}\n\n`;
+      }
+      if (entry.apuntes_traductologicos) {
+        md += `**Apunte traductológico:** *${entry.apuntes_traductologicos}*\n\n`;
+      }
+      if (entry.anotacion) {
+        md += `> [!info]+ Anotación\n> ${entry.anotacion.replace(/\n/g, '\n> ')}\n\n`;
+      }
+      md += `---\n\n`;
+    });
+  }
+
+  if (data.sintesis_de_cobertura) {
+    md += `## Síntesis de cobertura\n\n`;
+    const s = data.sintesis_de_cobertura;
+    if (s.secciones_procesadas) md += `- **Secciones procesadas:** ${s.secciones_procesadas}\n`;
+    if (s.alcance) md += `- **Alcance:** ${s.alcance}\n`;
+    if (s.contenido_excluido) md += `- **Contenido excluido:** ${s.contenido_excluido}\n`;
+    if (s.idioma_original) md += `- **Idioma original:** ${s.idioma_original}\n`;
+    if (s.observaciones_globales) md += `- **Observaciones:** ${s.observaciones_globales}\n`;
+    md += `\n`;
+  }
+
+  return md;
+}
+
+function formatRecursosMd(data) {
+  let md = `# ${data.titulo_mapa || 'Mapa de Recursos'}\n\n`;
+
+  if (data.vision_general) {
+    md += `> [!summary] Visión General\n> ${data.vision_general.replace(/\n/g, '\n> ')}\n\n`;
+  }
+
+  if (data.ejes_tematicos && data.ejes_tematicos.length > 0) {
+    data.ejes_tematicos.forEach(eje => {
+      md += `## ${eje.nombre_eje}\n\n`;
+      if (eje.recursos && eje.recursos.length > 0) {
+        eje.recursos.forEach(r => {
+          const icon = formatIconForResource(r.formato);
+          md += `> [!tip]+ ${icon} ${r.titulo}\n`;
+          md += `> **Autor/Creador:** ${r.autor_creador}\n`;
+          md += `> **Tipo y Datos:** ${r.tipo_y_datos || 'N/A'}\n`;
+          md += `> **Nivel y Accesibilidad:** ${r.nivel_y_accesibilidad || 'N/A'}\n`;
+          if (r.idioma) md += `> **Idioma:** ${r.idioma}\n`;
+          if (r.conexion_con_texto) md += `> \n> **Conexión con el texto:**\n> ${r.conexion_con_texto.replace(/\n/g, '\n> ')}\n`;
+          if (r.nota) md += `> \n> ⚠️ **Nota:** ${r.nota.replace(/\n/g, '\n> ')}\n`;
+          md += `\n`;
+        });
+      }
+    });
+  }
+
+  if (data.nota_de_integridad) {
+    md += `> [!warning] Nota de integridad\n> ${data.nota_de_integridad.replace(/\n/g, '\n> ')}\n\n`;
+  }
+
+  return md;
+}
+
 // ── Navigation buttons ─────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   // Tab switching
@@ -1736,5 +1943,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Init
   initSettings();
   initVisibilityHandling();
+  initObsidianExport();
   initApp();
 });

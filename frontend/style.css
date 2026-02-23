@@ -1002,16 +1002,14 @@ body {
   inset: -1px;
   border-radius: 24px;
   padding: 1px;
-  background: conic-gradient(
-    from 0deg at 50% 50%,
-    transparent 0deg,
-    rgba(245, 158, 11, 0.35) 60deg,
-    rgba(139, 92, 246, 0.35) 120deg,
-    rgba(245, 158, 11, 0.35) 180deg,
-    rgba(139, 92, 246, 0.35) 240deg,
-    rgba(245, 158, 11, 0.35) 300deg,
-    transparent 360deg
-  );
+  background: conic-gradient(from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(245, 158, 11, 0.35) 60deg,
+      rgba(139, 92, 246, 0.35) 120deg,
+      rgba(245, 158, 11, 0.35) 180deg,
+      rgba(139, 92, 246, 0.35) 240deg,
+      rgba(245, 158, 11, 0.35) 300deg,
+      transparent 360deg);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   -webkit-mask-composite: xor;
@@ -1020,7 +1018,9 @@ body {
 }
 
 @keyframes rotateGlow {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .processing-neural-core {
@@ -1058,7 +1058,9 @@ body {
 }
 
 @keyframes coreSpin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .processing-title {
@@ -1133,8 +1135,17 @@ body {
 }
 
 @keyframes signalPulse {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-  50% { transform: scale(1.2); box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  }
+
+  50% {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+  }
 }
 
 .agent-icon {
@@ -1196,8 +1207,15 @@ body {
 }
 
 @keyframes streamPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .stream-events {
@@ -1220,8 +1238,15 @@ body {
 }
 
 @keyframes eventSlide {
-  from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .stream-event:last-child {
@@ -1256,7 +1281,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .processing-steps {
@@ -1371,6 +1398,14 @@ body {
   color: var(--text-secondary);
   line-height: 1.6;
   margin-bottom: 14px;
+}
+
+.part-meta-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .part-badges {
@@ -2454,8 +2489,15 @@ body {
 }
 
 @keyframes agentPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.1);
+  }
 }
 
 .fi-stream {
@@ -2476,8 +2518,15 @@ body {
 }
 
 @keyframes fiLineIn {
-  from { opacity: 0; transform: translateX(-6px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .fi-toggle {
