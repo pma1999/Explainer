@@ -1740,27 +1740,44 @@ function initObsidianExport() {
     const scope = document.querySelector('input[name="export-scope"]:checked').value; // 'current' or 'all'
     const tabs = scope === 'current' ? [state.activeTab] : ['explicacion', 'recorrido', 'recursos'];
 
-    let markdown = `---\nAutor: ${autor}\nObra: ${obra}\nSecciones: ${partName}\nTema: Análisis\n---\n\n`;
+    const files = [];
+    const baseMeta = `---\nAutor: ${autor}\nObra: ${obra}\nSecciones: ${partName}\nTema: Análisis\n---\n\n`;
 
     if (tabs.includes('explicacion') && partData.explicacion) {
-      markdown += formatExplicacionMd(partData.explicacion);
+      files.push({
+        markdown: baseMeta + formatExplicacionMd(partData.explicacion),
+        filename: `${autor} - ${obra} - ${partName} - Explicacion.md`.replace(/[/\\?%*:|"<>]/g, '-')
+      });
     }
     if (tabs.includes('recorrido') && partData.recorrido) {
-      markdown += formatRecorridoMd(partData.recorrido);
+      files.push({
+        markdown: baseMeta + formatRecorridoMd(partData.recorrido),
+        filename: `${autor} - ${obra} - ${partName} - Recorrido.md`.replace(/[/\\?%*:|"<>]/g, '-')
+      });
     }
     if (tabs.includes('recursos') && partData.recursos) {
-      markdown += formatRecursosMd(partData.recursos);
+      files.push({
+        markdown: baseMeta + formatRecursosMd(partData.recursos),
+        filename: `${autor} - ${obra} - ${partName} - Recursos.md`.replace(/[/\\?%*:|"<>]/g, '-')
+      });
     }
 
-    return { markdown, filename: `${autor} - ${obra} - ${partName}.md`.replace(/[/\\?%*:|"<>]/g, '-') };
+    if (files.length === 0) {
+      toast('No se encontró contenido en las pestañas seleccionadas.', 'warning');
+      return null;
+    }
+
+    return files;
   };
 
   btnCopy.addEventListener('click', () => {
-    const data = getExportData();
-    if (!data) return;
+    const files = getExportData();
+    if (!files) return;
 
-    navigator.clipboard.writeText(data.markdown).then(() => {
-      toast('Copiado al portapapeles', 'success');
+    const textToCopy = files.map(f => f.markdown).join('\n\n\n======================================================\n\n\n');
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      toast(files.length > 1 ? 'Todos copiados al portapapeles' : 'Copiado al portapapeles', 'success');
       closeModal();
     }).catch(err => {
       toast('Error al copiar: ' + err, 'error');
@@ -1769,18 +1786,24 @@ function initObsidianExport() {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const data = getExportData();
-    if (!data) return;
+    const files = getExportData();
+    if (!files) return;
 
-    const blob = new Blob([data.markdown], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = data.filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    files.forEach((file, index) => {
+      setTimeout(() => {
+        const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, index * 300);
+    });
 
-    toast('Archivo exportado', 'success');
+    toast(`Exportados ${files.length} archivo(s)`, 'success');
     closeModal();
   });
 }
