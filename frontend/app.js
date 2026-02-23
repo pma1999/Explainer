@@ -1784,27 +1784,77 @@ function initObsidianExport() {
     });
   });
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const files = getExportData();
     if (!files) return;
 
-    files.forEach((file, index) => {
-      setTimeout(() => {
-        const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, index * 300);
-    });
+    try {
+      // Strategy 1: Desktop - File System Access API
+      if (window.showDirectoryPicker) {
+        try {
+          const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          for (const file of files) {
+            const fileHandle = await dirHandle.getFileHandle(file.filename, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(file.markdown);
+            await writable.close();
+          }
+          toast(`Exportados ${files.length} archivo(s) a la carpeta de Obsidian`, 'success');
+          closeModal();
+          return;
+        } catch (err) {
+          // If the user cancelled the picker explicitly, abort
+          if (err.name === 'AbortError') {
+            closeModal();
+            return;
+          }
+          console.error('File System Access API falló:', err);
+          // Otherwise, fall through safely to fallback methods
+        }
+      }
 
-    toast(`Exportados ${files.length} archivo(s)`, 'success');
-    closeModal();
+      // Strategy 2: Mobile & Safari - Web Share API
+      const fileObjects = files.map(f => new File([f.markdown], f.filename, { type: 'text/markdown' }));
+      if (navigator.canShare && navigator.canShare({ files: fileObjects })) {
+        try {
+          await navigator.share({
+            title: 'Exportar a Obsidian',
+            files: fileObjects
+          });
+          toast(`Archivos enviados a compartir`, 'success');
+          closeModal();
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') {
+            closeModal();
+            return;
+          }
+          console.error('Web Share API falló:', err);
+        }
+      }
+
+      // Strategy 3: Universal Fallback (Sequential download)
+      files.forEach((file, index) => {
+        setTimeout(() => {
+          const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, index * 300);
+      });
+
+      toast(`Descargando ${files.length} archivo(s) localmente`, 'success');
+      closeModal();
+
+    } catch (globalErr) {
+      toast('Error durante la exportación: ' + globalErr.message, 'error');
+    }
   });
 }
 
