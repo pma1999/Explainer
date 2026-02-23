@@ -1788,73 +1788,71 @@ function initObsidianExport() {
     const files = getExportData();
     if (!files) return;
 
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
     try {
-      // Strategy 1: Desktop - File System Access API
-      if (window.showDirectoryPicker) {
+      // Strategy 1: Native Folder Access (showDirectoryPicker)
+      // Best for Desktop. On Android, it's often sandboxed or buggy for writing.
+      if (window.showDirectoryPicker && !isMobile) {
         try {
           const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
           for (const file of files) {
             const fileHandle = await dirHandle.getFileHandle(file.filename, { create: true });
             const writable = await fileHandle.createWritable();
-            await writable.write(file.markdown);
+            const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
+            await writable.write(blob);
             await writable.close();
           }
           toast(`Exportados ${files.length} archivo(s) a la carpeta de Obsidian`, 'success');
           closeModal();
           return;
         } catch (err) {
-          // If the user cancelled the picker explicitly, abort
-          if (err.name === 'AbortError') {
-            closeModal();
-            return;
-          }
-          console.error('File System Access API falló:', err);
-          // Otherwise, fall through safely to fallback methods
+          if (err.name === 'AbortError') { closeModal(); return; }
+          console.warn('Strategy 1 (Native Folder) falló:', err);
         }
       }
 
-      // Strategy 2: Mobile & Safari - Web Share API
+      // Strategy 2: Native Mobile Share (Web Share API)
+      // Best for Mobile - hands off files directly to the Obsidian app.
       const fileObjects = files.map(f => new File([f.markdown], f.filename, { type: 'text/plain' }));
       if (navigator.canShare && navigator.canShare({ files: fileObjects })) {
         try {
           await navigator.share({
-            title: 'Exportar a Obsidian',
+            title: `Explainer: ${files.length} archivos`,
             files: fileObjects
           });
-          toast(`Archivos enviados a compartir`, 'success');
+          toast(`Enviado a Obsidian / Compartir`, 'success');
           closeModal();
           return;
         } catch (err) {
-          if (err.name === 'AbortError') {
-            closeModal();
-            return;
-          }
-          console.error('Web Share API falló:', err);
+          if (err.name === 'AbortError') { closeModal(); return; }
+          console.warn('Strategy 2 (Native Share) falló:', err);
         }
       }
 
       // Strategy 3: Universal Fallback (Sequential download)
-      files.forEach((file, index) => {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        await new Promise(resolve => setTimeout(resolve, i * 1000));
+        const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = file.filename;
+        document.body.appendChild(a);
+        a.click();
         setTimeout(() => {
-          const blob = new Blob([file.markdown], { type: 'text/markdown;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = file.filename;
-          document.body.appendChild(a);
-          a.click();
-          // Leave it in the DOM longer and delay revocation for mobile browsers
-          setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          }, 10000);
-        }, index * 1000); // More spacing between downloads
-      });
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 30000);
+      }
 
-      toast(`Descargando ${files.length} archivo(s) localmente`, 'success');
+      toast(`Descargando ${files.length} archivo(s)`, 'info');
       closeModal();
 
     } catch (globalErr) {
+      console.error('Export Error:', globalErr);
       toast('Error durante la exportación: ' + globalErr.message, 'error');
     }
   });
