@@ -169,7 +169,7 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
         if not isinstance(project, dict):
             skipped += 1
             continue
-        required = ["name", "description", "pdf_filename", "status"]
+        required = ["name", "pdf_filename", "status"]
         if any(not project.get(k) for k in required):
             skipped += 1
             continue

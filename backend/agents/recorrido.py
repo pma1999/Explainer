@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from backend.pricing import get_model_name
 from backend.gemini_client import gemini_retry, generate_content_with_retry
+from backend.logging_config import get_logger
 
 from google import genai
 from google.genai import types
+
+logger = get_logger("backend.agents.recorrido")
 
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
@@ -340,6 +344,16 @@ RESPONSE_SCHEMA = genai.types.Schema(
 @gemini_retry(max_retries=5)
 def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dict[str, Any], Any]:
     """Run the Recorrido Anotado agent and return (structured_result, usage_metadata)."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente recorrido",
+        extra={
+            "file_uri_prefix": file_uri[:60] + "..." if len(file_uri) > 60 else file_uri,
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+        }
+    )
+
     client = genai.Client(api_key=api_key)
     model = get_model_name()
 
@@ -360,12 +374,51 @@ def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dic
         system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
     )
 
+    logger.debug("Enviando request a Gemini para generar recorrido anotado")
+
     response = generate_content_with_retry(
         client=client,
         model=model,
         contents=contents,
         config=config,
         max_retries=5,
+        operation_context={"agent": "recorrido"},
     )
 
-    return json.loads(response.text), response.usage_metadata
+    # Procesar respuesta
+    parse_start = time.time()
+    try:
+        result = json.loads(response.text)
+        parse_duration = (time.time() - parse_start) * 1000
+        total_duration = (time.time() - start_time) * 1000
+
+        # Extraer información relevante
+        num_entradas = len(result.get("recorrido_anotado", []))
+        sintesis = result.get("sintesis_de_cobertura", {})
+
+        logger.info(
+            f"Recorrido completado: {num_entradas} entradas en {int(total_duration)}ms",
+            extra={
+                "num_entradas": num_entradas,
+                "secciones_procesadas": sintesis.get("secciones_procesadas", "unknown"),
+                "idioma_original": sintesis.get("idioma_original", "unknown"),
+                "parse_duration_ms": int(parse_duration),
+                "total_duration_ms": int(total_duration),
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0) if response.usage_metadata else 0,
+                "candidates_tokens": getattr(response.usage_metadata, "candidates_token_count", 0) if response.usage_metadata else 0,
+                "thoughts_tokens": getattr(response.usage_metadata, "thoughts_token_count", 0) if response.usage_metadata else 0,
+                "total_tokens": getattr(response.usage_metadata, "total_token_count", 0) if response.usage_metadata else 0,
+            }
+        )
+
+        return result, response.usage_metadata
+
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"Error al parsear JSON de respuesta: {str(e)}",
+            extra={
+                "error_type": "json_decode_error",
+                "response_preview": response.text[:200] if response.text else "empty",
+            }
+        )
+        raise
