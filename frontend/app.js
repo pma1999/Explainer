@@ -713,16 +713,15 @@ function clearFile() {
 
 function validateForm() {
   const nameInput = $('project-name');
-  const descInput = $('project-description');
   const youtubeUrlInput = $('youtube-url');
-  const hasNameAndDesc = nameInput.value.trim() && descInput.value.trim();
+  const hasName = nameInput.value.trim();
 
   if (currentSourceType === 'pdf') {
-    const ready = selectedFile && hasNameAndDesc;
+    const ready = selectedFile && hasName;
     $('btn-upload').disabled = !ready;
   } else {
     const url = youtubeUrlInput.value.trim();
-    const ready = isValidYouTubeUrl(url) && hasNameAndDesc;
+    const ready = isValidYouTubeUrl(url) && hasName;
     $('btn-upload').disabled = !ready;
   }
 }

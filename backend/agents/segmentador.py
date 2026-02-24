@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from backend.pricing import get_model_name
 from backend.gemini_client import gemini_retry, generate_content_with_retry
+from backend.logging_config import get_logger, LogContext
 
 from google import genai
 from google.genai import types
+
+logger = get_logger("backend.agents.segmentador")
 
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
@@ -253,18 +257,34 @@ RESPONSE_SCHEMA = genai.types.Schema(
 )
 
 
+DEFAULT_DESCRIPTION = "Procesar TODO el documento completo sin omitir ninguna sección. Segmentar el contenido completo según su estructura natural, cubriendo TODAS las partes del texto sin dejar nada fuera."
+
+
 @gemini_retry(max_retries=5)
 def run_segmentador(api_key: str, file_uri: str, description: str) -> tuple[dict[str, Any], Any]:
     """Run the Segmentador agent and return (structured_result, usage_metadata)."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente segmentador",
+        extra={
+            "file_uri_prefix": file_uri[:60] + "..." if len(file_uri) > 60 else file_uri,
+            "description_length": len(description) if description else 0,
+            "has_custom_description": bool(description and description.strip()),
+        }
+    )
+
     client = genai.Client(api_key=api_key)
     model = get_model_name()
+
+    # Usar descripción por defecto si está vacía
+    effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
 
     contents = [
         types.Content(
             role="user",
             parts=[
                 types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
-                types.Part.from_text(text=description),
+                types.Part.from_text(text=effective_description),
             ],
         ),
     ]
@@ -276,12 +296,49 @@ def run_segmentador(api_key: str, file_uri: str, description: str) -> tuple[dict
         system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
     )
 
+    logger.debug("Enviando request a Gemini para segmentación")
+
     response = generate_content_with_retry(
         client=client,
         model=model,
         contents=contents,
         config=config,
         max_retries=5,
+        operation_context={"agent": "segmentador"},
     )
 
-    return json.loads(response.text), response.usage_metadata
+    # Procesar respuesta
+    parse_start = time.time()
+    try:
+        result = json.loads(response.text)
+        parse_duration = (time.time() - parse_start) * 1000
+        total_duration = (time.time() - start_time) * 1000
+
+        # Extraer información relevante
+        num_partes = len(result.get("partes", []))
+        temas_identificados = len(result.get("temas_identificados", []))
+
+        logger.info(
+            f"Segmentación completada: {num_partes} partes, {temas_identificados} temas",
+            extra={
+                "num_partes": num_partes,
+                "temas_identificados": temas_identificados,
+                "parse_duration_ms": int(parse_duration),
+                "total_duration_ms": int(total_duration),
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0) if response.usage_metadata else 0,
+                "candidates_tokens": getattr(response.usage_metadata, "candidates_token_count", 0) if response.usage_metadata else 0,
+                "total_tokens": getattr(response.usage_metadata, "total_token_count", 0) if response.usage_metadata else 0,
+            }
+        )
+
+        return result, response.usage_metadata
+
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"Error al parsear JSON de respuesta: {str(e)}",
+            extra={
+                "error_type": "json_decode_error",
+                "response_preview": response.text[:200] if response.text else "empty",
+            }
+        )
+        raise

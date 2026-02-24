@@ -4,7 +4,7 @@ Este módulo proporciona:
 - Retry automático con backoff exponencial y jitter
 - Manejo específico de errores de Gemini API (429, 500, 503, 504)
 - Excepciones personalizadas para diferentes tipos de fallos
-- Logging detallado de intentos y errores
+- Logging detallado de intentos y errores con métricas
 - Decorator reutilizable para funciones de agentes
 """
 from __future__ import annotations
@@ -19,15 +19,10 @@ from typing import Any, Callable, TypeVar, cast
 from google import genai
 from google.genai import types
 
-# Configuración de logging
-logger = logging.getLogger("backend.gemini_retry")
-logger.setLevel(logging.INFO)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    ))
-    logger.addHandler(handler)
+from backend.logging_config import get_logger
+
+# Logger configurado
+logger = get_logger("backend.gemini_client")
 
 # Constantes configurables
 MAX_RETRIES = 5
@@ -268,43 +263,106 @@ class GeminiRetryHandler:
         Raises:
             GeminiError: Si se agotan los reintentos o el error no es retryable
         """
+        start_time = time.time()
+        logger.info(
+            f"[{operation_name}] Iniciando operación",
+            extra={"operation": operation_name, "max_retries": self.max_retries}
+        )
+
         # Verificar circuit breaker
         if self._check_circuit_breaker():
-            raise GeminiServiceError(
+            error_msg = (
                 f"Circuit breaker abierto después de {self._consecutive_failures} fallos consecutivos. "
-                f"Esperando {self._circuit_breaker_reset_time // 60} minutos antes de reintentar.",
-                status_code=503,
+                f"Esperando {self._circuit_breaker_reset_time // 60} minutos antes de reintentar."
             )
+            logger.critical(f"[{operation_name}] {error_msg}")
+            raise GeminiServiceError(error_msg, status_code=503)
 
         last_exception: Exception | None = None
         current_timeout = self.timeout
+        total_tokens = 0
 
         for attempt in range(self.max_retries + 1):
+            attempt_start = time.time()
             try:
                 logger.info(
-                    f"[{operation_name}] Intento {attempt + 1}/{self.max_retries + 1}"
+                    f"[{operation_name}] Intento {attempt + 1}/{self.max_retries + 1}",
+                    extra={
+                        "operation": operation_name,
+                        "attempt": attempt + 1,
+                        "max_attempts": self.max_retries + 1,
+                    }
                 )
+
                 result = operation()
+                attempt_duration = (time.time() - attempt_start) * 1000
+
+                # Extraer información de uso de tokens si está disponible
+                tokens_info = {}
+                if hasattr(result, "usage_metadata") and result.usage_metadata:
+                    total_tokens = getattr(result.usage_metadata, "total_token_count", 0)
+                    tokens_info = {
+                        "prompt_tokens": getattr(result.usage_metadata, "prompt_token_count", 0),
+                        "candidates_tokens": getattr(result.usage_metadata, "candidates_token_count", 0),
+                        "thoughts_tokens": getattr(result.usage_metadata, "thoughts_token_count", 0),
+                        "total_tokens": total_tokens,
+                    }
+
                 self._record_success()
+                total_duration = (time.time() - start_time) * 1000
+
                 if attempt > 0:
                     logger.info(
-                        f"[{operation_name}] Éxito después de {attempt} reintentos"
+                        f"[{operation_name}] Éxito después de {attempt} reintentos",
+                        extra={
+                            "operation": operation_name,
+                            "retries_needed": attempt,
+                            "duration_ms": int(total_duration),
+                            **tokens_info,
+                        }
                     )
+                else:
+                    logger.info(
+                        f"[{operation_name}] Operación completada exitosamente",
+                        extra={
+                            "operation": operation_name,
+                            "duration_ms": int(total_duration),
+                            "attempt_duration_ms": int(attempt_duration),
+                            **tokens_info,
+                        }
+                    )
+
                 return result
 
             except Exception as e:
+                attempt_duration = (time.time() - attempt_start) * 1000
                 last_exception = e
                 status_code, message, details = _extract_error_info(e)
 
-                # Log del error
+                # Log detallado del error
                 logger.warning(
                     f"[{operation_name}] Error en intento {attempt + 1}: "
-                    f"code={status_code}, message={message[:100]}..."
+                    f"code={status_code}, message={message[:150]}",
+                    extra={
+                        "operation": operation_name,
+                        "attempt": attempt + 1,
+                        "status_code": status_code,
+                        "error_type": type(e).__name__,
+                        "error_message": message[:500],
+                        "duration_ms": int(attempt_duration),
+                    }
                 )
 
                 # Verificar casos especiales que no deben reintentarse
                 if _is_context_too_large_error(message):
-                    logger.error(f"[{operation_name}] Contexto demasiado grande, no se reintentará")
+                    logger.error(
+                        f"[{operation_name}] Contexto demasiado grande, no se reintentará",
+                        extra={
+                            "operation": operation_name,
+                            "error_type": "context_too_large",
+                            "status_code": status_code,
+                        }
+                    )
                     raise GeminiInvalidArgumentError(
                         "El contexto es demasiado largo para ser procesado. "
                         "Reduzca el tamaño del texto o divida en partes más pequeñas.",
@@ -312,7 +370,14 @@ class GeminiRetryHandler:
                     )
 
                 if _is_safety_blocked_error(message):
-                    logger.error(f"[{operation_name}] Contenido bloqueado por safety, no se reintentará")
+                    logger.error(
+                        f"[{operation_name}] Contenido bloqueado por safety, no se reintentará",
+                        extra={
+                            "operation": operation_name,
+                            "error_type": "safety_blocked",
+                            "status_code": status_code,
+                        }
+                    )
                     raise GeminiError(
                         "El contenido fue bloqueado por políticas de seguridad. "
                         "Revise el contenido del documento.",
@@ -323,16 +388,32 @@ class GeminiRetryHandler:
                 # Si es el último intento, propagar el error
                 if attempt >= self.max_retries:
                     self._record_failure()
+                    total_duration = (time.time() - start_time) * 1000
                     logger.error(
                         f"[{operation_name}] Agotados {self.max_retries + 1} intentos. "
-                        f"Último error: code={status_code}, message={message[:200]}"
+                        f"Último error: code={status_code}, message={message[:200]}",
+                        extra={
+                            "operation": operation_name,
+                            "total_attempts": self.max_retries + 1,
+                            "status_code": status_code,
+                            "error_type": type(e).__name__,
+                            "error_message": message[:1000],
+                            "total_duration_ms": int(total_duration),
+                            "circuit_failures": self._consecutive_failures,
+                        }
                     )
                     raise self._create_gemini_error(status_code, message, details)
 
                 # Verificar si el error es retryable
                 if not _is_retryable_error(status_code, message):
                     logger.error(
-                        f"[{operation_name}] Error no retryable (code={status_code}), propagando"
+                        f"[{operation_name}] Error no retryable (code={status_code}), propagando",
+                        extra={
+                            "operation": operation_name,
+                            "status_code": status_code,
+                            "error_type": type(e).__name__,
+                            "retryable": False,
+                        }
                     )
                     raise self._create_gemini_error(status_code, message, details)
 
@@ -346,17 +427,47 @@ class GeminiRetryHandler:
                         retry_after = getattr(e.metadata, "retry_after", None)
                         if retry_after:
                             delay = max(delay, retry_after)
-                            logger.info(f"[{operation_name}] Usando Retry-After: {delay}s")
+                            logger.info(
+                                f"[{operation_name}] Usando Retry-After: {delay:.1f}s",
+                                extra={
+                                    "operation": operation_name,
+                                    "retry_after": retry_after,
+                                    "calculated_delay": delay,
+                                }
+                            )
 
                 # Para timeouts, aumentar el timeout para el siguiente intento
                 if status_code == 504:
                     current_timeout = int(current_timeout * 1.5)
-                    logger.info(f"[{operation_name}] Aumentando timeout a {current_timeout}s")
+                    logger.info(
+                        f"[{operation_name}] Aumentando timeout a {current_timeout}s",
+                        extra={
+                            "operation": operation_name,
+                            "new_timeout": current_timeout,
+                            "previous_timeout": int(current_timeout / 1.5),
+                        }
+                    )
 
-                logger.info(f"[{operation_name}] Esperando {delay:.2f}s antes del siguiente intento")
+                logger.info(
+                    f"[{operation_name}] Esperando {delay:.2f}s antes del siguiente intento",
+                    extra={
+                        "operation": operation_name,
+                        "delay_seconds": round(delay, 2),
+                        "next_attempt": attempt + 2,
+                    }
+                )
                 time.sleep(delay)
 
         # No debería llegar aquí, pero por seguridad
+        total_duration = (time.time() - start_time) * 1000
+        logger.critical(
+            f"[{operation_name}] Error inesperado después de {self.max_retries + 1} intentos",
+            extra={
+                "operation": operation_name,
+                "total_duration_ms": int(total_duration),
+                "unexpected": True,
+            }
+        )
         raise GeminiServiceError(
             f"Error inesperado después de {self.max_retries + 1} intentos",
             status_code=500,
@@ -428,6 +539,7 @@ def generate_content_with_retry(
     contents: list,
     config: types.GenerateContentConfig,
     max_retries: int = MAX_RETRIES,
+    operation_context: dict[str, Any] | None = None,
 ) -> Any:
     """Wrapper conveniente para client.models.generate_content con retry.
 
@@ -437,10 +549,26 @@ def generate_content_with_retry(
         contents: Contenidos para la generación
         config: Configuración de generación
         max_retries: Número máximo de reintentos
+        operation_context: Contexto adicional para logging (ej: agent_name, part_id)
 
     Returns:
         Respuesta de la API
     """
+    operation_name = "generate_content"
+    if operation_context:
+        ctx_parts = [f"{k}={v}" for k, v in operation_context.items()]
+        operation_name = f"generate_content[{','.join(ctx_parts)}]"
+
+    logger.info(
+        f"[{operation_name}] Preparando generación de contenido",
+        extra={
+            "operation": "generate_content",
+            "model": model,
+            "max_retries": max_retries,
+            **(operation_context or {}),
+        }
+    )
+
     handler = GeminiRetryHandler(max_retries=max_retries)
 
     def operation():
@@ -450,7 +578,7 @@ def generate_content_with_retry(
             config=config,
         )
 
-    return handler.execute_with_retry(operation, operation_name="generate_content")
+    return handler.execute_with_retry(operation, operation_name=operation_name)
 
 
 def upload_file_with_retry(
@@ -468,12 +596,42 @@ def upload_file_with_retry(
     Returns:
         Objeto File subido
     """
+    import os
+
+    file_size = 0
+    try:
+        file_size = os.path.getsize(file_path)
+    except OSError:
+        pass
+
+    logger.info(
+        f"[files.upload] Iniciando subida de archivo: {file_path}",
+        extra={
+            "operation": "files.upload",
+            "file_path": file_path,
+            "file_size_bytes": file_size,
+            "file_size_mb": round(file_size / (1024 * 1024), 2) if file_size else None,
+            "max_retries": max_retries,
+        }
+    )
+
     handler = GeminiRetryHandler(max_retries=max_retries)
 
     def operation():
         return client.files.upload(file=file_path)
 
-    return handler.execute_with_retry(operation, operation_name="files.upload")
+    result = handler.execute_with_retry(operation, operation_name="files.upload")
+
+    logger.info(
+        f"[files.upload] Archivo subido exitosamente: {result.uri if hasattr(result, 'uri') else 'unknown'}",
+        extra={
+            "operation": "files.upload",
+            "file_uri": result.uri if hasattr(result, "uri") else None,
+            "file_name": result.name if hasattr(result, "name") else None,
+        }
+    )
+
+    return result
 
 
 # Excepciones específicas que pueden usar los agentes
