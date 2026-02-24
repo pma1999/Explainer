@@ -639,14 +639,14 @@ function initLanding() {
   tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
 
   function checkReady() {
-    const hasNameAndDesc = nameInput.value.trim() && descInput.value.trim();
+    const hasName = nameInput.value.trim();
 
     if (currentSourceType === 'pdf') {
-      const ready = selectedFile && hasNameAndDesc;
+      const ready = selectedFile && hasName;
       btnUpload.disabled = !ready;
     } else {
       const url = youtubeUrlInput.value.trim();
-      const ready = isValidYouTubeUrl(url) && hasNameAndDesc;
+      const ready = isValidYouTubeUrl(url) && hasName;
       btnUpload.disabled = !ready;
     }
   }
