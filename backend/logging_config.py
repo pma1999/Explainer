@@ -219,15 +219,15 @@ class LogContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        # Restaurar valores anteriores
+        # Restaurar valores anteriores usando reset()
         if self.tokens[0] is not None:
-            project_id_var.set(self.tokens[0])
+            project_id_var.reset(self.tokens[0])
         if self.tokens[1] is not None:
-            user_id_var.set(self.tokens[1])
+            user_id_var.reset(self.tokens[1])
         if self.tokens[2] is not None:
-            part_id_var.set(self.tokens[2])
+            part_id_var.reset(self.tokens[2])
         if self.tokens[3] is not None:
-            agent_name_var.set(self.tokens[3])
+            agent_name_var.reset(self.tokens[3])
 
 
 def log_with_metadata(
