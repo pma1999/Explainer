@@ -178,6 +178,33 @@
           </div>
         </div>
 
+        <!-- Model Selector -->
+        <div class="model-selector">
+          <p class="form-label">Modelo de IA</p>
+          <div class="model-options">
+            <label class="model-option">
+              <input type="radio" name="model-choice" value="gemini-3-flash-preview" checked />
+              <div class="model-option-card">
+                <div class="model-option-header">
+                  <span class="model-option-name">Flash</span>
+                  <span class="model-badge model-badge-flash">Rápido · Económico</span>
+                </div>
+                <p class="model-option-desc">Veloz y eficiente. Ideal para la mayoría de textos.</p>
+              </div>
+            </label>
+            <label class="model-option">
+              <input type="radio" name="model-choice" value="gemini-3.1-pro-preview" />
+              <div class="model-option-card">
+                <div class="model-option-header">
+                  <span class="model-option-name">Pro</span>
+                  <span class="model-badge model-badge-pro">Máxima calidad</span>
+                </div>
+                <p class="model-option-desc">Mayor razonamiento y profundidad. Para textos complejos.</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
         <button class="btn-primary" id="btn-upload" disabled>
           <span class="btn-text">Iniciar análisis</span>
           <span class="btn-icon">→</span>
