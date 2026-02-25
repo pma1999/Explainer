@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
-from backend.pricing import get_model_name
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 
@@ -342,7 +341,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
 
 
 @gemini_retry(max_retries=5)
-def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dict[str, Any], Any]:
+def run_recorrido(api_key: str, file_uri: str, identificacion: str, model: str = "gemini-3-flash-preview") -> tuple[dict[str, Any], Any]:
     """Run the Recorrido Anotado agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
     logger.info(
@@ -355,7 +354,6 @@ def run_recorrido(api_key: str, file_uri: str, identificacion: str) -> tuple[dic
     )
 
     client = genai.Client(api_key=api_key)
-    model = get_model_name()
 
     contents = [
         types.Content(
