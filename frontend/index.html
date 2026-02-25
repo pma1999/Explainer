@@ -280,6 +280,14 @@
             <div class="usage-mini-label">Coste total</div>
             <div class="usage-mini-value" id="mini-total-cost">$0.00</div>
           </div>
+          <button class="btn-export-project" id="btn-open-full-export">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Exportar a Obsidian
+          </button>
           <button class="btn-danger-sm" id="btn-delete-project">Eliminar proyecto</button>
         </div>
       </aside>
@@ -466,6 +474,56 @@
                 <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
                   stroke-linecap="round" stroke-linejoin="round" />
                 <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== FULL PROJECT OBSIDIAN EXPORT MODAL ===== -->
+  <div class="modal-overlay hidden" id="modal-full-export">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title">Exportar proyecto completo</h3>
+        <button class="modal-close" id="btn-close-full-export">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="settings-description">
+          Exporta todas las secciones completadas del proyecto. Cada sección
+          se guardará en su propia carpeta con los tres archivos de análisis.
+        </p>
+
+        <div class="export-summary" id="full-export-summary">
+          <span class="export-summary-icon">✦</span>
+          <span id="full-export-summary-text">Calculando secciones...</span>
+        </div>
+
+        <div class="export-section-list" id="full-export-section-list">
+          <!-- JS inyecta una fila por sección -->
+        </div>
+
+        <form id="form-full-export" class="settings-form">
+          <div class="form-group">
+            <label for="full-export-autor" class="form-label">Autor</label>
+            <input type="text" id="full-export-autor" class="form-input"
+              placeholder="Ej: James Rachels" />
+          </div>
+          <div class="form-group">
+            <label for="full-export-obra" class="form-label">Obra</label>
+            <input type="text" id="full-export-obra" class="form-input"
+              placeholder="Ej: The Elements of Moral Philosophy" />
+          </div>
+          <div class="form-actions" style="margin-top: 2rem;">
+            <button type="submit" class="btn-primary" id="btn-do-full-export">
+              <span class="btn-text">Exportar proyecto</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                style="margin-left: 0.5rem;">
+                <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 20H20" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round"/>
               </svg>
             </button>
           </div>
