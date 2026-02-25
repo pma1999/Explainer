@@ -576,6 +576,7 @@ function updateApiKeyUI() {
 // ── LANDING VIEW ───────────────────────────────────────────
 let selectedFile = null;
 let currentSourceType = 'pdf'; // 'pdf' or 'youtube'
+let selectedModel = 'gemini-3-flash-preview'; // 'gemini-3-flash-preview' or 'gemini-3.1-pro-preview'
 
 function extractYouTubeVideoId(url) {
   const patterns = [
@@ -690,6 +691,10 @@ function initLanding() {
   nameInput.addEventListener('input', checkReady);
   descInput.addEventListener('input', checkReady);
 
+  document.querySelectorAll('input[name="model-choice"]').forEach(radio => {
+    radio.addEventListener('change', (e) => { selectedModel = e.target.value; });
+  });
+
   btnUpload.addEventListener('click', handleUpload);
   $('btn-go-projects').addEventListener('click', loadProjectsView);
 }
@@ -776,9 +781,14 @@ async function handleUpload() {
     $('project-name').value = '';
     $('project-description').value = '';
     $('youtube-url').value = '';
+    document.querySelectorAll('input[name="model-choice"]').forEach(r => {
+      r.checked = r.value === 'gemini-3-flash-preview';
+    });
+    const modelForProcess = selectedModel;
+    selectedModel = 'gemini-3-flash-preview';
 
     // Start processing
-    await api(`/api/projects/${project.id}/process`, { method: 'POST' });
+    await api(`/api/projects/${project.id}/process?model=${encodeURIComponent(modelForProcess)}`, { method: 'POST' });
 
     // Open project view and start listening
     await openProjectView(project.id);

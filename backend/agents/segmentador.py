@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
-from backend.pricing import get_model_name
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 
@@ -261,7 +260,7 @@ DEFAULT_DESCRIPTION = "Procesar TODO el documento completo sin omitir ninguna se
 
 
 @gemini_retry(max_retries=5)
-def run_segmentador(api_key: str, file_uri: str, description: str) -> tuple[dict[str, Any], Any]:
+def run_segmentador(api_key: str, file_uri: str, description: str, model: str = "gemini-3-flash-preview") -> tuple[dict[str, Any], Any]:
     """Run the Segmentador agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
     logger.info(
@@ -274,7 +273,6 @@ def run_segmentador(api_key: str, file_uri: str, description: str) -> tuple[dict
     )
 
     client = genai.Client(api_key=api_key)
-    model = get_model_name()
 
     # Usar descripción por defecto si está vacía
     effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
