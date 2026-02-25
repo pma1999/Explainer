@@ -9,6 +9,8 @@ from typing import Annotated, AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+
+ALLOWED_MODELS = {"gemini-3-flash-preview", "gemini-3.1-pro-preview"}
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,7 +38,7 @@ from backend.supabase_data import (
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import project_create_rate_limit
-from backend.pricing import calculate_cost, get_model_name
+from backend.pricing import calculate_cost
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
@@ -219,7 +221,7 @@ async def api_delete_project(
     return {"ok": True}
 
 
-async def _process_project(project_id: str, user_id: str) -> None:
+async def _process_project(project_id: str, user_id: str, model_name: str = "gemini-3-flash-preview") -> None:
     process_start_time = time.time()
     pdf_temp_path = None
 
@@ -259,10 +261,10 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
         from google import genai
         client = genai.Client(api_key=api_key)
-        model_name = get_model_name()
         logger.info(f"[Process] Modelo seleccionado: {model_name}")
 
         cumulative_usage = {
+            "model": model_name,
             "prompt_tokens": 0,
             "candidates_tokens": 0,
             "thoughts_tokens": 0,
@@ -349,7 +351,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
         # Fase de segmentación
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
-        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"])
+        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"], model_name)
         seg_duration = (time.time() - seg_start) * 1000
 
         _update_usage(usage_meta, phase="segmentation")
@@ -410,9 +412,9 @@ async def _process_project(project_id: str, user_id: str) -> None:
             # Ejecutar los tres agentes en paralelo
             agents_start = time.time()
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion),
-                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion),
-                asyncio.to_thread(run_resources, api_key, file_uri, identificacion),
+                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion, model_name),
+                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion, model_name),
+                asyncio.to_thread(run_resources, api_key, file_uri, identificacion, model_name),
                 return_exceptions=True,
             )
             agents_duration = (time.time() - agents_start) * 1000
@@ -575,6 +577,7 @@ async def api_process_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
     background_tasks: BackgroundTasks,
+    model: str = Query("gemini-3-flash-preview"),
 ):
     """Start processing a project using the user's own API key (BYOK)."""
     logger.info(
@@ -602,15 +605,19 @@ async def api_process_project(
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
 
+    if model not in ALLOWED_MODELS:
+        raise HTTPException(status_code=400, detail=f"Modelo no válido. Opciones: {', '.join(sorted(ALLOWED_MODELS))}")
+
     logger.info(
         f"[API] Iniciando procesamiento en background",
         extra={
             "project_id": project_id,
             "project_name": project.get("name", "unnamed"),
             "source_type": project.get("source_type", "pdf"),
+            "model": model,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id)
+    background_tasks.add_task(_process_project, project_id, user_id, model)
     return {"ok": True, "status": "started"}
 
 

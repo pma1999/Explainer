@@ -2633,3 +2633,84 @@ body {
     font-size: 12px;
   }
 }
+/* ── Model Selector ── */
+.model-selector {
+  margin-bottom: 1.5rem;
+}
+
+.model-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.model-option {
+  cursor: pointer;
+}
+
+.model-option input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.model-option-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1rem;
+  background: var(--bg-elevated);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+
+.model-option:hover .model-option-card {
+  border-color: var(--border-light);
+  background: var(--bg-hover);
+}
+
+.model-option input:checked + .model-option-card {
+  border-color: var(--amber);
+  background: var(--amber-dim);
+  box-shadow: 0 0 0 1px var(--amber-border);
+}
+
+.model-option-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.model-option-name {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.model-badge {
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+  letter-spacing: 0.02em;
+}
+
+.model-badge-flash {
+  background: var(--emerald-dim);
+  color: var(--emerald);
+}
+
+.model-badge-pro {
+  background: var(--amber-dim);
+  color: var(--amber-light);
+}
+
+.model-option-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
