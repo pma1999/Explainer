@@ -1794,6 +1794,82 @@ async function importProjectsBackup(file) {
 }
 // ── OBSIDIAN EXPORT ────────────────────────────────────────
 
+// ── Shared export utilities ─────────────────────────────────
+
+/**
+ * Converts a raw string (section title, project name) into a safe folder/file
+ * name segment: strips diacritics, removes filesystem-invalid characters,
+ * collapses whitespace to hyphens, and caps length at 60 characters.
+ */
+function sanitizeFolderName(raw) {
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')          // é→e, ñ→n, ü→u …
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')   // chars inválidos en rutas
+    .replace(/\s+/g, '-')                     // espacios → guiones
+    .replace(/-{2,}/g, '-')                   // colapsar guiones múltiples
+    .replace(/^-+|-+$/g, '')                  // trim guiones extremos
+    .slice(0, 60);
+}
+
+/**
+ * Builds a zero-padded folder name for a section, ensuring correct
+ * alphabetical sort in Obsidian's file explorer.
+ * Example: (3, "Ética de la Virtud") → "03 - Etica-de-la-Virtud"
+ */
+function buildSectionFolderName(numero, titulo) {
+  return `${String(numero).padStart(2, '0')} - ${sanitizeFolderName(titulo)}`;
+}
+
+/**
+ * Extracts autor/obra from a project name formatted as "Autor - Obra"
+ * or "Autor — Obra". Returns { autor, obra }.
+ */
+function prefillFromProjectName(projectName) {
+  if (!projectName) return { autor: '', obra: '' };
+  const parts = projectName.split(/[-—]/);
+  if (parts.length >= 2) {
+    return { autor: parts[0].trim(), obra: parts.slice(1).join('-').trim() };
+  }
+  return { autor: '', obra: projectName.trim() };
+}
+
+/**
+ * Loads JSZip from CDN lazily — only when actually needed.
+ * Returns a Promise resolving to the JSZip constructor, or null on failure.
+ */
+function loadJSZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+    script.onload = () => resolve(window.JSZip || null);
+    script.onerror = () => resolve(null);
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * Triggers a single programmatic file download and waits before returning,
+ * giving the browser time to register it before the next one starts.
+ */
+function triggerDownload(blob, filename) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      resolve();
+    }, 800);
+  });
+}
+
 function initObsidianExport() {
   const modal = $('modal-export-obsidian');
   const btnOpen = $('btn-open-export');
@@ -1962,6 +2038,206 @@ function initObsidianExport() {
     } catch (globalErr) {
       console.error('Export Error:', globalErr);
       toast('Error durante la exportación: ' + globalErr.message, 'error');
+    }
+  });
+}
+
+// ── FULL PROJECT OBSIDIAN EXPORT ───────────────────────────
+
+/**
+ * Collects all completed sections from the current project and builds
+ * an array of section descriptors ready to be exported.
+ * Returns null when no sections are completed.
+ */
+function buildFullExportSections(autor, obra) {
+  const project = state.currentProject;
+  if (!project?.segmentation?.partes) return null;
+
+  const sections = [];
+  for (const parte of project.segmentation.partes) {
+    const partData = project.partes_contenido?.[String(parte.numero)];
+    if (!partData || partData.status !== 'completed') continue;
+
+    const folderName = buildSectionFolderName(parte.numero, parte.titulo);
+    const files = [];
+
+    if (partData.explainer)
+      files.push({ filename: 'explicacion.md',
+                   content: formatExplicacionMd(partData.explainer, autor, obra, parte.titulo) });
+    if (partData.recorrido)
+      files.push({ filename: 'recorrido-anotado.md',
+                   content: formatRecorridoMd(partData.recorrido, autor, obra, parte.titulo) });
+    if (partData.resources)
+      files.push({ filename: 'recursos.md',
+                   content: formatRecursosMd(partData.resources, autor, obra, parte.titulo) });
+
+    if (files.length > 0) sections.push({ folderName, files });
+  }
+
+  return sections.length > 0 ? sections : null;
+}
+
+/**
+ * Strategy 1: File System Access API.
+ * Creates one real subfolder per section inside the user-chosen directory.
+ * Throws AbortError if the user cancels the picker; throws on API errors
+ * so the caller can fall through to the next strategy.
+ */
+async function exportViaDirectoryPicker(sections) {
+  const rootHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  for (const section of sections) {
+    const dirHandle = await rootHandle.getDirectoryHandle(section.folderName, { create: true });
+    for (const file of section.files) {
+      const fileHandle = await dirHandle.getFileHandle(file.filename, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(new Blob([file.content], { type: 'text/markdown;charset=utf-8' }));
+      await writable.close();
+    }
+  }
+}
+
+/**
+ * Strategy 2: ZIP download via JSZip (loaded lazily).
+ * Builds a ZIP preserving the folder structure.
+ * Returns false if JSZip could not be loaded.
+ */
+async function exportViaZip(sections, projectName) {
+  const JSZip = await loadJSZip();
+  if (!JSZip) return false;
+
+  const zip = new JSZip();
+  for (const section of sections) {
+    for (const file of section.files) {
+      zip.file(`${section.folderName}/${file.filename}`, file.content);
+    }
+  }
+
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  await triggerDownload(blob, `${sanitizeFolderName(projectName || 'proyecto')}-obsidian.zip`);
+  return true;
+}
+
+/**
+ * Strategy 3: Sequential flat downloads — universal fallback.
+ * Files are named with the section folder prefix so they remain identifiable.
+ */
+async function exportViaSequentialDownload(sections) {
+  for (const section of sections) {
+    for (const file of section.files) {
+      const blob = new Blob([file.content], { type: 'text/markdown;charset=utf-8' });
+      await triggerDownload(blob, `${section.folderName} — ${file.filename}`);
+    }
+  }
+}
+
+function initFullProjectExport() {
+  const modal       = $('modal-full-export');
+  const btnOpen     = $('btn-open-full-export');
+  const btnClose    = $('btn-close-full-export');
+  const form        = $('form-full-export');
+  const inputAutor  = $('full-export-autor');
+  const inputObra   = $('full-export-obra');
+  const summaryText = $('full-export-summary-text');
+  const sectionList = $('full-export-section-list');
+  const btnSubmit   = $('btn-do-full-export');
+
+  if (!modal || !btnOpen) return;
+
+  btnOpen.addEventListener('click', () => {
+    const project = state.currentProject;
+    if (!project) return;
+
+    // Pre-rellenar metadatos desde el nombre del proyecto
+    const { autor, obra } = prefillFromProjectName(project.name);
+    inputAutor.value = autor;
+    inputObra.value  = obra;
+
+    // Calcular resumen de secciones listas
+    const partes = project.segmentation?.partes ?? [];
+    const readyCount = partes.filter(p =>
+      project.partes_contenido?.[String(p.numero)]?.status === 'completed'
+    ).length;
+    summaryText.textContent = readyCount === partes.length
+      ? `${readyCount} secciones · ${readyCount * 3} archivos listos para exportar`
+      : `${readyCount} de ${partes.length} secciones listas · ${readyCount * 3} archivos`;
+
+    // Renderizar checklist de secciones
+    sectionList.innerHTML = partes.map(parte => {
+      const isReady = project.partes_contenido?.[String(parte.numero)]?.status === 'completed';
+      return `<div class="export-section-row${isReady ? ' ready' : ''}">
+        <span class="row-dot"></span>
+        <span>${escHtml(buildSectionFolderName(parte.numero, parte.titulo))}</span>
+      </div>`;
+    }).join('');
+
+    btnSubmit.disabled = readyCount === 0;
+    show(modal);
+  });
+
+  const closeModal = () => hide(modal);
+  btnClose.addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!state.currentProject) return;
+
+    const autor = inputAutor.value.trim() || 'Desconocido';
+    const obra  = inputObra.value.trim()  || 'Desconocida';
+    const sections = buildFullExportSections(autor, obra);
+
+    if (!sections) {
+      toast('No hay secciones completadas para exportar.', 'warning');
+      return;
+    }
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const btnText  = btnSubmit.querySelector('.btn-text');
+    const origText = btnText.textContent;
+    btnSubmit.disabled = true;
+    btnText.textContent = 'Exportando...';
+
+    try {
+      // Estrategia 1: File System Access API — ideal para Desktop
+      if (window.showDirectoryPicker && !isMobile) {
+        try {
+          await exportViaDirectoryPicker(sections);
+          toast(`Proyecto exportado: ${sections.length} secciones en tu vault de Obsidian`, 'success');
+          closeModal();
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') { closeModal(); return; }
+          console.warn('Strategy 1 (showDirectoryPicker) falló:', err);
+        }
+      }
+
+      // Estrategia 2: ZIP con JSZip — preserva estructura de carpetas
+      try {
+        const ok = await exportViaZip(sections, state.currentProject.name);
+        if (ok) {
+          const total = sections.reduce((n, s) => n + s.files.length, 0);
+          toast(`ZIP descargado: ${sections.length} secciones, ${total} archivos`, 'success');
+          closeModal();
+          return;
+        }
+        console.warn('Strategy 2: JSZip no disponible, usando descarga plana');
+      } catch (err) {
+        console.warn('Strategy 2 (JSZip) falló:', err);
+      }
+
+      // Estrategia 3: Descarga plana secuencial — fallback universal
+      const total = sections.reduce((n, s) => n + s.files.length, 0);
+      toast(`Descargando ${total} archivos...`, 'info');
+      await exportViaSequentialDownload(sections);
+      toast('Descarga completada.', 'success');
+      closeModal();
+
+    } catch (globalErr) {
+      console.error('Full project export error:', globalErr);
+      toast('Error durante la exportación: ' + globalErr.message, 'error');
+    } finally {
+      btnSubmit.disabled = false;
+      btnText.textContent = origText;
     }
   });
 }
@@ -2147,5 +2423,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initVisibilityHandling();
   initObsidianExport();
+  initFullProjectExport();
   initApp();
 });

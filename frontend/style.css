@@ -2714,3 +2714,83 @@ body {
   line-height: 1.4;
   margin: 0;
 }
+
+/* ── Full Project Export — sidebar button ── */
+.btn-export-project {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--amber);
+  background: transparent;
+  border: 1px solid var(--amber-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.btn-export-project:hover {
+  background: var(--amber-dim);
+  border-color: var(--amber);
+}
+
+/* ── Full Project Export — summary banner in modal ── */
+.export-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--amber-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.export-summary-icon {
+  color: var(--amber);
+  flex-shrink: 0;
+}
+
+/* ── Full Project Export — section checklist ── */
+.export-section-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 0;
+  margin-bottom: 16px;
+}
+
+.export-section-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+}
+
+.export-section-row.ready {
+  color: var(--text-primary);
+}
+
+.export-section-row .row-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-light);
+  flex-shrink: 0;
+}
+
+.export-section-row.ready .row-dot {
+  background: var(--emerald);
+}
