@@ -895,6 +895,9 @@ function updateUsageUI(usage) {
   if ($('usage-thought-tokens')) $('usage-thought-tokens').textContent = thoughts.toLocaleString();
   if ($('usage-total-tokens')) $('usage-total-tokens').textContent = total.toLocaleString();
 
+  // Live cost in proc-stage banner
+  if ($('proc-cost-badge')) $('proc-cost-badge').textContent = `$${cost.toFixed(4)}`;
+
   const card = $('project-usage-card');
   if (card) {
     card.classList.remove('pulse-highlight');
@@ -964,6 +967,10 @@ function syncProcessingUIWithState() {
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
   if (isProcessing) {
     showProcessingIndicator(project.status);
+    // Restore parts grid if segmentation already happened
+    if (project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0) {
+      renderProcPartsGrid(project);
+    }
   } else {
     hideProcessingIndicator();
   }
@@ -980,21 +987,26 @@ function renderProjectView(project) {
   updateMobileHeader();
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
-  if (isProcessing) {
-    showProcessingIndicator(project.status);
-  } else {
-    hideProcessingIndicator();
-  }
 
   if (!state.currentPartId) {
-    show($('main-welcome'));
     hide($('part-content'));
-    const hasPartes = project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0;
-    const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
-    $('welcome-title').textContent = hasPartes ? 'Selecciona una sección' : (isProcessing ? 'Procesando...' : 'Sin contenido');
-    $('welcome-sub').textContent = hasPartes
-      ? 'Haz clic en cualquier sección completada para ver su contenido.'
-      : (isProcessing ? 'El análisis está en curso. Los resultados aparecerán en el panel lateral.' : 'No hay secciones disponibles.');
+    if (isProcessing) {
+      // Show immersive proc-stage instead of the plain welcome message
+      showProcessingIndicator(project.status);
+      hide($('main-welcome'));
+      // If segmentation data already exists (e.g. re-opening a processing project), show the grid immediately
+      if (project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0) {
+        renderProcPartsGrid(project);
+      }
+    } else {
+      hideProcessingIndicator();
+      show($('main-welcome'));
+      const hasPartes = project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0;
+      $('welcome-title').textContent = hasPartes ? 'Selecciona una sección' : 'Sin contenido';
+      $('welcome-sub').textContent = hasPartes
+        ? 'Haz clic en cualquier sección para ver su contenido.'
+        : 'No hay secciones disponibles.';
+    }
   }
 }
 
@@ -1030,134 +1042,193 @@ function renderSidebarNav(project) {
   });
 }
 
-function updateProcessingOverlay(status) {
-  const titles = {
-    uploading: 'Subiendo documento...',
-    segmenting: 'Segmentando el texto...',
-    processing: 'Generando contenido...',
-    pending: 'Iniciando...',
-  };
-  const subs = {
-    uploading: 'Enviando el PDF a la IA',
-    segmenting: 'El Segmentador está dividiendo el texto en partes',
-    processing: 'Explainer, Recorrido y Recursos trabajando en paralelo',
-    pending: 'Preparando',
-  };
-  const titleEl = $('processing-title');
-  const subEl = $('processing-sub');
-  if (titleEl) titleEl.textContent = titles[status] || 'Procesando...';
-  if (subEl) subEl.textContent = subs[status] || '';
-}
+// ═══════════════════════════════════════════════════════════
+//  PROC STAGE — The Scholarly Forge loading experience
+//  Non-blocking, real-time, section-by-section reveal.
+// ═══════════════════════════════════════════════════════════
 
-function pushStreamEvent(type, desc) {
-  const container = $('stream-events');
-  if (container) {
-    const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const el = document.createElement('div');
-    el.className = 'stream-event';
-    el.innerHTML = `<span class="event-time">${time}</span><span class="event-type">${escHtml(type)}</span><span class="event-desc">${escHtml(desc || '')}</span>`;
-    container.insertBefore(el, container.firstChild);
-    while (container.children.length > 20) container.lastChild.remove();
-  }
-  // Also update floating indicator
-  pushIndicatorStream(`${type}: ${desc || ''}`);
-}
-
-function setAgentNodeState(agentId, stateKind) {
-  const node = $(`agent-${agentId}`);
-  if (!node) return;
-  node.classList.remove('active', 'completed');
-  if (stateKind === 'active') node.classList.add('active');
-  if (stateKind === 'completed') node.classList.add('completed');
-}
-
-function setAllAgentsIdle() {
-  ['explainer', 'recorrido', 'resources'].forEach((id) => {
-    setAgentNodeState(id, '');
-    setIndicatorAgentState(id, '');
-  });
-}
-
-// ── Non-blocking processing indicator ───────────────────
-function ensureFloatingIndicatorExists() {
-  if ($('floating-indicator')) return;
-  const indicator = document.createElement('div');
-  indicator.id = 'floating-indicator';
-  indicator.className = 'floating-indicator hidden';
-  indicator.innerHTML = `
-    <div class="fi-core">
-      <div class="fi-ring fi-ring-1"></div>
-      <div class="fi-ring fi-ring-2"></div>
-    </div>
-    <div class="fi-content">
-      <div class="fi-title">Generando...</div>
-      <div class="fi-agents">
-        <span id="fi-explainer" class="fi-agent">📖</span>
-        <span id="fi-recorrido" class="fi-agent">✍️</span>
-        <span id="fi-resources" class="fi-agent">🗺️</span>
-      </div>
-      <div class="fi-stream" id="fi-stream"></div>
-    </div>
-    <button class="fi-toggle" id="fi-toggle" title="Expandir/Colapsar">▼</button>
-  `;
-  document.body.appendChild(indicator);
-
-  // Toggle expand/collapse
-  indicator.querySelector('#fi-toggle').addEventListener('click', () => {
-    indicator.classList.toggle('collapsed');
-  });
-
-  // Click on indicator to open project if not current
-  indicator.addEventListener('click', (e) => {
-    if (e.target.closest('#fi-toggle')) return;
-    const view = document.querySelector('.view.active');
-    if (view && view.id !== 'view-project' && state.sseProjectId) {
-      openProjectView(state.sseProjectId);
-    }
-  });
-}
-
+/**
+ * Show the proc-stage loading screen and set the correct phase.
+ * @param {string} status — project status string (uploading/segmenting/processing/pending)
+ */
 function showProcessingIndicator(status) {
-  ensureFloatingIndicatorExists();
-  const indicator = $('floating-indicator');
-  if (!indicator) return;
-  indicator.classList.remove('hidden');
-  updateProcessingIndicator(status);
+  const stage = $('proc-stage');
+  if (!stage) return;
+  stage.classList.remove('hidden');
+  setProcPhase(status);
 }
 
+/** Hide the proc-stage loading screen. */
 function hideProcessingIndicator() {
-  const indicator = $('floating-indicator');
-  if (indicator) indicator.classList.add('hidden');
-  // Also hide the old overlay if visible
-  hide($('processing-overlay'));
+  const stage = $('proc-stage');
+  if (stage) stage.classList.add('hidden');
 }
 
-function updateProcessingIndicator(status) {
-  const titleMap = {
-    uploading: 'Subiendo PDF...',
-    segmenting: 'Segmentando...',
-    processing: 'Generando contenido...',
-    pending: 'Iniciando...',
+/**
+ * Update the phase banner + timeline to reflect the current processing phase.
+ * @param {string} status
+ */
+function setProcPhase(status) {
+  const labelMap = {
+    pending: 'Iniciando',
+    uploading: 'Subiendo archivo',
+    segmenting: 'Segmentando',
+    processing: 'Generando contenido',
   };
-  const fiTitle = document.querySelector('#floating-indicator .fi-title');
-  if (fiTitle) fiTitle.textContent = titleMap[status] || 'Procesando...';
+  const subMap = {
+    pending: 'Preparando el análisis...',
+    uploading: 'Enviando el documento a la IA',
+    segmenting: 'El Segmentador está dividiendo el texto en secciones',
+    processing: 'Los agentes están trabajando en paralelo',
+  };
+  const orbMap = {
+    pending: '',
+    uploading: 'orb-upload',
+    segmenting: 'orb-segment',
+    processing: 'orb-generate',
+  };
+
+  const label = $('proc-phase-label');
+  const sub = $('proc-phase-sub');
+  const orb = $('proc-phase-orb');
+  const hint = $('forge-hint');
+
+  if (label) label.textContent = labelMap[status] || 'Procesando';
+  if (sub) sub.textContent = subMap[status] || '';
+  if (orb) {
+    orb.className = 'proc-phase-orb ' + (orbMap[status] || '');
+  }
+  if (hint) hint.textContent = subMap[status] || 'Procesando...';
+
+  // --- Timeline step states ---
+  // upload → pstep-upload
+  // segmenting → pstep-upload done, pstep-segment active
+  // processing → pstep-upload done, pstep-segment done, pstep-generate active
+  const steps = ['pstep-upload', 'pstep-segment', 'pstep-generate'];
+  const lines = document.querySelectorAll('.proc-step-line');
+
+  const phaseIndex = { pending: -1, uploading: 0, segmenting: 1, processing: 2 }[status] ?? -1;
+
+  steps.forEach((id, i) => {
+    const el = $(id);
+    if (!el) return;
+    el.classList.remove('active', 'done');
+    if (i < phaseIndex) el.classList.add('done');
+    else if (i === phaseIndex) el.classList.add('active');
+  });
+
+  lines.forEach((line, i) => {
+    line.classList.remove('active', 'done');
+    if (i < phaseIndex - 1) line.classList.add('done');
+    else if (i === phaseIndex - 1) line.classList.add('active');
+  });
 }
 
-function pushIndicatorStream(text) {
-  const stream = $('fi-stream');
-  if (!stream) return;
-  const line = document.createElement('div');
-  line.className = 'fi-line';
-  line.textContent = text;
-  stream.appendChild(line);
-  if (stream.children.length > 5) stream.firstChild.remove();
+/**
+ * Render the parts grid from project segmentation data.
+ * Shows grid, hides the forge animation, adds one card per section.
+ * @param {object} project
+ */
+function renderProcPartsGrid(project) {
+  const grid = $('proc-parts-grid');
+  const forge = $('proc-forge');
+  if (!grid) return;
+
+  const partes = project.segmentation?.partes || [];
+  const contenido = project.partes_contenido || {};
+
+  // Build a staggered delay per card for the cascade entrance
+  grid.innerHTML = `<div class="proc-grid-header">${partes.length} sección${partes.length !== 1 ? 'es' : ''} · En progreso</div>`;
+
+  partes.forEach((parte, idx) => {
+    const partId = parte.numero;
+    const c = contenido[String(partId)];
+    const status = c ? c.status : 'pending';
+
+    const doneAgents = {
+      explainer: c && c.explainer && !c.explainer.error,
+      recorrido: c && c.recorrido && !c.recorrido.error,
+      resources: c && c.resources && !c.resources.error,
+    };
+
+    const card = document.createElement('div');
+    card.className = `proc-part-card ${status}`;
+    card.dataset.partId = partId;
+    card.style.animationDelay = `${idx * 60}ms`;
+
+    card.innerHTML = `
+      <div class="proc-card-num">
+        <span>Sección ${partId}</span>
+        <span class="proc-card-status-dot"></span>
+      </div>
+      <div class="proc-card-title">${escHtml(parte.titulo)}</div>
+      <div class="proc-agent-row">
+        <span class="proc-agent-badge${doneAgents.explainer ? ' done' : (status === 'processing' ? ' active' : '')}" data-agent="explainer">
+          <span class="badge-icon">📖</span> Explicación
+        </span>
+        <span class="proc-agent-badge${doneAgents.recorrido ? ' done' : (status === 'processing' ? ' active' : '')}" data-agent="recorrido">
+          <span class="badge-icon">✍</span> Recorrido
+        </span>
+        <span class="proc-agent-badge${doneAgents.resources ? ' done' : (status === 'processing' ? ' active' : '')}" data-agent="resources">
+          <span class="badge-icon">🗺️</span> Recursos
+        </span>
+      </div>
+      <div class="proc-card-cta">Abrir →</div>
+    `;
+
+    if (status === 'completed') {
+      card.addEventListener('click', () => selectPart(partId));
+    }
+
+    grid.appendChild(card);
+  });
+
+  // Show grid, hide forge animation
+  grid.classList.remove('hidden');
+  if (forge) forge.classList.add('hidden');
 }
 
-function setIndicatorAgentState(agentId, stateKind) {
-  const el = document.querySelector(`#fi-${agentId}`);
-  if (!el) return;
-  el.classList.remove('active', 'completed');
-  if (stateKind) el.classList.add(stateKind);
+/**
+ * Light up an agent badge on a specific part card when agent_completed fires.
+ * @param {number} partId
+ * @param {string} agentName  — 'explainer' | 'recorrido' | 'resources'
+ */
+function updateProcPartCard(partId, agentName) {
+  const card = document.querySelector(`#proc-parts-grid .proc-part-card[data-part-id="${partId}"]`);
+  if (!card) return;
+
+  // Activate the card border (processing state)
+  card.classList.remove('pending');
+  card.classList.add('processing');
+
+  // Light up the specific agent badge
+  const badge = card.querySelector(`.proc-agent-badge[data-agent="${agentName}"]`);
+  if (badge) {
+    badge.classList.remove('active');
+    badge.classList.add('done');
+  }
+}
+
+/**
+ * Mark a part card as fully completed: green border + click-to-open.
+ * @param {number} partId
+ */
+function completeProcPartCard(partId) {
+  const card = document.querySelector(`#proc-parts-grid .proc-part-card[data-part-id="${partId}"]`);
+  if (!card) return;
+
+  card.classList.remove('pending', 'processing');
+  card.classList.add('completed');
+
+  // All badges should be done
+  card.querySelectorAll('.proc-agent-badge').forEach(b => {
+    b.classList.remove('active');
+    b.classList.add('done');
+  });
+
+  // Make clickable
+  card.style.cursor = 'pointer';
+  card.addEventListener('click', () => selectPart(partId));
 }
 
 function selectPart(partId) {
@@ -1167,6 +1238,8 @@ function selectPart(partId) {
     el.classList.toggle('active', Number(el.dataset.partId) === partId);
   });
 
+  // Hide the proc-stage and the plain welcome, show reading content
+  hide($('proc-stage'));
   hide($('main-welcome'));
   show($('part-content'));
 
@@ -1518,9 +1591,11 @@ function startSSE(projectId, opts = {}) {
   state.sseProjectId = projectId;
   state.sseReconnectAttempts = 0;
   state.sseLastEventAt = Date.now();
-  setAllAgentsIdle();
-  const streamEvents = $('stream-events');
-  if (streamEvents) streamEvents.innerHTML = '';
+  // Reset proc-stage to forge state (forge visible, grid hidden)
+  const procForge = $('proc-forge');
+  const procGrid = $('proc-parts-grid');
+  if (procForge) procForge.classList.remove('hidden');
+  if (procGrid) { procGrid.classList.add('hidden'); procGrid.innerHTML = ''; }
 
   function connect() {
     const token = getAccessToken();
@@ -1550,26 +1625,21 @@ function startSSE(projectId, opts = {}) {
             state.currentProject.usage = payload.usage;
             updateUsageUI(payload.usage);
           }
-          pushStreamEvent('Uso', `$${(payload.usage?.total_cost || 0).toFixed(2)}`);
           break;
 
         case 'uploading':
           project.status = 'uploading';
-          updateProcessingOverlay('uploading');
-          pushStreamEvent('Subida', 'Enviando PDF a la IA');
+          setProcPhase('uploading');
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-uploading">Subiendo</span>`;
-          setAllAgentsIdle();
           break;
 
         case 'segmenting':
           project.status = 'segmenting';
-          updateProcessingOverlay('segmenting');
-          pushStreamEvent('Segmentación', 'Dividiendo el texto en partes');
+          setProcPhase('segmenting');
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-segmenting">Segmentando</span>`;
-          setAllAgentsIdle();
           break;
 
-        case 'segmented':
+        case 'segmented': {
           project.status = 'processing';
           try {
             const fresh = await api(`/api/projects/${projectId}`);
@@ -1577,45 +1647,37 @@ function startSSE(projectId, opts = {}) {
             Object.assign(project, { segmentation: fresh.segmentation, partes_contenido: fresh.partes_contenido || {} });
           } catch (_) { }
           renderSidebarNav(state.currentProject);
-          updateProcessingOverlay('processing');
+          setProcPhase('processing');
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-processing">Procesando</span>`;
-          const welcomeTitle = $('welcome-title');
-          const welcomeSub = $('welcome-sub');
-          if (welcomeTitle) welcomeTitle.textContent = 'Generando contenido';
-          if (welcomeSub) welcomeSub.textContent = 'Los 3 agentes están trabajando en paralelo para cada parte.';
-          pushStreamEvent('Segmentado', `${(project.segmentation?.partes?.length || 0)} partes`);
-          setAgentNodeState('explainer', 'active');
-          setAgentNodeState('recorrido', 'active');
-          setAgentNodeState('resources', 'active');
-          setIndicatorAgentState('explainer', 'active');
-          setIndicatorAgentState('recorrido', 'active');
-          setIndicatorAgentState('resources', 'active');
+          // Render the parts grid now that we have segmentation data
+          renderProcPartsGrid(state.currentProject);
           break;
+        }
 
-        case 'part_started':
+        case 'part_started': {
+          const psKey = String(payload.part_id);
           if (project.partes_contenido) {
-            const key = String(payload.part_id);
-            if (!project.partes_contenido[key]) {
-              project.partes_contenido[key] = { status: 'processing', explainer: null, recorrido: null, resources: null };
+            if (!project.partes_contenido[psKey]) {
+              project.partes_contenido[psKey] = { status: 'processing', explainer: null, recorrido: null, resources: null };
             } else {
-              project.partes_contenido[key].status = 'processing';
+              project.partes_contenido[psKey].status = 'processing';
             }
             renderSidebarNav(state.currentProject);
           }
-          setAgentNodeState('explainer', 'active');
-          setAgentNodeState('recorrido', 'active');
-          setAgentNodeState('resources', 'active');
-          setIndicatorAgentState('explainer', 'active');
-          setIndicatorAgentState('recorrido', 'active');
-          setIndicatorAgentState('resources', 'active');
-          pushStreamEvent('Parte', `Parte ${payload.part_id} iniciada`);
+          // Activate this card's visual state in proc-stage grid
+          const psCard = document.querySelector(`#proc-parts-grid .proc-part-card[data-part-id="${payload.part_id}"]`);
+          if (psCard) {
+            psCard.classList.remove('pending');
+            psCard.classList.add('processing');
+          }
           break;
+        }
 
         case 'agent_completed': {
           const key = String(payload.part_id);
           const agent = payload.agent;
-          setAgentNodeState(agent, 'completed');
-          setIndicatorAgentState(agent, 'completed');
+          // Light up agent badge in the grid card
+          updateProcPartCard(payload.part_id, agent);
           try {
             const fresh = await api(`/api/projects/${projectId}`);
             if (!state.currentProject) return;
@@ -1634,8 +1696,6 @@ function startSSE(projectId, opts = {}) {
             }
             renderSidebarNav(state.currentProject);
           } catch (_) { }
-          const agentLabel = agent === 'explainer' ? 'Explicación' : agent === 'recorrido' ? 'Recorrido' : 'Recursos';
-          pushStreamEvent(agentLabel, `Parte ${payload.part_id} lista`);
           break;
         }
 
@@ -1645,20 +1705,25 @@ function startSSE(projectId, opts = {}) {
             project.partes_contenido[key].status = 'completed';
           }
           renderSidebarNav(state.currentProject);
+          // Golden reveal animation on the grid card
+          completeProcPartCard(payload.part_id);
+          // If this part is currently being viewed, refresh its content
           if (state.currentPartId === payload.part_id) {
             selectPart(payload.part_id);
           }
-          setAllAgentsIdle();
-          pushStreamEvent('Parte completada', `Parte ${payload.part_id}`);
           break;
         }
 
         case 'completed':
           project.status = 'completed';
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-completed">Completado</span>`;
-          setAllAgentsIdle();
-          pushStreamEvent('Completado', 'Análisis finalizado');
-          hide($('processing-overlay'));
+          // Update timeline to all-done and hide proc-stage after a brief moment
+          if ($('proc-phase-orb')) $('proc-phase-orb').className = 'proc-phase-orb orb-done';
+          if ($('proc-phase-label')) $('proc-phase-label').textContent = 'Análisis completo';
+          if ($('proc-phase-sub')) $('proc-phase-sub').textContent = 'Todo el contenido está listo';
+          document.querySelectorAll('.proc-step').forEach(el => { el.classList.remove('active'); el.classList.add('done'); });
+          document.querySelectorAll('.proc-step-line').forEach(el => { el.classList.remove('active'); el.classList.add('done'); });
+          setTimeout(() => hideProcessingIndicator(), 1200);
           toast('¡Análisis completo! Ya puedes estudiar todo el contenido.', 'success');
           evtSource.close();
           state.processingSSE = null;

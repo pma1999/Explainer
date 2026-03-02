@@ -2821,3 +2821,759 @@ body {
 .export-section-row.ready .row-dot {
   background: var(--emerald);
 }
+
+/* ============================================================
+   PROC STAGE — Immersive non-blocking loading experience
+   The Scholarly Forge aesthetic: sections emerge from darkness
+   into golden amber as AI agents complete their work.
+   ============================================================ */
+
+/* Container: fills project-main, scrollable */
+.proc-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  background: var(--ink-900, #0c0e14);
+  animation: procStageIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.proc-stage.hidden {
+  display: none !important;
+}
+
+@keyframes procStageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Phase Banner (sticky top strip) ── */
+.proc-phase-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 40px;
+  background: rgba(12, 14, 20, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(232, 184, 109, 0.15);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+
+.proc-phase-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Pulsing status orb */
+.proc-phase-orb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--amber, #f59e0b);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  animation: procOrbPulse 2s ease-in-out infinite;
+}
+
+.proc-phase-orb.orb-upload {
+  background: #60a5fa;
+  box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.4);
+}
+
+.proc-phase-orb.orb-segment {
+  background: #a78bfa;
+  box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.4);
+}
+
+.proc-phase-orb.orb-generate {
+  background: var(--amber, #f59e0b);
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+}
+
+.proc-phase-orb.orb-done {
+  background: #10b981;
+  animation: none;
+}
+
+@keyframes procOrbPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5);
+  }
+
+  60% {
+    box-shadow: 0 0 0 8px rgba(245, 158, 11, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+.proc-phase-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.proc-phase-label {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #f0ece3);
+  letter-spacing: 0.03em;
+}
+
+.proc-phase-sub {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 11px;
+  color: var(--text-muted, #6b7280);
+  letter-spacing: 0.01em;
+}
+
+.proc-phase-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proc-cost-label {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted, #6b7280);
+}
+
+.proc-cost-badge {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold, #e8b86d);
+  letter-spacing: -0.01em;
+  transition: color 0.3s ease;
+}
+
+/* ── 3-step Timeline ── */
+.proc-timeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 20px 40px 0;
+}
+
+.proc-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.proc-step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  background: var(--ink-700, #1a1d28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: border-color 0.4s ease, background 0.4s ease, box-shadow 0.4s ease;
+  font-size: 12px;
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.proc-step-label {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #6b7280);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  transition: color 0.4s ease;
+}
+
+.proc-step-line {
+  flex: 1;
+  min-width: 40px;
+  max-width: 120px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin-bottom: 20px;
+  /* aligns with dot center */
+  position: relative;
+  overflow: hidden;
+}
+
+/* Active step styles */
+.proc-step.active .proc-step-dot {
+  border-color: var(--gold, #e8b86d);
+  background: rgba(232, 184, 109, 0.12);
+  box-shadow: 0 0 16px rgba(232, 184, 109, 0.3);
+}
+
+.proc-step.active .proc-step-dot::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--gold, #e8b86d);
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+}
+
+.proc-step.active .proc-step-label {
+  color: var(--gold, #e8b86d);
+  font-weight: 600;
+}
+
+/* Done step styles */
+.proc-step.done .proc-step-dot {
+  border-color: var(--emerald, #10b981);
+  background: rgba(16, 185, 129, 0.12);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+}
+
+.proc-step.done .proc-step-dot::after {
+  content: '✓';
+  position: absolute;
+  font-size: 12px;
+  color: var(--emerald, #10b981);
+  font-weight: 700;
+}
+
+.proc-step.done .proc-step-label {
+  color: var(--emerald, #10b981);
+}
+
+/* Active line sweep animation */
+.proc-step-line.active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, transparent, var(--gold, #e8b86d), transparent);
+  animation: lineSweep 2s ease-in-out infinite;
+}
+
+.proc-step-line.done {
+  background: rgba(16, 185, 129, 0.35);
+}
+
+@keyframes lineSweep {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  80% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* ── Forge Animation (pre-segmentation) ── */
+.proc-forge {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 60px 40px;
+  position: relative;
+}
+
+.proc-forge.hidden {
+  display: none !important;
+}
+
+.forge-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -60%);
+  /* shift up from center since hint text is below */
+}
+
+.forge-ring-1 {
+  width: 120px;
+  height: 120px;
+  border-top-color: var(--gold, #e8b86d);
+  border-right-color: rgba(232, 184, 109, 0.2);
+  animation: forgeRing1 3s linear infinite;
+}
+
+.forge-ring-2 {
+  width: 180px;
+  height: 180px;
+  border-bottom-color: rgba(129, 140, 248, 0.5);
+  border-left-color: rgba(129, 140, 248, 0.15);
+  animation: forgeRing2 5s linear infinite;
+}
+
+.forge-ring-3 {
+  width: 240px;
+  height: 240px;
+  border-top-color: rgba(232, 184, 109, 0.18);
+  border-right-color: rgba(232, 184, 109, 0.06);
+  animation: forgeRing3 8s linear infinite;
+}
+
+@keyframes forgeRing1 {
+  to {
+    transform: translate(-50%, -60%) rotate(360deg);
+  }
+}
+
+@keyframes forgeRing2 {
+  to {
+    transform: translate(-50%, -60%) rotate(-360deg);
+  }
+}
+
+@keyframes forgeRing3 {
+  to {
+    transform: translate(-50%, -60%) rotate(360deg);
+  }
+}
+
+.forge-core {
+  position: relative;
+  z-index: 2;
+  font-size: 42px;
+  color: var(--gold, #e8b86d);
+  line-height: 1;
+  margin-top: 120px;
+  /* push below the rings */
+  animation: forgeCoreBreath 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 20px rgba(232, 184, 109, 0.4));
+}
+
+@keyframes forgeCoreBreath {
+
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 20px rgba(232, 184, 109, 0.35));
+  }
+
+  50% {
+    transform: scale(1.06);
+    filter: drop-shadow(0 0 32px rgba(232, 184, 109, 0.6));
+  }
+}
+
+.forge-hint {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--text-muted, #6b7280);
+  letter-spacing: 0.04em;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Parts Grid ── */
+.proc-parts-grid {
+  padding: 28px 40px 60px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+
+.proc-parts-grid.hidden {
+  display: none !important;
+}
+
+/* Individual part cards */
+.proc-part-card {
+  background: var(--ink-800, #13151d);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 20px;
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.25s ease;
+  animation: procCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes procCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Skeleton shimmer for pending cards */
+.proc-part-card.pending::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.025) 50%,
+      transparent 100%);
+  animation: procShimmer 2.2s ease-in-out infinite;
+}
+
+@keyframes procShimmer {
+  0% {
+    left: -60%;
+  }
+
+  100% {
+    left: 160%;
+  }
+}
+
+/* Processing card: amber border pulse */
+.proc-part-card.processing {
+  border-color: rgba(232, 184, 109, 0.3);
+  box-shadow: 0 0 0 1px rgba(232, 184, 109, 0.08), 0 0 20px rgba(232, 184, 109, 0.06);
+}
+
+.proc-part-card.processing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(232, 184, 109, 0.2);
+  animation: cardBorderPulse 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes cardBorderPulse {
+
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Completed card: golden reveal */
+.proc-part-card.completed {
+  border-color: rgba(16, 185, 129, 0.3);
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(16, 185, 129, 0.06);
+}
+
+.proc-part-card.completed:hover {
+  border-color: rgba(16, 185, 129, 0.55);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 0 24px rgba(16, 185, 129, 0.08);
+}
+
+.proc-part-card.completed .proc-card-num {
+  color: var(--emerald, #10b981);
+}
+
+/* Card number chip */
+.proc-card-num {
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proc-card-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.4s ease;
+  flex-shrink: 0;
+}
+
+.proc-part-card.processing .proc-card-status-dot {
+  background: var(--gold, #e8b86d);
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.proc-part-card.completed .proc-card-status-dot {
+  background: var(--emerald, #10b981);
+  animation: none;
+}
+
+/* Card title */
+.proc-card-title {
+  font-family: var(--font-display-r, 'Fraunces', Georgia, serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #f0ece3);
+  line-height: 1.35;
+  margin-bottom: 16px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.proc-part-card.pending .proc-card-title {
+  color: var(--text-secondary, #9ca3af);
+}
+
+/* Agent badges row */
+.proc-agent-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.proc-agent-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #6b7280);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 100px;
+  padding: 4px 9px 4px 6px;
+  opacity: 0.45;
+  filter: grayscale(0.8);
+  transition: opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.4s ease,
+    border-color 0.4s ease,
+    transform 0.3s ease;
+}
+
+.proc-agent-badge .badge-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.proc-agent-badge.active {
+  opacity: 0.7;
+  filter: grayscale(0.3);
+  border-color: rgba(232, 184, 109, 0.2);
+  background: rgba(232, 184, 109, 0.06);
+  animation: badgeActive 1.8s ease-in-out infinite;
+}
+
+@keyframes badgeActive {
+
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.proc-agent-badge.done {
+  opacity: 1;
+  filter: grayscale(0);
+  color: var(--text-secondary, #9ca3af);
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+  animation: badgeLightUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes badgeLightUp {
+  from {
+    opacity: 0.4;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Click-to-open hint on completed cards */
+.proc-card-cta {
+  display: none;
+  margin-top: 12px;
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--emerald, #10b981);
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.proc-part-card.completed .proc-card-cta {
+  display: block;
+  animation: procCardIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.proc-part-card.completed:hover .proc-card-cta {
+  opacity: 1;
+}
+
+/* Section count header above the grid */
+.proc-grid-header {
+  grid-column: 1 / -1;
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted, #6b7280);
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 4px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .proc-parts-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    padding: 24px 28px 52px;
+  }
+
+  .proc-phase-banner {
+    padding: 12px 28px;
+  }
+
+  .proc-timeline {
+    padding: 16px 28px 0;
+  }
+}
+
+@media (max-width: 768px) {
+
+  /* Banner stacks on mobile */
+  .proc-phase-banner {
+    padding: 10px 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .proc-phase-right {
+    align-self: flex-end;
+  }
+
+  /* Timeline: hide labels, tighter */
+  .proc-timeline {
+    padding: 12px 16px 0;
+  }
+
+  .proc-step-label {
+    display: none;
+  }
+
+  .proc-step-line {
+    min-width: 24px;
+  }
+
+  /* single-column grid */
+  .proc-parts-grid {
+    grid-template-columns: 1fr;
+    padding: 20px 16px 48px;
+    gap: 12px;
+  }
+
+  .proc-forge {
+    padding: 48px 24px;
+  }
+
+  .forge-ring-1 {
+    width: 90px;
+    height: 90px;
+  }
+
+  .forge-ring-2 {
+    width: 140px;
+    height: 140px;
+  }
+
+  .forge-ring-3 {
+    width: 190px;
+    height: 190px;
+  }
+
+  .forge-core {
+    font-size: 32px;
+    margin-top: 92px;
+  }
+}
+
+@media (max-width: 480px) {
+  .proc-phase-label {
+    font-size: 12px;
+  }
+
+  .proc-cost-badge {
+    font-size: 13px;
+  }
+
+  .proc-part-card {
+    padding: 16px;
+  }
+
+  .proc-card-title {
+    font-size: 14px;
+  }
+}

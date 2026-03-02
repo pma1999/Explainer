@@ -319,41 +319,58 @@
           <span class="mobile-project-name" id="mobile-project-name"></span>
         </div>
 
-        <!-- Processing overlay (Neural Forge — real-time) -->
-        <div class="processing-overlay hidden" id="processing-overlay">
-          <div class="processing-card">
-            <div class="processing-neural-core" id="processing-neural-core">
-              <div class="core-ring core-ring-1"></div>
-              <div class="core-ring core-ring-2"></div>
-              <div class="core-ring core-ring-3"></div>
-            </div>
-            <h3 class="processing-title" id="processing-title">Analizando documento...</h3>
-            <p class="processing-sub" id="processing-sub">Preparando la carga del archivo</p>
-            <div class="processing-agents" id="processing-agents">
-              <div class="agent-node" id="agent-explainer" data-agent="explainer">
-                <span class="agent-signal"></span>
-                <div class="agent-icon">📖</div>
-                <div class="agent-name">Explicación</div>
-              </div>
-              <div class="agent-node" id="agent-recorrido" data-agent="recorrido">
-                <span class="agent-signal"></span>
-                <div class="agent-icon">✍️</div>
-                <div class="agent-name">Recorrido</div>
-              </div>
-              <div class="agent-node" id="agent-resources" data-agent="resources">
-                <span class="agent-signal"></span>
-                <div class="agent-icon">🗺️</div>
-                <div class="agent-name">Recursos</div>
+        <!-- ═══════════════════════════════════════════════════
+             PROC STAGE — Immersive non-blocking loading state
+             ═══════════════════════════════════════════════════ -->
+        <div class="proc-stage hidden" id="proc-stage">
+
+          <!-- Phase banner (sticky top) -->
+          <div class="proc-phase-banner" id="proc-phase-banner">
+            <div class="proc-phase-left">
+              <div class="proc-phase-orb" id="proc-phase-orb"></div>
+              <div class="proc-phase-text">
+                <span class="proc-phase-label" id="proc-phase-label">Iniciando</span>
+                <span class="proc-phase-sub" id="proc-phase-sub">Preparando el análisis</span>
               </div>
             </div>
-            <div class="processing-stream" id="processing-stream">
-              <div class="stream-header">
-                <span class="stream-dot"></span>
-                En vivo
-              </div>
-              <div class="stream-events" id="stream-events"></div>
+            <div class="proc-phase-right">
+              <span class="proc-cost-label">Coste</span>
+              <span class="proc-cost-badge" id="proc-cost-badge">$0.00</span>
             </div>
           </div>
+
+          <!-- 3-step timeline -->
+          <div class="proc-timeline" id="proc-timeline">
+            <div class="proc-step" id="pstep-upload">
+              <div class="proc-step-dot"></div>
+              <span class="proc-step-label">Subida</span>
+            </div>
+            <div class="proc-step-line"></div>
+            <div class="proc-step" id="pstep-segment">
+              <div class="proc-step-dot"></div>
+              <span class="proc-step-label">Segmentación</span>
+            </div>
+            <div class="proc-step-line"></div>
+            <div class="proc-step" id="pstep-generate">
+              <div class="proc-step-dot"></div>
+              <span class="proc-step-label">Generación</span>
+            </div>
+          </div>
+
+          <!-- Pre-segmentation forge animation -->
+          <div class="proc-forge" id="proc-forge">
+            <div class="forge-ring forge-ring-1"></div>
+            <div class="forge-ring forge-ring-2"></div>
+            <div class="forge-ring forge-ring-3"></div>
+            <div class="forge-core">⬡</div>
+            <p class="forge-hint" id="forge-hint">Analizando el documento...</p>
+          </div>
+
+          <!-- Parts grid (injected by JS after segmentation) -->
+          <div class="proc-parts-grid hidden" id="proc-parts-grid">
+            <!-- .proc-part-card elements inserted by JS -->
+          </div>
+
         </div>
 
         <!-- Welcome / no part selected -->
