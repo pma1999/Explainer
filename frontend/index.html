@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Syne:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,600&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,300;1,8..60,400&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -253,38 +253,54 @@
     </div>
   </div>
 
+  <!-- ===== READING PROGRESS BAR (global, powered by JS) ===== -->
+  <div id="reading-progress-bar"></div>
+
   <!-- ===== PROJECT DETAIL VIEW ===== -->
   <div id="view-project" class="view">
     <div class="project-layout">
 
+      <!-- Sidebar overlay (mobile) -->
+      <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
       <!-- Sidebar -->
       <aside class="project-sidebar" id="project-sidebar">
         <div class="sidebar-header">
-          <button class="btn-back" id="btn-back-to-projects">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          <button class="sidebar-back-btn" id="btn-back-to-projects">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
             </svg>
             Proyectos
           </button>
+          <button class="sidebar-collapse-btn" id="btn-sidebar-collapse" title="Colapsar sidebar">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </button>
         </div>
+
         <div class="sidebar-project-info">
           <h3 class="sidebar-project-name" id="sidebar-project-name"></h3>
           <div class="sidebar-status" id="sidebar-status"></div>
         </div>
-        <div class="sidebar-section-title">Partes del texto</div>
+
+        <div class="sidebar-parts-header">
+          <span class="sidebar-section-title">Secciones</span>
+        </div>
         <nav class="sidebar-nav" id="sidebar-nav">
           <!-- Part items injected by JS -->
         </nav>
+
         <div class="sidebar-footer">
           <div class="sidebar-usage-mini" id="sidebar-usage-mini">
             <div class="usage-mini-label">Coste total</div>
             <div class="usage-mini-value" id="mini-total-cost">$0.00</div>
           </div>
           <button class="btn-export-project" id="btn-open-full-export">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor"
-                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+              <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" />
+              <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
             Exportar a Obsidian
           </button>
@@ -294,6 +310,14 @@
 
       <!-- Main content -->
       <main class="project-main" id="project-main">
+
+        <!-- Mobile header bar -->
+        <div class="mobile-header" id="mobile-header">
+          <button class="sidebar-hamburger" id="btn-sidebar-open">
+            <span></span><span></span><span></span>
+          </button>
+          <span class="mobile-project-name" id="mobile-project-name"></span>
+        </div>
 
         <!-- Processing overlay (Neural Forge — real-time) -->
         <div class="processing-overlay hidden" id="processing-overlay">
@@ -335,51 +359,74 @@
         <!-- Welcome / no part selected -->
         <div class="main-welcome" id="main-welcome">
           <div class="welcome-icon">⬡</div>
-          <h3 class="welcome-title" id="welcome-title">Selecciona una parte</h3>
-          <p class="welcome-sub" id="welcome-sub">Elige una parte del sidebar para ver su contenido</p>
+          <h3 class="welcome-title" id="welcome-title">Selecciona una sección</h3>
+          <p class="welcome-sub" id="welcome-sub">Elige una sección del panel lateral para ver su contenido</p>
         </div>
 
         <!-- Part content -->
         <div class="part-content hidden" id="part-content">
+
+          <!-- Reading Toolbar -->
+          <div class="reading-toolbar" id="reading-toolbar">
+            <button class="reading-nav-btn" id="btn-part-prev" disabled>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+              Anterior
+            </button>
+            <div class="reading-toolbar-center">
+              <span class="reading-toolbar-partnum" id="toolbar-part-num">–</span>
+            </div>
+            <button class="reading-nav-btn" id="btn-part-next" disabled>
+              Siguiente
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+
+          <!-- Part header -->
           <div class="part-header">
-            <div class="part-number" id="content-part-number"></div>
-            <div class="part-meta">
-              <h2 class="part-title" id="content-part-title"></h2>
-              <p class="part-description" id="content-part-description"></p>
-              <div class="part-meta-actions">
+            <div class="part-header-top">
+              <div class="part-number-chip" id="content-part-number"></div>
+              <div class="part-header-actions">
                 <div class="part-badges" id="content-part-badges"></div>
-                <button class="btn-ghost btn-sm" id="btn-open-export">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" class="btn-icon-left">
+                <button class="btn-export-inline" id="btn-open-export">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
                     <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
                       stroke-linecap="round" stroke-linejoin="round" />
                     <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                   </svg>
-                  Exportar a Obsidian
+                  Exportar
                 </button>
               </div>
             </div>
-            <div class="part-usage-card" id="project-usage-card">
-              <div class="usage-card-header">
-                <span class="usage-title">Consumo de IA</span>
-                <span class="usage-cost-pill" id="usage-total-cost">$0.00</span>
+            <h2 class="part-title" id="content-part-title"></h2>
+            <p class="part-description" id="content-part-description"></p>
+          </div>
+
+          <!-- Hidden usage data (kept for JS compat) -->
+          <div class="part-usage-card hidden" id="project-usage-card">
+            <div class="usage-card-header">
+              <span class="usage-title">Consumo de IA</span>
+              <span class="usage-cost-pill" id="usage-total-cost">$0.00</span>
+            </div>
+            <div class="usage-grid">
+              <div class="usage-item">
+                <span class="usage-label">Tokens Entrada</span>
+                <span class="usage-value" id="usage-prompt-tokens">0</span>
               </div>
-              <div class="usage-grid">
-                <div class="usage-item">
-                  <span class="usage-label">Tokens Entrada</span>
-                  <span class="usage-value" id="usage-prompt-tokens">0</span>
-                </div>
-                <div class="usage-item">
-                  <span class="usage-label">Tokens Salida</span>
-                  <span class="usage-value" id="usage-output-tokens">0</span>
-                </div>
-                <div class="usage-item">
-                  <span class="usage-label">Pensamiento (IA)</span>
-                  <span class="usage-value" id="usage-thought-tokens">0</span>
-                </div>
-                <div class="usage-item">
-                  <span class="usage-label">Total</span>
-                  <span class="usage-value" id="usage-total-tokens">0</span>
-                </div>
+              <div class="usage-item">
+                <span class="usage-label">Tokens Salida</span>
+                <span class="usage-value" id="usage-output-tokens">0</span>
+              </div>
+              <div class="usage-item">
+                <span class="usage-label">Pensamiento (IA)</span>
+                <span class="usage-value" id="usage-thought-tokens">0</span>
+              </div>
+              <div class="usage-item">
+                <span class="usage-label">Total</span>
+                <span class="usage-value" id="usage-total-tokens">0</span>
               </div>
             </div>
           </div>
@@ -387,13 +434,24 @@
           <!-- Tabs -->
           <div class="tabs-bar">
             <button class="tab-btn active" data-tab="explicacion">
-              <span class="tab-icon">📖</span> Explicación
+              <svg class="tab-svg" width="15" height="15" viewBox="0 0 20 20" fill="none">
+                <path d="M4 6h12M4 10h12M4 14h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              Explicación
             </button>
             <button class="tab-btn" data-tab="recorrido">
-              <span class="tab-icon">✍️</span> Recorrido Anotado
+              <svg class="tab-svg" width="15" height="15" viewBox="0 0 20 20" fill="none">
+                <path d="M3 16L8 6l4 6 3-4 4 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                  stroke-linejoin="round" />
+              </svg>
+              Recorrido Anotado
             </button>
             <button class="tab-btn" data-tab="recursos">
-              <span class="tab-icon">🗺️</span> Recursos
+              <svg class="tab-svg" width="15" height="15" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6" />
+                <path d="M10 6v4l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              Recursos
             </button>
           </div>
 
@@ -403,8 +461,9 @@
               <div class="skeleton-block"></div>
               <div class="skeleton-block skeleton-short"></div>
               <div class="skeleton-block"></div>
+              <div class="skeleton-block skeleton-med"></div>
             </div>
-            <div class="panel-content" id="content-explicacion"></div>
+            <div class="panel-content reading-column" id="content-explicacion"></div>
           </div>
 
           <div class="tab-panel hidden" id="panel-recorrido">
@@ -413,7 +472,7 @@
               <div class="skeleton-block skeleton-short"></div>
               <div class="skeleton-block"></div>
             </div>
-            <div class="panel-content" id="content-recorrido"></div>
+            <div class="panel-content reading-column" id="content-recorrido"></div>
           </div>
 
           <div class="tab-panel hidden" id="panel-recursos">
@@ -423,10 +482,12 @@
             </div>
             <div class="panel-content" id="content-recursos"></div>
           </div>
+
         </div>
       </main>
     </div>
   </div>
+
 
   <!-- ===== OBSIDIAN EXPORT MODAL ===== -->
   <div class="modal-overlay hidden" id="modal-export-obsidian">
@@ -507,8 +568,7 @@
         <form id="form-full-export" class="settings-form">
           <div class="form-group">
             <label for="full-export-autor" class="form-label">Autor</label>
-            <input type="text" id="full-export-autor" class="form-input"
-              placeholder="Ej: James Rachels" />
+            <input type="text" id="full-export-autor" class="form-input" placeholder="Ej: James Rachels" />
           </div>
           <div class="form-group">
             <label for="full-export-obra" class="form-label">Obra</label>
@@ -518,12 +578,10 @@
           <div class="form-actions" style="margin-top: 2rem;">
             <button type="submit" class="btn-primary" id="btn-do-full-export">
               <span class="btn-text">Exportar proyecto</span>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                style="margin-left: 0.5rem;">
-                <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor"
-                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M4 20H20" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round"/>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="margin-left: 0.5rem;">
+                <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M4 20H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
             </button>
           </div>

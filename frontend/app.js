@@ -977,6 +977,7 @@ function renderProjectView(project) {
 
   renderSidebarNav(project);
   updateUsageUI(project.usage);
+  updateMobileHeader();
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
   if (isProcessing) {
@@ -990,12 +991,13 @@ function renderProjectView(project) {
     hide($('part-content'));
     const hasPartes = project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0;
     const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
-    $('welcome-title').textContent = hasPartes ? 'Selecciona una parte' : (isProcessing ? 'Procesando...' : 'Sin contenido');
+    $('welcome-title').textContent = hasPartes ? 'Selecciona una sección' : (isProcessing ? 'Procesando...' : 'Sin contenido');
     $('welcome-sub').textContent = hasPartes
-      ? 'Haz clic en cualquier parte completada para ver su contenido mientras se genera el resto.'
-      : (isProcessing ? 'El análisis está en curso. Los resultados aparecerán en el sidebar.' : 'No hay partes disponibles.');
+      ? 'Haz clic en cualquier sección completada para ver su contenido.'
+      : (isProcessing ? 'El análisis está en curso. Los resultados aparecerán en el panel lateral.' : 'No hay secciones disponibles.');
   }
 }
+
 
 function renderSidebarNav(project) {
   const nav = $('sidebar-nav');
@@ -1172,7 +1174,7 @@ function selectPart(partId) {
   const parte = project.segmentation.partes.find(p => p.numero === partId);
   const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
 
-  $('content-part-number').textContent = `PARTE ${partId}`;
+  $('content-part-number').textContent = `Sección ${partId}`;
   $('content-part-title').textContent = parte.titulo;
   $('content-part-description').textContent = parte.contenido;
   $('content-part-badges').innerHTML = `
@@ -1186,6 +1188,14 @@ function selectPart(partId) {
   renderTab('recursos', contenido);
 
   activateTab(state.activeTab);
+
+  // Scroll reading area back to top
+  const main = $('project-main');
+  if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // Update toolbar & mobile header
+  updateReadingToolbar();
+  updateMobileHeader();
 
   // Save view state when selecting a part
   saveViewState();
@@ -2062,14 +2072,20 @@ function buildFullExportSections(autor, obra) {
     const files = [];
 
     if (partData.explainer)
-      files.push({ filename: 'explicacion.md',
-                   content: formatExplicacionMd(partData.explainer, autor, obra, parte.titulo) });
+      files.push({
+        filename: 'explicacion.md',
+        content: formatExplicacionMd(partData.explainer, autor, obra, parte.titulo)
+      });
     if (partData.recorrido)
-      files.push({ filename: 'recorrido-anotado.md',
-                   content: formatRecorridoMd(partData.recorrido, autor, obra, parte.titulo) });
+      files.push({
+        filename: 'recorrido-anotado.md',
+        content: formatRecorridoMd(partData.recorrido, autor, obra, parte.titulo)
+      });
     if (partData.resources)
-      files.push({ filename: 'recursos.md',
-                   content: formatRecursosMd(partData.resources, autor, obra, parte.titulo) });
+      files.push({
+        filename: 'recursos.md',
+        content: formatRecursosMd(partData.resources, autor, obra, parte.titulo)
+      });
 
     if (files.length > 0) sections.push({ folderName, files });
   }
@@ -2131,15 +2147,15 @@ async function exportViaSequentialDownload(sections) {
 }
 
 function initFullProjectExport() {
-  const modal       = $('modal-full-export');
-  const btnOpen     = $('btn-open-full-export');
-  const btnClose    = $('btn-close-full-export');
-  const form        = $('form-full-export');
-  const inputAutor  = $('full-export-autor');
-  const inputObra   = $('full-export-obra');
+  const modal = $('modal-full-export');
+  const btnOpen = $('btn-open-full-export');
+  const btnClose = $('btn-close-full-export');
+  const form = $('form-full-export');
+  const inputAutor = $('full-export-autor');
+  const inputObra = $('full-export-obra');
   const summaryText = $('full-export-summary-text');
   const sectionList = $('full-export-section-list');
-  const btnSubmit   = $('btn-do-full-export');
+  const btnSubmit = $('btn-do-full-export');
 
   if (!modal || !btnOpen) return;
 
@@ -2150,7 +2166,7 @@ function initFullProjectExport() {
     // Pre-rellenar metadatos desde el nombre del proyecto
     const { autor, obra } = prefillFromProjectName(project.name);
     inputAutor.value = autor;
-    inputObra.value  = obra;
+    inputObra.value = obra;
 
     // Calcular resumen de secciones listas
     const partes = project.segmentation?.partes ?? [];
@@ -2183,7 +2199,7 @@ function initFullProjectExport() {
     if (!state.currentProject) return;
 
     const autor = inputAutor.value.trim() || 'Desconocido';
-    const obra  = inputObra.value.trim()  || 'Desconocida';
+    const obra = inputObra.value.trim() || 'Desconocida';
     const sections = buildFullExportSections(autor, obra);
 
     if (!sections) {
@@ -2192,7 +2208,7 @@ function initFullProjectExport() {
     }
 
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const btnText  = btnSubmit.querySelector('.btn-text');
+    const btnText = btnSubmit.querySelector('.btn-text');
     const origText = btnText.textContent;
     btnSubmit.disabled = true;
     btnText.textContent = 'Exportando...';
@@ -2424,5 +2440,122 @@ document.addEventListener('DOMContentLoaded', () => {
   initVisibilityHandling();
   initObsidianExport();
   initFullProjectExport();
+  initReadingProgressBar();
+  initSidebarMobile();
+  initSidebarCollapse();
+  initPartNavigation();
   initApp();
 });
+
+// ── READING PROGRESS BAR ─────────────────────────────────────
+function initReadingProgressBar() {
+  const bar = $('reading-progress-bar');
+  const main = $('project-main');
+  if (!bar || !main) return;
+
+  main.addEventListener('scroll', () => {
+    const { scrollTop, scrollHeight, clientHeight } = main;
+    const pct = scrollHeight <= clientHeight ? 0 : (scrollTop / (scrollHeight - clientHeight)) * 100;
+    bar.style.width = pct + '%';
+  }, { passive: true });
+}
+
+// ── MOBILE SIDEBAR DRAWER ────────────────────────────────────
+function initSidebarMobile() {
+  const sidebar = $('project-sidebar');
+  const overlay = $('sidebar-overlay');
+  const openBtn = $('btn-sidebar-open');
+
+  if (!sidebar || !overlay || !openBtn) return;
+
+  openBtn.addEventListener('click', () => {
+    sidebar.classList.add('open');
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  });
+
+  // Close on overlay click
+  overlay.addEventListener('click', closeMobileSidebar);
+
+  // Also close when a part is tapped on mobile
+  sidebar.addEventListener('click', (e) => {
+    if (e.target.closest('.sidebar-part') && window.innerWidth <= 768) {
+      closeMobileSidebar();
+    }
+  });
+
+  function closeMobileSidebar() {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+}
+
+// ── DESKTOP SIDEBAR COLLAPSE ─────────────────────────────────
+function initSidebarCollapse() {
+  const sidebar = $('project-sidebar');
+  const collapseBtn = $('btn-sidebar-collapse');
+  const layout = document.querySelector('.project-layout');
+
+  if (!sidebar || !collapseBtn) return;
+
+  collapseBtn.addEventListener('click', () => {
+    const collapsed = sidebar.classList.toggle('collapsed');
+    collapseBtn.style.transform = collapsed ? 'rotate(180deg)' : '';
+    // Push main content
+    if (layout) layout.classList.toggle('sidebar-hidden', collapsed);
+  });
+}
+
+// ── PART NAVIGATION (prev / next) ───────────────────────────
+function initPartNavigation() {
+  const prevBtn = $('btn-part-prev');
+  const nextBtn = $('btn-part-next');
+
+  if (!prevBtn || !nextBtn) return;
+
+  prevBtn.addEventListener('click', () => navigateToPart(-1));
+  nextBtn.addEventListener('click', () => navigateToPart(1));
+}
+
+function navigateToPart(delta) {
+  if (!state.currentProject?.partes) return;
+  const partes = state.currentProject.partes;
+  const idx = partes.findIndex(p => String(p.id) === String(state.currentPartId));
+  if (idx === -1) return;
+  const next = partes[idx + delta];
+  if (next) selectPart(next.id);
+}
+
+/**
+ * Update the reading toolbar prev/next buttons and label based on current part index.
+ */
+function updateReadingToolbar() {
+  const prevBtn = $('btn-part-prev');
+  const nextBtn = $('btn-part-next');
+  const label = $('toolbar-part-num');
+  if (!prevBtn || !nextBtn || !label) return;
+
+  const partes = state.currentProject?.partes || [];
+  const idx = partes.findIndex(p => String(p.id) === String(state.currentPartId));
+
+  prevBtn.disabled = idx <= 0;
+  nextBtn.disabled = idx === -1 || idx >= partes.length - 1;
+
+  if (idx !== -1) {
+    label.textContent = `Sección ${idx + 1} de ${partes.length}`;
+  } else {
+    label.textContent = '–';
+  }
+}
+
+/**
+ * Update mobile header name.
+ */
+function updateMobileHeader() {
+  const el = $('mobile-project-name');
+  if (el && state.currentProject) {
+    el.textContent = state.currentProject.name || '';
+  }
+}
+
