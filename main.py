@@ -278,10 +278,10 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         def _update_usage(usage_meta, phase: str = "unknown"):
             if not usage_meta:
                 return
-            p = getattr(usage_meta, "prompt_token_count", 0)
-            c = getattr(usage_meta, "candidates_token_count", 0)
-            t = getattr(usage_meta, "thoughts_token_count", 0)
-            tt = getattr(usage_meta, "total_token_count", 0)
+            p = getattr(usage_meta, "prompt_token_count", 0) or 0
+            c = getattr(usage_meta, "candidates_token_count", 0) or 0
+            t = getattr(usage_meta, "thoughts_token_count", 0) or 0
+            tt = getattr(usage_meta, "total_token_count", 0) or 0
             cumulative_usage["prompt_tokens"] += p
             cumulative_usage["candidates_tokens"] += c
             cumulative_usage["thoughts_tokens"] += t
