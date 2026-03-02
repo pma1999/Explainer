@@ -29,9 +29,10 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   4. **Sentido y Utilidad**: Tu prioridad absoluta es encontrar la **mejor división posible, la que más sentido tenga** pedagógicamente. No divides por algoritmos rígidos; divides allí donde el texto "pide" un cambio de módulo para facilitar el aprendizaje.
   5. **Economía racional de partes**: Buscas el punto óptimo: ni microdivisión agotadora ni macrodivisión abrumadora. **No separas por separar**; solo creas una nueva parte cuando hay una ruptura temática real que justifica un nuevo módulo de estudio.
   6. **Marcadores estructurales**: Priorizas divisiones en cambios de tema, capítulos, secciones, o transiciones naturales del texto. Si el texto no tiene estructura clara, la identificas por cambios de argumento o contenido.
+  7. **Identificación precisa de páginas**: Cada página del documento PDF tiene una marca visible en la parte inferior con el formato "— Página X / N —". DEBES usar estas marcas para identificar con precisión en qué página empieza y termina cada parte. Las páginas que no contengan contenido sustantivo (portadas, índices, páginas en blanco) pueden excluirse, pero toda página con contenido debe estar asignada a alguna parte.
 
   **Principios MECE (Mutually Exclusive, Collectively Exhaustive):**
-  - **Cobertura total (Collectively Exhaustive)**: Cada palabra, párrafo y tema del texto original debe pertenecer a una y solo una parte. No puede quedar contenido sin asignar.
+  - **Cobertura total (Collectively Exhaustive)**: Cada palabra, párrafo y tema del texto original debe pertenecer a una y solo una parte. No puede quedar contenido sin asignar. Todas las páginas con contenido sustantivo deben estar cubiertas por los rangos de página de las partes.
   - **Exclusividad mutua (Mutually Exclusive)**: Las partes no deben solaparse temáticamente. Cada tema/subtema aparece en exactamente una parte, nunca en varias.
   - **No artificialidad**: Prohibido separar un tema que debería ser unitario solo para crear más partes, o juntar temas conceptualmente independientes solo para reducir el número de partes.
   - **Asignación explícita**: Cada tema identificado en el texto debe quedar asignado explícitamente a una parte específica.
@@ -163,14 +164,15 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
   - El número de partes es el mínimo necesario para garantizar MECE según el contenido
 - Articula por qué esta opción es mejor que las otras
 
-**PASO 6 - DEFINICIÓN PRECISA DE IDENTIFICACIÓN:**
+**PASO 6 - DEFINICIÓN PRECISA DE IDENTIFICACIÓN Y PÁGINAS:**
 - Para cada parte de tu propuesta, recopila TODA la información necesaria para una identificación autocontenida:
   - Capítulo/Sección/Apartado COMPLETO (número + título exacto)
   - Subsección o punto específico de inicio (número + título exacto)
-  - Páginas específicas (inicio y fin)
+  - **Páginas exactas**: Usa las marcas visibles "— Página X / N —" de cada página para determinar con precisión el número de la primera página (pagina_inicio) y la última página (pagina_fin) de esta parte. Estos números deben coincidir EXACTAMENTE con las marcas visibles del PDF.
   - Primeras palabras textuales exactas del inicio (al menos 8-10 palabras entre comillas)
   - Últimas palabras textuales exactas del fin (al menos 8-10 palabras entre comillas)
   - Referencia al elemento siguiente que delimita el fin
+- Verifica que los rangos de página de todas las partes cubran TODAS las páginas con contenido sustantivo del documento
 - Verifica que esta identificación funcione SIN necesidad de leer la sección "Contenido"
 
 Solo tras completar estos 6 pasos, genera tu output estructurado en el formato especificado.
@@ -214,6 +216,8 @@ RESPONSE_SCHEMA = genai.types.Schema(
                     "titulo",
                     "contenido",
                     "identificacion",
+                    "pagina_inicio",
+                    "pagina_fin",
                     "temas_cubiertos",
                     "extension_estimada",
                     "complejidad",
@@ -234,7 +238,21 @@ RESPONSE_SCHEMA = genai.types.Schema(
                         description=(
                             "Identificación autocontenida y precisa de dónde empieza y "
                             "termina esta parte en el texto original, con frases textuales "
-                            "de inicio y fin, capítulo/sección y páginas si las hay."
+                            "de inicio y fin, capítulo/sección y páginas exactas."
+                        ),
+                    ),
+                    "pagina_inicio": genai.types.Schema(
+                        type=genai.types.Type.INTEGER,
+                        description=(
+                            "Número de la primera página del PDF que contiene contenido de esta parte "
+                            "(1-indexed, según la marca visible '— Página X / N —' del documento)."
+                        ),
+                    ),
+                    "pagina_fin": genai.types.Schema(
+                        type=genai.types.Type.INTEGER,
+                        description=(
+                            "Número de la última página del PDF que contiene contenido de esta parte "
+                            "(1-indexed, según la marca visible '— Página X / N —' del documento)."
                         ),
                     ),
                     "temas_cubiertos": genai.types.Schema(

@@ -45,6 +45,7 @@ from backend.agents.explainer import run_explainer
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
+from backend.pdf_utils import add_page_numbers, extract_page_range
 
 
 # Configurar logging al importar el módulo
@@ -224,6 +225,8 @@ async def api_delete_project(
 async def _process_project(project_id: str, user_id: str, model_name: str = "gemini-3-flash-preview") -> None:
     process_start_time = time.time()
     pdf_temp_path = None
+    numbered_pdf_path = None
+    segment_pdf_paths: list[str] = []
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -332,8 +335,13 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
 
             logger.info(f"[Process] PDF descargado temporalmente: {pdf_temp_path}")
 
+            # Add visible page numbers to the PDF before uploading
+            logger.info("[Process] Añadiendo numeración de páginas al PDF")
+            numbered_pdf_path = await asyncio.to_thread(add_page_numbers, pdf_temp_path)
+            logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
+
             upload_start = time.time()
-            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, pdf_temp_path, max_retries=5))
+            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
             upload_duration = (time.time() - upload_start) * 1000
 
             file_uri = uploaded_file.uri
@@ -385,6 +393,23 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         })
         await send_event(project_id, {"type": "segmented", "partes": partes_preview})
 
+        # Build Table of Contents for downstream agents (PDF only)
+        table_of_contents = ""
+        is_pdf_source = source_type != "youtube"
+        if is_pdf_source:
+            toc_lines = ["TABLA DE CONTENIDOS DEL DOCUMENTO COMPLETO:"]
+            for p in segmentation["partes"]:
+                pg_start = p.get("pagina_inicio", "?")
+                pg_end = p.get("pagina_fin", "?")
+                toc_lines.append(
+                    f"  Parte {p['numero']}/{num_partes}: \"{p['titulo']}\" (Páginas {pg_start}-{pg_end})"
+                )
+            table_of_contents = "\n".join(toc_lines)
+            logger.info(
+                f"[Process] Tabla de contenidos generada ({len(toc_lines)-1} entradas)",
+                extra={"toc_preview": table_of_contents[:300]}
+            )
+
         # Procesar cada parte
         logger.info(f"[Process] Comenzando procesamiento de {num_partes} partes")
 
@@ -409,12 +434,77 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             update_project(project_id, user_id, {"partes_contenido": partes_contenido})
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
+            # For PDF: extract sub-PDF with relevant pages and upload it
+            # For YouTube: use the full file_uri as before
+            agent_file_uri = file_uri
+            agent_prompt = identificacion
+            segment_temp_path = None
+
+            if is_pdf_source and numbered_pdf_path:
+                pagina_inicio = parte.get("pagina_inicio")
+                pagina_fin = parte.get("pagina_fin")
+
+                if pagina_inicio and pagina_fin:
+                    try:
+                        # Extract sub-PDF with buffer pages
+                        logger.info(
+                            f"[Process] Extrayendo páginas {pagina_inicio}-{pagina_fin} (±1 buffer) para parte {part_id}",
+                            extra={"pagina_inicio": pagina_inicio, "pagina_fin": pagina_fin}
+                        )
+                        segment_temp_path = await asyncio.to_thread(
+                            extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
+                        )
+                        segment_pdf_paths.append(segment_temp_path)
+
+                        # Upload sub-PDF to Gemini
+                        seg_upload_start = time.time()
+                        segment_uploaded = await asyncio.to_thread(
+                            lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
+                        )
+                        seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                        agent_file_uri = segment_uploaded.uri
+
+                        logger.info(
+                            f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
+                            extra={
+                                "segment_uri": agent_file_uri,
+                                "seg_upload_duration_ms": int(seg_upload_duration),
+                            }
+                        )
+                    except Exception as seg_err:
+                        # Fallback: use full PDF if sub-PDF extraction fails
+                        logger.warning(
+                            f"[Process] Error extrayendo sub-PDF para parte {part_id}, usando PDF completo: {seg_err}",
+                            extra={"error_type": type(seg_err).__name__}
+                        )
+                        agent_file_uri = file_uri
+                else:
+                    logger.warning(
+                        f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
+                    )
+
+                # Build augmented prompt with TOC for PDF source
+                toc_with_marker = table_of_contents.replace(
+                    f"  Parte {part_id}/{num_partes}:",
+                    f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+                )
+                agent_prompt = (
+                    f"{toc_with_marker}\n\n"
+                    f"---\n\n"
+                    f"INSTRUCCIONES PARA ESTA PARTE:\n"
+                    f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
+                    f"El PDF adjunto contiene las páginas relevantes para esta parte. "
+                    f"La tabla de contenidos anterior muestra la estructura completa del documento "
+                    f"para que tengas contexto de dónde se sitúa esta parte.\n\n"
+                    f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+                )
+
             # Ejecutar los tres agentes en paralelo
             agents_start = time.time()
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, file_uri, identificacion, model_name),
-                asyncio.to_thread(run_recorrido, api_key, file_uri, identificacion, model_name),
-                asyncio.to_thread(run_resources, api_key, file_uri, identificacion, model_name),
+                asyncio.to_thread(run_explainer, api_key, agent_file_uri, agent_prompt, model_name),
+                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, model_name),
+                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, model_name),
                 return_exceptions=True,
             )
             agents_duration = (time.time() - agents_start) * 1000
@@ -562,12 +652,14 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
-        if pdf_temp_path and os.path.isfile(pdf_temp_path):
-            try:
-                os.unlink(pdf_temp_path)
-                logger.debug(f"[Process] Archivo temporal eliminado: {pdf_temp_path}")
-            except OSError as e:
-                logger.warning(f"[Process] No se pudo eliminar archivo temporal: {e}")
+        # Clean up all temporary PDF files
+        for temp_path in [pdf_temp_path, numbered_pdf_path] + segment_pdf_paths:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.unlink(temp_path)
+                    logger.debug(f"[Process] Archivo temporal eliminado: {temp_path}")
+                except OSError as e:
+                    logger.warning(f"[Process] No se pudo eliminar archivo temporal {temp_path}: {e}")
         await sse_manager.end_stream(project_id)
         logger.debug(f"[Process] Stream SSE cerrado para proyecto: {project_id}")
 
