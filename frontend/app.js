@@ -2519,12 +2519,12 @@ function initPartNavigation() {
 }
 
 function navigateToPart(delta) {
-  if (!state.currentProject?.partes) return;
-  const partes = state.currentProject.partes;
-  const idx = partes.findIndex(p => String(p.id) === String(state.currentPartId));
+  const partes = state.currentProject?.segmentation?.partes;
+  if (!partes) return;
+  const idx = partes.findIndex(p => p.numero === state.currentPartId);
   if (idx === -1) return;
   const next = partes[idx + delta];
-  if (next) selectPart(next.id);
+  if (next) selectPart(next.numero);
 }
 
 /**
@@ -2536,8 +2536,8 @@ function updateReadingToolbar() {
   const label = $('toolbar-part-num');
   if (!prevBtn || !nextBtn || !label) return;
 
-  const partes = state.currentProject?.partes || [];
-  const idx = partes.findIndex(p => String(p.id) === String(state.currentPartId));
+  const partes = state.currentProject?.segmentation?.partes || [];
+  const idx = partes.findIndex(p => p.numero === state.currentPartId);
 
   prevBtn.disabled = idx <= 0;
   nextBtn.disabled = idx === -1 || idx >= partes.length - 1;
