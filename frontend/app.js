@@ -2560,17 +2560,22 @@ function initSidebarMobile() {
 function initSidebarCollapse() {
   const sidebar = $('project-sidebar');
   const collapseBtn = $('btn-sidebar-collapse');
+  const expandBtn = $('btn-sidebar-expand');
   const layout = document.querySelector('.project-layout');
 
   if (!sidebar || !collapseBtn) return;
 
-  collapseBtn.addEventListener('click', () => {
+  function toggleSidebar() {
     const collapsed = sidebar.classList.toggle('collapsed');
     collapseBtn.style.transform = collapsed ? 'rotate(180deg)' : '';
     // Push main content
     if (layout) layout.classList.toggle('sidebar-hidden', collapsed);
-  });
+  }
+
+  collapseBtn.addEventListener('click', toggleSidebar);
+  if (expandBtn) expandBtn.addEventListener('click', toggleSidebar);
 }
+
 
 // ── PART NAVIGATION (prev / next) ───────────────────────────
 function initPartNavigation() {

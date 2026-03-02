@@ -994,6 +994,41 @@ body {
   margin-left: 0;
 }
 
+/* Expand sidebar button — shown only when sidebar is collapsed on desktop */
+.sidebar-expand-btn {
+  display: none;
+  /* hidden by default */
+  position: fixed;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 52px;
+  background: var(--ink-700);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  z-index: 41;
+  transition: background 0.2s, color 0.2s, width 0.2s;
+}
+
+.sidebar-expand-btn:hover {
+  background: var(--ink-600);
+  color: var(--gold);
+  width: 28px;
+}
+
+/* Show only when sidebar-hidden is applied on the layout */
+.project-layout.sidebar-hidden .sidebar-expand-btn {
+  display: flex;
+}
+
+
+
 /* Sidebar project info */
 .sidebar-project-info {
   padding: 20px 18px 16px;
@@ -2050,10 +2085,12 @@ body {
     transform: translateX(0);
   }
 
-  /* Hide desktop collapse btn on mobile */
-  .sidebar-collapse-btn {
+  /* Hide desktop collapse/expand btns on mobile */
+  .sidebar-collapse-btn,
+  .sidebar-expand-btn {
     display: none;
   }
+
 
   .reading-toolbar {
     padding: 8px 20px;
