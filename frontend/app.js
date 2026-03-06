@@ -86,6 +86,64 @@ function getCachedProject(projectId) {
   return backup.projects.find((p) => p.id === projectId) || null;
 }
 
+/** Returns the first section number not yet marked as read, or null if all read or no sections. */
+function getFirstIncompletePart(project) {
+  const partes = project?.segmentation?.partes || [];
+  const completed = new Set(project?.reading_progress?.completed_parts || []);
+  return partes.find((p) => !completed.has(p.numero))?.numero ?? null;
+}
+
+/** Mark a section as read. Fire-and-forget; updates state and sidebar on success. No toast. */
+async function markSectionComplete(partId) {
+  if (!state.currentProjectId || !state.currentProject || !state.user?.id) return;
+  const project = state.currentProject;
+  const contenido = project.partes_contenido?.[String(partId)];
+  if (!contenido || contenido.status !== 'completed') return;
+  const completed = new Set(project?.reading_progress?.completed_parts || []);
+  if (completed.has(partId)) return;
+
+  try {
+    const updated = await api(`/api/projects/${state.currentProjectId}/progress`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_id: partId }),
+    });
+    if (updated?.reading_progress) {
+      state.currentProject.reading_progress = updated.reading_progress;
+      renderSidebarNav(state.currentProject);
+    }
+  } catch (_) {
+    // Silent fail; progress will retry on next action
+  }
+}
+
+/** Toggle section read status manually. completed=true marks as read, completed=false unmarks. Shows toast. */
+async function toggleSectionComplete(partId, completed) {
+  if (!state.currentProjectId || !state.currentProject || !state.user?.id) return;
+  const project = state.currentProject;
+  const contenido = project.partes_contenido?.[String(partId)];
+  if (!contenido || contenido.status !== 'completed') return;
+  const completedSet = new Set(project?.reading_progress?.completed_parts || []);
+  if (completed && completedSet.has(partId)) return;
+  if (!completed && !completedSet.has(partId)) return;
+
+  try {
+    const updated = await api(`/api/projects/${state.currentProjectId}/progress`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_id: partId, completed }),
+    });
+    if (updated?.reading_progress) {
+      state.currentProject.reading_progress = updated.reading_progress;
+      renderSidebarNav(state.currentProject);
+      updateToggleCompleteButton();
+      toast(completed ? 'Marcada como leída' : 'Marcada como no leída', 'success');
+    }
+  } catch (_) {
+    toast('Error al actualizar el progreso', 'error');
+  }
+}
+
 function payloadToJsonFile(payload, filename = 'explainer-sync.json') {
   return new File([JSON.stringify(payload, null, 2)], filename, { type: 'application/json' });
 }
@@ -373,7 +431,7 @@ async function restoreProjectView(projectId, partId, activeTab) {
 
     renderProjectView(project);
 
-    // Restore part selection if specified
+    // Restore part selection if specified, or navigate to first incomplete
     if (partId && project.segmentation?.partes?.some(p => p.numero === partId)) {
       state.currentPartId = partId;
       state.activeTab = activeTab;
@@ -382,6 +440,16 @@ async function restoreProjectView(projectId, partId, activeTab) {
     } else if (partId) {
       // Invalid partId — redirect to project overview
       if (typeof replaceRoute === 'function') replaceRoute({ view: 'project', projectId });
+    } else if (project.status === 'completed') {
+      const firstIncomplete = getFirstIncompletePart(project);
+      if (firstIncomplete && typeof pushRoute === 'function') {
+        pushRoute({
+          view: 'project',
+          projectId,
+          partId: firstIncomplete,
+          tab: 'explicacion',
+        });
+      }
     }
 
     // Restart SSE if project is still processing
@@ -1010,6 +1078,19 @@ async function openProjectView(projectId) {
 
     renderProjectView(project);
 
+    // Navigate to first incomplete section when opening without explicit partId
+    if (!state.currentPartId && project.status === 'completed') {
+      const firstIncomplete = getFirstIncompletePart(project);
+      if (firstIncomplete && typeof pushRoute === 'function') {
+        pushRoute({
+          view: 'project',
+          projectId,
+          partId: firstIncomplete,
+          tab: 'explicacion',
+        });
+      }
+    }
+
     const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
     if (isProcessing) {
       // Si ya hay SSE para este proyecto, no recrear; si es de otro, cerrar y crear nuevo
@@ -1106,10 +1187,14 @@ function renderSidebarNav(project) {
 
   const projectId = state.currentProjectId;
 
+  const completedParts = new Set(project?.reading_progress?.completed_parts || []);
+
   project.segmentation.partes.forEach(parte => {
     const partId = parte.numero;
     const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
     const status = contenido ? contenido.status : 'pending';
+    const isRead = completedParts.has(partId);
+    const canToggle = status === 'completed';
 
     const dotClass = {
       pending: 'dot-pending',
@@ -1127,16 +1212,32 @@ function renderSidebarNav(project) {
         })
       : '#';
 
+    const toggleBtnHtml = canToggle
+      ? `<button type="button" class="part-read-toggle${isRead ? ' is-read' : ''}" data-part-id="${partId}" aria-label="${isRead ? 'Marcar como no leída' : 'Marcar como leída'}" title="${isRead ? 'Marcar como no leída' : 'Marcar como leída'}">${isRead ? '✓' : '○'}</button>`
+      : '';
+
     const el = document.createElement('a');
-    el.className = `sidebar-part${state.currentPartId === partId ? ' active' : ''}`;
+    el.className = `sidebar-part${state.currentPartId === partId ? ' active' : ''}${isRead ? ' part-read' : ''}`;
     el.dataset.partId = partId;
     el.href = href;
     el.innerHTML = `
       <span class="part-num">P${partId}</span>
       <span class="part-label">${escHtml(parte.titulo)}</span>
       <span class="part-status-dot ${dotClass}"></span>
+      ${toggleBtnHtml}
     `;
     nav.appendChild(el);
+
+    if (canToggle) {
+      const toggleBtn = el.querySelector('.part-read-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleSectionComplete(partId, !isRead);
+        });
+      }
+    }
   });
 }
 
@@ -1385,6 +1486,7 @@ function selectPart(partId) {
   // Update toolbar & mobile header
   updateReadingToolbar();
   updateMobileHeader();
+  updateToggleCompleteButton();
 
   saveViewState();
 }
@@ -2632,10 +2734,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarCollapse();
   initPartNavigation();
   initCopyLink();
+  initToggleComplete();
   initApp();
 });
 
-// ── READING PROGRESS BAR ─────────────────────────────────────
+// ── READING PROGRESS BAR + SCROLL-BASED COMPLETION ─────────────
+const scrollMarkedParts = new Set();
+let scrollCompleteDebounce = null;
+
 function initReadingProgressBar() {
   const bar = $('reading-progress-bar');
   const main = $('project-main');
@@ -2645,6 +2751,17 @@ function initReadingProgressBar() {
     const { scrollTop, scrollHeight, clientHeight } = main;
     const pct = scrollHeight <= clientHeight ? 0 : (scrollTop / (scrollHeight - clientHeight)) * 100;
     bar.style.width = pct + '%';
+
+    // Mark section complete when user scrolls 80%+
+    const partId = state.currentPartId;
+    if (partId && pct >= 80 && !scrollMarkedParts.has(partId)) {
+      if (scrollCompleteDebounce) clearTimeout(scrollCompleteDebounce);
+      scrollCompleteDebounce = setTimeout(() => {
+        scrollCompleteDebounce = null;
+        scrollMarkedParts.add(partId);
+        markSectionComplete(partId);
+      }, 500);
+    }
   }, { passive: true });
 }
 
@@ -2718,6 +2835,10 @@ function navigateToPart(delta) {
   if (idx === -1) return;
   const next = partes[idx + delta];
   if (next && typeof pushRoute === 'function') {
+    // Mark current section as read when navigating to next
+    if (delta === 1 && state.currentPartId) {
+      markSectionComplete(state.currentPartId);
+    }
     pushRoute({
       view: 'project',
       projectId: state.currentProjectId,
@@ -2725,6 +2846,18 @@ function navigateToPart(delta) {
       tab: state.activeTab,
     });
   }
+}
+
+// ── TOGGLE COMPLETE (manual mark/unmark) ────────────────────
+function initToggleComplete() {
+  const btn = $('btn-toggle-complete');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    if (!state.currentProjectId || !state.currentPartId) return;
+    const isRead = btn.dataset.completed === 'true';
+    await toggleSectionComplete(state.currentPartId, !isRead);
+  });
 }
 
 // ── COPY LINK ──────────────────────────────────────────────
@@ -2771,6 +2904,38 @@ function updateReadingToolbar() {
   } else {
     label.textContent = '–';
   }
+}
+
+/**
+ * Update the toggle-complete button visibility and state.
+ */
+function updateToggleCompleteButton() {
+  const btn = $('btn-toggle-complete');
+  if (!btn) return;
+  const project = state.currentProject;
+  const partId = state.currentPartId;
+  if (!project || !partId) {
+    btn.style.display = 'none';
+    return;
+  }
+  const contenido = project.partes_contenido?.[String(partId)];
+  if (!contenido || contenido.status !== 'completed') {
+    btn.style.display = 'none';
+    return;
+  }
+  const isRead = new Set(project?.reading_progress?.completed_parts || []).has(partId);
+  btn.style.display = '';
+  btn.title = isRead ? 'Marcar como no leída' : 'Marcar como leída';
+  btn.dataset.completed = isRead ? 'true' : 'false';
+  const textEl = btn.querySelector('.btn-toggle-complete-text');
+  const iconEl = btn.querySelector('.toggle-complete-icon');
+  if (textEl) textEl.textContent = isRead ? 'Marcar como no leída' : 'Marcar como leída';
+  if (iconEl) {
+    iconEl.innerHTML = isRead
+      ? '<path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />'
+      : '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" />';
+  }
+  btn.classList.toggle('is-read', isRead);
 }
 
 /**

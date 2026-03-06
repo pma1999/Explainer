@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 
 ALLOWED_MODELS = {"gemini-3-flash-preview", "gemini-3.1-pro-preview"}
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,7 @@ from backend.supabase_data import (
     get_project,
     list_projects,
     update_project,
+    set_section_read_status,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -69,7 +70,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -209,6 +210,46 @@ async def api_get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
+
+
+@app.patch("/api/projects/{project_id}/progress")
+async def api_update_progress(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    body: dict = Body(...),
+):
+    """Mark or unmark a section as read. Body: { "part_id": 3, "completed": true|false }.
+    If completed is omitted, defaults to True (mark as read)."""
+    part_id = body.get("part_id")
+    if part_id is None:
+        raise HTTPException(status_code=400, detail="part_id requerido")
+    try:
+        part_id = int(part_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="part_id debe ser un número")
+
+    completed = body.get("completed", True)
+    if not isinstance(completed, bool):
+        completed = True
+
+    project = get_project(project_id, user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    partes = project.get("segmentation") or {}
+    partes_list = partes.get("partes") or []
+    if not any(p.get("numero") == part_id for p in partes_list):
+        raise HTTPException(status_code=400, detail="Sección no encontrada")
+
+    contenido = project.get("partes_contenido") or {}
+    part_status = contenido.get(str(part_id), {}).get("status")
+    if part_status != "completed":
+        raise HTTPException(status_code=400, detail="El contenido de esta sección aún no está listo")
+
+    updated = set_section_read_status(project_id, user_id, part_id, completed)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    return updated
 
 
 @app.delete("/api/projects/{project_id}")

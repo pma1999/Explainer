@@ -44,6 +44,7 @@ def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
         "segmentation": row.get("segmentation"),
         "partes_contenido": row.get("partes_contenido") or {},
         "usage": row.get("usage") or {},
+        "reading_progress": row.get("reading_progress") or {},
         "error_message": row.get("error_message"),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
         "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
@@ -86,6 +87,7 @@ def create_project(
         "segmentation": None,
         "partes_contenido": {},
         "usage": {},
+        "reading_progress": {},
         "error_message": None,
         "created_at": now,
         "updated_at": now,
@@ -121,12 +123,51 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     project = get_project(project_id, user_id)
     if not project:
         return None
-    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "error_message"}
+    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "reading_progress", "error_message"}
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
     client = _client()
     client.table("projects").update(payload).eq("id", project_id).eq("user_id", user_id).execute()
     return get_project(project_id, user_id)
+
+
+def update_reading_progress(
+    project_id: str,
+    user_id: str,
+    part_id: int,
+) -> Optional[dict[str, Any]]:
+    """Mark a section as read. Adds part_id to completed_parts, deduplicated and sorted.
+    Returns updated project or None if not found."""
+    return set_section_read_status(project_id, user_id, part_id, completed=True)
+
+
+def set_section_read_status(
+    project_id: str,
+    user_id: str,
+    part_id: int,
+    completed: bool,
+) -> Optional[dict[str, Any]]:
+    """Set section read status. completed=True adds to completed_parts, completed=False removes.
+    Returns updated project or None if not found."""
+    project = get_project(project_id, user_id)
+    if not project:
+        return None
+    progress = project.get("reading_progress") or {}
+    completed_list = list(progress.get("completed_parts") or [])
+
+    if completed:
+        if part_id in completed_list:
+            return project
+        completed_list.append(part_id)
+        completed_list.sort()
+    else:
+        completed_list = [p for p in completed_list if p != part_id]
+
+    new_progress = {
+        "completed_parts": completed_list,
+        "last_read_at": _now_iso(),
+    }
+    return update_project(project_id, user_id, {"reading_progress": new_progress})
 
 
 def delete_project(project_id: str, user_id: str) -> bool:
@@ -188,6 +229,7 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
             "segmentation": project.get("segmentation"),
             "partes_contenido": project.get("partes_contenido") or {},
             "usage": project.get("usage") or {},
+            "reading_progress": project.get("reading_progress") or {},
             "error_message": project.get("error_message"),
             "created_at": project.get("created_at") or created,
             "updated_at": project.get("updated_at") or created,
