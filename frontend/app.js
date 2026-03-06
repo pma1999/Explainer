@@ -1570,6 +1570,9 @@ function completeProcPartCard(partId) {
 function selectPart(partId) {
   state.currentPartId = partId;
 
+  const partContent = $('part-content');
+  if (!partContent) return;
+
   document.querySelectorAll('.sidebar-part').forEach(el => {
     el.classList.toggle('active', Number(el.dataset.partId) === partId);
   });
@@ -1577,23 +1580,23 @@ function selectPart(partId) {
   // Hide the proc-stage and the plain welcome, show reading content
   hide($('proc-stage'));
   hide($('main-welcome'));
-  show($('part-content'));
+  show(partContent);
 
   const project = state.currentProject;
   const parte = project.segmentation.partes.find(p => p.numero === partId);
   const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
 
-  $('content-part-title').textContent = parte.titulo;
-  $('content-part-description').textContent = parte.contenido;
+  const titleEl = $('content-part-title');
+  const descEl = $('content-part-description');
   const metaEl = $('content-part-meta');
-  if (metaEl) {
-    metaEl.textContent = [parte.extension_estimada, parte.complejidad].filter(Boolean).join(' · ');
-  }
+  if (titleEl) titleEl.textContent = parte?.titulo ?? '';
+  if (descEl) descEl.textContent = parte?.contenido ?? '';
+  if (metaEl) metaEl.textContent = [parte?.extension_estimada, parte?.complejidad].filter(Boolean).join(' · ');
   resetDescriptionExpand();
   const expandBtn = $('btn-description-expand');
   const wrap = document.querySelector('.part-description-wrap');
   if (expandBtn && wrap) {
-    const hasDescription = parte.contenido && parte.contenido.trim().length > 0;
+    const hasDescription = parte?.contenido && parte.contenido.trim().length > 0;
     wrap.classList.toggle('has-description', !!hasDescription);
   }
 
