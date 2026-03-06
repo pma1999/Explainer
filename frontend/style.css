@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    EXPLAINER — "The Scholarly Forge"
    Dark Academic · Warm Amber · Playfair + Crimson + Syne
    ============================================================ */
@@ -1086,6 +1086,8 @@ body {
   margin-bottom: 1px;
   border-left: 2px solid transparent;
   position: relative;
+  text-decoration: none;
+  color: inherit;
 }
 
 .sidebar-part:hover {

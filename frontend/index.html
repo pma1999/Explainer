@@ -415,6 +415,13 @@
               <div class="part-number-chip" id="content-part-number"></div>
               <div class="part-header-actions">
                 <div class="part-badges" id="content-part-badges"></div>
+                <button class="btn-export-inline" id="btn-copy-link" title="Copiar enlace a esta explicación">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  Copiar enlace
+                </button>
                 <button class="btn-export-inline" id="btn-open-export">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
                     <path d="M12 4L12 16M12 16L8 12M12 16L16 12" stroke="currentColor" stroke-width="2"
@@ -676,6 +683,7 @@
 
   <!-- Supabase: config.js define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY -->
   <script src="/config.js"></script>
+  <script src="/router.js"></script>
   <script>
     window.SUPABASE_URL = window.EXPLAINER_SUPABASE_URL || '';
     window.SUPABASE_ANON_KEY = window.EXPLAINER_SUPABASE_ANON_KEY || '';

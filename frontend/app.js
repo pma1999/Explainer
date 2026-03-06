@@ -186,6 +186,52 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+// ── ROUTER ─────────────────────────────────────────────────
+let router = null;
+
+function navigateFromRoute(route) {
+  if (!route) return;
+
+  if (route.view === 'landing') {
+    showView('view-landing');
+    initLanding();
+    refreshApiKeyStatus();
+    return;
+  }
+
+  if (route.view === 'projects') {
+    showView('view-projects');
+    loadProjectsView();
+    return;
+  }
+
+  if (route.view === 'project' && route.projectId) {
+    if (route.partId) {
+      const projectId = route.projectId;
+      const partId = route.partId;
+      const tab = route.tab || 'explicacion';
+
+      if (state.currentProjectId === projectId && state.currentProject) {
+        const parteExists = state.currentProject.segmentation?.partes?.some(p => p.numero === partId);
+        if (parteExists) {
+          state.currentPartId = partId;
+          state.activeTab = tab;
+          selectPart(partId);
+          activateTab(tab);
+          return;
+        }
+        if (typeof replaceRoute === 'function') replaceRoute({ view: 'project', projectId });
+        openProjectView(projectId);
+        return;
+      }
+      restoreProjectView(projectId, partId, tab).catch(() => {});
+      return;
+    }
+
+    openProjectView(route.projectId);
+  }
+}
+
 // ── APP INIT ───────────────────────────────────────────────
 async function initApp() {
   if (!supabaseClient) {
@@ -199,6 +245,10 @@ async function initApp() {
   state.session = session;
   state.user = session?.user ?? null;
 
+  if (typeof initRouter === 'function') {
+    router = initRouter(navigateFromRoute);
+  }
+
   supabaseClient.auth.onAuthStateChange((_event, newSession) => {
     const prevUserId = state.user?.id ?? null;
     const newUserId = newSession?.user?.id ?? null;
@@ -209,9 +259,15 @@ async function initApp() {
 
     // Smart navigation: only redirect on meaningful state changes
     if (!prevUserId && newUserId) {
-      // Fresh login (was logged out, now logged in)
-      showView('view-landing');
-      initLanding();
+      // Fresh login (was logged out, now logged in) — navigate from URL if present
+      const route = typeof parseRoute === 'function' ? parseRoute() : null;
+      if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
+        navigateFromRoute(route);
+      } else {
+        if (router) router.pushRoute({ view: 'landing' });
+        showView('view-landing');
+        initLanding();
+      }
       refreshApiKeyStatus();
     } else if (prevUserId && !newUserId) {
       // Logout (was logged in, now logged out)
@@ -254,26 +310,37 @@ async function initApp() {
     return;
   }
 
-  // Try to restore previous view state from sessionStorage
-  // This handles browser tab discard/recovery scenarios
+  // 1. URL takes precedence — if hash has a route, navigate there
+  const route = typeof parseRoute === 'function' ? parseRoute() : null;
+  if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
+    await navigateFromRoute(route);
+    return;
+  }
+
+  // 2. Fallback: restore from sessionStorage (tab discard/recovery)
   const savedState = sessionStorage.getItem('explainer.viewState');
   if (savedState) {
     try {
       const viewState = JSON.parse(savedState);
-      // Only restore if it's the same user
       if (viewState.userId === state.user?.id) {
-        // Restore view based on saved state
         if (viewState.view === 'view-project' && viewState.projectId) {
-          // Restore project view
           state.currentProjectId = viewState.projectId;
           state.currentPartId = viewState.partId || null;
           state.activeTab = viewState.activeTab || 'explicacion';
-          // Load project and show view
           await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab);
+          if (typeof replaceRoute === 'function') {
+            replaceRoute({
+              view: 'project',
+              projectId: viewState.projectId,
+              partId: viewState.partId,
+              tab: viewState.activeTab || 'explicacion',
+            });
+          }
           return;
         } else if (viewState.view === 'view-projects') {
           showView('view-projects');
           loadProjectsView();
+          if (typeof replaceRoute === 'function') replaceRoute({ view: 'projects' });
           return;
         } else if (viewState.view === 'view-landing') {
           showView('view-landing');
@@ -287,7 +354,8 @@ async function initApp() {
     }
   }
 
-  // Default: go to landing
+  // 3. Default: go to landing
+  if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
   showView('view-landing');
   initLanding();
   await refreshApiKeyStatus();
@@ -311,6 +379,9 @@ async function restoreProjectView(projectId, partId, activeTab) {
       state.activeTab = activeTab;
       selectPart(partId);
       activateTab(activeTab);
+    } else if (partId) {
+      // Invalid partId — redirect to project overview
+      if (typeof replaceRoute === 'function') replaceRoute({ view: 'project', projectId });
     }
 
     // Restart SSE if project is still processing
@@ -326,9 +397,9 @@ async function restoreProjectView(projectId, partId, activeTab) {
       }
     }
   } catch (err) {
-    // If restore fails, go to projects list
     showView('view-projects');
     loadProjectsView();
+    if (typeof replaceRoute === 'function') replaceRoute({ view: 'projects' });
     toast('No se pudo restaurar la vista anterior', 'error');
   }
 }
@@ -482,8 +553,14 @@ function initAuth() {
       if (error) throw error;
       state.session = data.session;
       state.user = data.user;
-      showView('view-landing');
-      initLanding();
+      const route = typeof parseRoute === 'function' ? parseRoute() : null;
+      if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
+        navigateFromRoute(route);
+      } else {
+        if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
+        showView('view-landing');
+        initLanding();
+      }
       await refreshApiKeyStatus();
       toast('Sesión iniciada', 'success');
     } catch (err) {
@@ -520,8 +597,14 @@ function initAuth() {
       if (error) throw error;
       state.session = data.session;
       state.user = data.user;
-      showView('view-landing');
-      initLanding();
+      const route = typeof parseRoute === 'function' ? parseRoute() : null;
+      if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
+        navigateFromRoute(route);
+      } else {
+        if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
+        showView('view-landing');
+        initLanding();
+      }
       await refreshApiKeyStatus();
       toast('Cuenta creada. Ya puedes usar Explainer.', 'success');
     } catch (err) {
@@ -696,7 +779,9 @@ function initLanding() {
   });
 
   btnUpload.addEventListener('click', handleUpload);
-  $('btn-go-projects').addEventListener('click', loadProjectsView);
+  $('btn-go-projects').addEventListener('click', () => {
+    if (typeof pushRoute === 'function') pushRoute({ view: 'projects' });
+  });
 }
 
 function setFile(f) {
@@ -790,8 +875,8 @@ async function handleUpload() {
     // Start processing
     await api(`/api/projects/${project.id}/process?model=${encodeURIComponent(modelForProcess)}`, { method: 'POST' });
 
-    // Open project view and start listening
-    await openProjectView(project.id);
+    // Navigate to project (router will trigger openProjectView via hashchange)
+    if (typeof pushRoute === 'function') pushRoute({ view: 'project', projectId: project.id });
 
   } catch (err) {
     errEl.textContent = err.message;
@@ -871,7 +956,9 @@ function renderProjectsList(projects) {
   `).join('');
 
   grid.querySelectorAll('.project-card').forEach(card => {
-    card.addEventListener('click', () => openProjectView(card.dataset.id));
+    card.addEventListener('click', () => {
+      if (typeof pushRoute === 'function') pushRoute({ view: 'project', projectId: card.dataset.id });
+    });
   });
 
   const hasActive = projects.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
@@ -1017,6 +1104,8 @@ function renderSidebarNav(project) {
 
   if (!project.segmentation || !project.segmentation.partes) return;
 
+  const projectId = state.currentProjectId;
+
   project.segmentation.partes.forEach(parte => {
     const partId = parte.numero;
     const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
@@ -1029,15 +1118,24 @@ function renderSidebarNav(project) {
       error: 'dot-error',
     }[status] || 'dot-pending';
 
-    const el = document.createElement('div');
+    const href = typeof buildHash === 'function' && projectId
+      ? buildHash({
+          view: 'project',
+          projectId,
+          partId,
+          tab: state.activeTab,
+        })
+      : '#';
+
+    const el = document.createElement('a');
     el.className = `sidebar-part${state.currentPartId === partId ? ' active' : ''}`;
     el.dataset.partId = partId;
+    el.href = href;
     el.innerHTML = `
       <span class="part-num">P${partId}</span>
       <span class="part-label">${escHtml(parte.titulo)}</span>
       <span class="part-status-dot ${dotClass}"></span>
     `;
-    el.addEventListener('click', () => selectPart(partId));
     nav.appendChild(el);
   });
 }
@@ -1177,7 +1275,16 @@ function renderProcPartsGrid(project) {
     `;
 
     if (status === 'completed') {
-      card.addEventListener('click', () => selectPart(partId));
+      card.addEventListener('click', () => {
+        if (typeof pushRoute === 'function') {
+          pushRoute({
+            view: 'project',
+            projectId: state.currentProjectId,
+            partId,
+            tab: 'explicacion',
+          });
+        }
+      });
     }
 
     grid.appendChild(card);
@@ -1228,7 +1335,16 @@ function completeProcPartCard(partId) {
 
   // Make clickable
   card.style.cursor = 'pointer';
-  card.addEventListener('click', () => selectPart(partId));
+  card.addEventListener('click', () => {
+    if (typeof pushRoute === 'function') {
+      pushRoute({
+        view: 'project',
+        projectId: state.currentProjectId,
+        partId,
+        tab: 'explicacion',
+      });
+    }
+  });
 }
 
 function selectPart(partId) {
@@ -1270,7 +1386,6 @@ function selectPart(partId) {
   updateReadingToolbar();
   updateMobileHeader();
 
-  // Save view state when selecting a part
   saveViewState();
 }
 
@@ -1328,7 +1443,6 @@ function activateTab(tabName) {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
-  // Save view state when changing tabs
   saveViewState();
 }
 
@@ -2455,17 +2569,31 @@ function formatRecursosMd(data, autor, obra, partName) {
 document.addEventListener('DOMContentLoaded', () => {
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if (state.currentProjectId && state.currentPartId && typeof pushRoute === 'function') {
+        pushRoute({
+          view: 'project',
+          projectId: state.currentProjectId,
+          partId: state.currentPartId,
+          tab,
+        });
+      } else {
+        activateTab(tab);
+      }
+    });
   });
 
   // Home / logo clicks
-  $('btn-home-from-projects').addEventListener('click', () => showView('view-landing'));
+  $('btn-home-from-projects').addEventListener('click', () => {
+    if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
+  });
 
   $('btn-new-project').addEventListener('click', () => {
-    showView('view-landing');
+    if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
   });
   $('btn-new-project-2').addEventListener('click', () => {
-    showView('view-landing');
+    if (typeof pushRoute === 'function') pushRoute({ view: 'landing' });
   });
 
   $('btn-export-projects').addEventListener('click', exportProjectsBackup);
@@ -2476,13 +2604,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('btn-back-to-projects').addEventListener('click', () => {
-    // NO cerrar SSE al ir a proyectos - seguimos escuchando en background
-    // Solo detener polling específico de la lista de proyectos
-    loadProjectsView();
-    // Iniciar polling de la lista si hay proyectos activos (incluido el actual)
-    const localProjects = loadLocalBackup().projects;
-    const hasActive = localProjects.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
-    if (hasActive) startProjectsListPolling();
+    if (typeof pushRoute === 'function') pushRoute({ view: 'projects' });
   });
 
   $('btn-delete-project').addEventListener('click', async () => {
@@ -2494,7 +2616,7 @@ document.addEventListener('DOMContentLoaded', () => {
       syncProjectsToLocal(remaining);
       toast('Proyecto eliminado.', 'success');
       if (state.processingSSE) { state.processingSSE.close(); state.processingSSE = null; }
-      loadProjectsView();
+      if (typeof pushRoute === 'function') pushRoute({ view: 'projects' });
     } catch (err) {
       toast('Error al eliminar: ' + err.message, 'error');
     }
@@ -2509,6 +2631,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSidebarMobile();
   initSidebarCollapse();
   initPartNavigation();
+  initCopyLink();
   initApp();
 });
 
@@ -2594,7 +2717,38 @@ function navigateToPart(delta) {
   const idx = partes.findIndex(p => p.numero === state.currentPartId);
   if (idx === -1) return;
   const next = partes[idx + delta];
-  if (next) selectPart(next.numero);
+  if (next && typeof pushRoute === 'function') {
+    pushRoute({
+      view: 'project',
+      projectId: state.currentProjectId,
+      partId: next.numero,
+      tab: state.activeTab,
+    });
+  }
+}
+
+// ── COPY LINK ──────────────────────────────────────────────
+function initCopyLink() {
+  const btn = $('btn-copy-link');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    if (!state.currentProjectId || !state.currentPartId) return;
+    const url = location.origin + location.pathname + (typeof buildHash === 'function'
+      ? buildHash({
+          view: 'project',
+          projectId: state.currentProjectId,
+          partId: state.currentPartId,
+          tab: state.activeTab,
+        })
+      : location.hash || '#/');
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Enlace copiado al portapapeles', 'success');
+    } catch (_) {
+      toast('No se pudo copiar el enlace', 'error');
+    }
+  });
 }
 
 /**
