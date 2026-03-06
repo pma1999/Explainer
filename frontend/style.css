@@ -704,6 +704,42 @@ body {
   gap: 20px;
 }
 
+/* Projects loading skeleton */
+.projects-loading {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.projects-loading.hidden {
+  display: none;
+}
+
+.project-card-skeleton {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.project-card-skeleton .skeleton-line {
+  display: block;
+  height: 14px;
+  width: 45%;
+  background: linear-gradient(90deg, var(--bg-elevated), var(--border-light), var(--bg-elevated));
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer 1.8s infinite;
+}
+
+.project-card-skeleton .skeleton-line.skeleton-wide {
+  width: 85%;
+  animation-delay: 0.15s;
+}
+
 /* Project Card */
 .project-card {
   background: var(--bg-surface);

@@ -22,6 +22,7 @@ const state = {
   pollProjectsInterval: null,
   pollCurrentProjectInterval: null,
   hasApiKey: false,
+  apiKeyStatus: 'loading',  // 'loading' | 'has' | 'none'
   session: null,
   user: null,
   previousUserId: null,             // Para detectar cambios de usuario vs refresh de sesión
@@ -33,12 +34,44 @@ const POLL_PROJECTS_MS = 6000;
 const POLL_CURRENT_IF_IDLE_MS = 12000;
 const VISIBILITY_RECONNECT_DELAY_MS = 800;
 
-const LOCAL_BACKUP_KEY = 'explainer.projects.backup.v1';
+const LOCAL_BACKUP_KEY_LEGACY = 'explainer.projects.backup.v1';
 const SESSION_VIEW_KEY = 'explainer.current_view.v1';
+const API_KEY_CACHE_KEY_PREFIX = 'explainer.apiKeyStatus.v1.';
+const API_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function loadLocalBackup() {
+function getLocalBackupKey(userId) {
+  return userId ? `explainer.projects.backup.v1.${userId}` : null;
+}
+
+function getCachedApiKeyStatus(userId) {
+  if (!userId) return null;
   try {
-    const raw = localStorage.getItem(LOCAL_BACKUP_KEY);
+    const raw = localStorage.getItem(API_KEY_CACHE_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const age = Date.now() - (parsed.updatedAt ? new Date(parsed.updatedAt).getTime() : 0);
+    if (age > API_KEY_CACHE_TTL_MS) return null;
+    return parsed.hasApiKey === true;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setCachedApiKeyStatus(userId, hasApiKey) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(API_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
+      hasApiKey: Boolean(hasApiKey),
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+
+function loadLocalBackup(userId) {
+  const key = getLocalBackupKey(userId);
+  if (!key) return { version: 1, projects: [] };
+  try {
+    const raw = localStorage.getItem(key);
     if (!raw) return { version: 1, projects: [] };
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.projects)) return { version: 1, projects: [] };
@@ -48,13 +81,36 @@ function loadLocalBackup() {
   }
 }
 
-function saveLocalBackup(payload) {
+function saveLocalBackupToKey(key, payload) {
   const safePayload = {
     version: 1,
     exported_at: new Date().toISOString(),
     projects: Array.isArray(payload?.projects) ? payload.projects : [],
   };
-  localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(safePayload));
+  localStorage.setItem(key, JSON.stringify(safePayload));
+}
+
+function syncProjectsToLocal(projects, userId) {
+  const key = getLocalBackupKey(userId);
+  if (!key) return;
+  saveLocalBackupToKey(key, { projects });
+}
+
+/** Migrate legacy backup (non-user-keyed) to user-keyed format. One-time. */
+function migrateLegacyBackupIfNeeded(userId) {
+  if (!userId) return;
+  const userKey = getLocalBackupKey(userId);
+  if (!userKey) return;
+  try {
+    const legacyRaw = localStorage.getItem(LOCAL_BACKUP_KEY_LEGACY);
+    if (!legacyRaw) return;
+    const userRaw = localStorage.getItem(userKey);
+    if (userRaw) return; // Already have user-keyed backup
+    const parsed = JSON.parse(legacyRaw);
+    if (!parsed || !Array.isArray(parsed.projects)) return;
+    saveLocalBackupToKey(userKey, { projects: parsed.projects });
+    localStorage.removeItem(LOCAL_BACKUP_KEY_LEGACY);
+  } catch (_) {}
 }
 
 function mergeProjects(serverProjects = [], localProjects = []) {
@@ -77,12 +133,8 @@ function mergeProjects(serverProjects = [], localProjects = []) {
   );
 }
 
-function syncProjectsToLocal(projects) {
-  saveLocalBackup({ projects });
-}
-
 function getCachedProject(projectId) {
-  const backup = loadLocalBackup();
+  const backup = loadLocalBackup(state.user?.id);
   return backup.projects.find((p) => p.id === projectId) || null;
 }
 
@@ -244,6 +296,32 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+// ── PROJECTS PREFETCH ───────────────────────────────────────
+let projectsFetchPromise = null;
+
+function invalidateProjectsCache() {
+  projectsFetchPromise = null;
+}
+
+function ensureProjectsFetched() {
+  const userId = state.user?.id;
+  if (!userId) return Promise.resolve([]);
+  if (!projectsFetchPromise) {
+    projectsFetchPromise = api('/api/projects')
+      .then((serverProjects) => {
+        const local = loadLocalBackup(userId).projects;
+        const merged = mergeProjects(serverProjects, local);
+        syncProjectsToLocal(merged, userId);
+        return merged;
+      })
+      .catch((err) => {
+        projectsFetchPromise = null;
+        throw err;
+      });
+  }
+  return projectsFetchPromise;
+}
+
 // ── ROUTER ─────────────────────────────────────────────────
 let router = null;
 
@@ -252,8 +330,8 @@ function navigateFromRoute(route) {
 
   if (route.view === 'landing') {
     showView('view-landing');
+    refreshApiKeyStatus(); // Applies cache sync first, then fetches in background
     initLanding();
-    refreshApiKeyStatus();
     return;
   }
 
@@ -318,6 +396,7 @@ async function initApp() {
     // Smart navigation: only redirect on meaningful state changes
     if (!prevUserId && newUserId) {
       // Fresh login (was logged out, now logged in) — navigate from URL if present
+      refreshApiKeyStatus();
       const route = typeof parseRoute === 'function' ? parseRoute() : null;
       if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
         navigateFromRoute(route);
@@ -326,7 +405,6 @@ async function initApp() {
         showView('view-landing');
         initLanding();
       }
-      refreshApiKeyStatus();
     } else if (prevUserId && !newUserId) {
       // Logout (was logged in, now logged out)
       // Close SSE and clean up
@@ -339,6 +417,8 @@ async function initApp() {
       showView('view-auth');
     } else if (prevUserId && newUserId && prevUserId !== newUserId) {
       // User switched (different user logged in)
+      invalidateProjectsCache();
+      state.apiKeyStatus = 'loading';
       // Clear project state and close SSE
       if (state.processingSSE) {
         state.processingSSE.close();
@@ -352,8 +432,8 @@ async function initApp() {
       // Clear session storage for previous user
       sessionStorage.removeItem('explainer.viewState');
       showView('view-landing');
-      initLanding();
       refreshApiKeyStatus();
+      initLanding();
     } else if (newUserId) {
       // Session continued or refreshed - same user
       // DO NOT navigate - let user stay on current view
@@ -367,6 +447,11 @@ async function initApp() {
     initAuth();
     return;
   }
+
+  // Prefetch and migration (fire-and-forget for fast subsequent navigation)
+  migrateLegacyBackupIfNeeded(state.user?.id);
+  ensureProjectsFetched();
+  refreshApiKeyStatus();
 
   // 1. URL takes precedence — if hash has a route, navigate there
   const route = typeof parseRoute === 'function' ? parseRoute() : null;
@@ -426,8 +511,8 @@ async function restoreProjectView(projectId, partId, activeTab) {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
 
-    const refreshed = mergeProjects([project], loadLocalBackup().projects);
-    syncProjectsToLocal(refreshed);
+    const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
+    syncProjectsToLocal(refreshed, state.user?.id);
 
     renderProjectView(project);
 
@@ -489,11 +574,24 @@ function saveViewState() {
 }
 
 async function refreshApiKeyStatus() {
+  const userId = state.user?.id;
+  // Apply cache synchronously first (avoids flash when we have valid cache)
+  const cached = getCachedApiKeyStatus(userId);
+  if (cached !== null) {
+    state.hasApiKey = cached;
+    state.apiKeyStatus = cached ? 'has' : 'none';
+    if (typeof updateApiKeyUI === 'function') updateApiKeyUI();
+  }
+
   try {
     const status = await api('/api/settings/api-key/status');
     state.hasApiKey = Boolean(status.has_api_key);
+    state.apiKeyStatus = state.hasApiKey ? 'has' : 'none';
+    setCachedApiKeyStatus(userId, state.hasApiKey);
   } catch (_) {
     state.hasApiKey = false;
+    state.apiKeyStatus = 'none';
+    setCachedApiKeyStatus(userId, false);
   }
   if (typeof updateApiKeyUI === 'function') updateApiKeyUI();
 }
@@ -546,6 +644,8 @@ function initSettings() {
       });
 
       state.hasApiKey = true;
+      state.apiKeyStatus = 'has';
+      setCachedApiKeyStatus(state.user?.id, true);
       $('api-key-input').value = '';
       $('api-key-success').textContent = 'API key guardada correctamente';
       updateApiKeyUI();
@@ -567,6 +667,8 @@ function initSettings() {
     try {
       await api('/api/settings/api-key', { method: 'DELETE' });
       state.hasApiKey = false;
+      state.apiKeyStatus = 'none';
+      setCachedApiKeyStatus(state.user?.id, false);
       updateApiKeyUI();
       toast('API key eliminada', 'success');
     } catch (err) {
@@ -705,7 +807,7 @@ function hideSettings() {
 }
 
 function updateApiKeyUI() {
-  // Actualiza la UI según el estado de la API key.
+  // Settings modal: use hasApiKey
   if (state.hasApiKey) {
     hide($('api-key-not-set'));
     show($('api-key-set'));
@@ -716,11 +818,12 @@ function updateApiKeyUI() {
     $('btn-delete-api-key').style.display = 'none';
   }
 
-  // Update warning in landing
-  if (state.hasApiKey) {
-    hide($('api-key-warning'));
-  } else {
+  // Landing warning: only show when we KNOW user has no key (apiKeyStatus === 'none')
+  // When 'loading', hide to avoid false positive flash
+  if (state.apiKeyStatus === 'none') {
     show($('api-key-warning'));
+  } else {
+    hide($('api-key-warning'));
   }
 }
 
@@ -925,8 +1028,9 @@ async function handleUpload() {
     }
 
     const project = await api('/api/projects', { method: 'POST', body: fd });
-    const mergedAfterCreate = mergeProjects([project], loadLocalBackup().projects);
-    syncProjectsToLocal(mergedAfterCreate);
+    invalidateProjectsCache();
+    const mergedAfterCreate = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
+    syncProjectsToLocal(mergedAfterCreate, state.user?.id);
     toast('Proyecto creado. Iniciando análisis...', 'success');
 
     // Reset form
@@ -954,22 +1058,37 @@ async function handleUpload() {
 }
 
 // ── PROJECTS LIST VIEW ─────────────────────────────────────
+function showProjectsLoading(show) {
+  const grid = $('projects-grid');
+  const empty = $('projects-empty');
+  const loading = $('projects-loading');
+  if (!loading) return;
+  if (show) {
+    hide(grid);
+    hide(empty);
+    show(loading);
+  } else {
+    hide(loading);
+  }
+}
+
 async function loadProjectsView() {
   showView('view-projects');
-  const localProjects = loadLocalBackup().projects;
+  showProjectsLoading(true);
+  const localProjects = loadLocalBackup(state.user?.id).projects;
 
   try {
-    const serverProjects = await api('/api/projects');
-    const merged = mergeProjects(serverProjects, localProjects);
-    syncProjectsToLocal(merged);
+    const merged = await ensureProjectsFetched();
     renderProjectsList(merged);
   } catch (err) {
     if (localProjects.length > 0) {
       renderProjectsList(localProjects);
       toast('Servidor no disponible. Mostrando copia local de tus proyectos.', 'error');
-      return;
+    } else {
+      toast('Error cargando proyectos: ' + err.message, 'error');
     }
-    toast('Error cargando proyectos: ' + err.message, 'error');
+  } finally {
+    showProjectsLoading(false);
   }
 }
 
@@ -1073,8 +1192,8 @@ async function openProjectView(projectId) {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
 
-    const refreshed = mergeProjects([project], loadLocalBackup().projects);
-    syncProjectsToLocal(refreshed);
+    const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
+    syncProjectsToLocal(refreshed, state.user?.id);
 
     renderProjectView(project);
 
@@ -1778,10 +1897,10 @@ function startProjectsListPolling() {
     if (!view || view.id !== 'view-projects') return;
     try {
       const serverProjects = await api('/api/projects');
-      const localProjects = loadLocalBackup().projects;
+      const localProjects = loadLocalBackup(state.user?.id).projects;
       const merged = mergeProjects(serverProjects, localProjects);
       const hasActive = merged.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
-      syncProjectsToLocal(merged);
+      syncProjectsToLocal(merged, state.user?.id);
       renderProjectsList(merged);
       if (!hasActive && state.pollProjectsInterval) {
         clearInterval(state.pollProjectsInterval);
@@ -2035,7 +2154,7 @@ function startSSE(projectId, opts = {}) {
 
 async function exportProjectsBackup() {
   try {
-    const localProjects = loadLocalBackup().projects;
+    const localProjects = loadLocalBackup(state.user?.id).projects;
     let payload = { version: 1, exported_at: new Date().toISOString(), projects: localProjects };
 
     try {
@@ -2048,7 +2167,7 @@ async function exportProjectsBackup() {
       // Si el servidor falla, exportamos desde la copia local sin bloquear al usuario.
     }
 
-    syncProjectsToLocal(payload.projects);
+    syncProjectsToLocal(payload.projects, state.user?.id);
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2070,13 +2189,14 @@ async function importProjectsBackup(file) {
       throw new Error('Formato inválido: el backup no contiene una lista de proyectos');
     }
 
-    const localMerged = mergeProjects(parsed.projects, loadLocalBackup().projects);
-    syncProjectsToLocal(localMerged);
+    const localMerged = mergeProjects(parsed.projects, loadLocalBackup(state.user?.id).projects);
+    syncProjectsToLocal(localMerged, state.user?.id);
 
     const fd = new FormData();
     fd.append('file', payloadToJsonFile(parsed, file.name || 'explainer-import.json'));
 
     const result = await api('/api/projects/import', { method: 'POST', body: fd });
+    invalidateProjectsCache();
     toast(`Importación completada: ${result.imported} importados, ${result.skipped} omitidos`, 'success');
     loadProjectsView();
   } catch (err) {
@@ -2714,8 +2834,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!confirm('¿Eliminar este proyecto y todo su contenido? Esta acción no se puede deshacer.')) return;
     try {
       await api(`/api/projects/${state.currentProjectId}`, { method: 'DELETE' });
-      const remaining = loadLocalBackup().projects.filter((p) => p.id !== state.currentProjectId);
-      syncProjectsToLocal(remaining);
+      invalidateProjectsCache();
+      const remaining = loadLocalBackup(state.user?.id).projects.filter((p) => p.id !== state.currentProjectId);
+      syncProjectsToLocal(remaining, state.user?.id);
       toast('Proyecto eliminado.', 'success');
       if (state.processingSSE) { state.processingSSE.close(); state.processingSSE = null; }
       if (typeof pushRoute === 'function') pushRoute({ view: 'projects' });
