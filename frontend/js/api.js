@@ -38,7 +38,3 @@ export async function api(path, options = {}) {
 
   return res.json();
 }
-
-export function getAccessToken() {
-  return state.session?.access_token || null;
-}
