@@ -506,6 +506,7 @@ async function initApp() {
 
 // Helper to restore project view on init
 async function restoreProjectView(projectId, partId, activeTab) {
+  state.currentProjectId = projectId;
   showView('view-project');
   try {
     const project = await api(`/api/projects/${projectId}`);
@@ -2873,27 +2874,51 @@ document.addEventListener('DOMContentLoaded', () => {
 const scrollMarkedParts = new Set();
 let scrollCompleteDebounce = null;
 
+function getScrollPct(el) {
+  if (!el) return 0;
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  if (scrollHeight <= clientHeight) return 0;
+  return (scrollTop / (scrollHeight - clientHeight)) * 100;
+}
+
+function handleScrollForProgress(ev) {
+  const main = $('project-main');
+  const bar = $('reading-progress-bar');
+  if (!bar) return;
+
+  // Use scroll metrics from the element that actually scrolled
+  const target = ev.target;
+  let pct = 0;
+  if (target === main && main.scrollHeight > main.clientHeight) {
+    pct = getScrollPct(main);
+  } else if (target === document.documentElement || target === document.body || target === document) {
+    pct = getScrollPct(document.documentElement);
+  } else if (main && main.scrollHeight > main.clientHeight) {
+    pct = getScrollPct(main);
+  }
+
+  bar.style.width = pct + '%';
+
+  // Mark section complete when user scrolls 80%+
+  const partId = state.currentPartId;
+  if (partId && pct >= 80 && !scrollMarkedParts.has(partId)) {
+    if (scrollCompleteDebounce) clearTimeout(scrollCompleteDebounce);
+    scrollCompleteDebounce = setTimeout(() => {
+      scrollCompleteDebounce = null;
+      scrollMarkedParts.add(partId);
+      markSectionComplete(partId);
+    }, 500);
+  }
+}
+
 function initReadingProgressBar() {
   const bar = $('reading-progress-bar');
   const main = $('project-main');
   if (!bar || !main) return;
 
-  main.addEventListener('scroll', () => {
-    const { scrollTop, scrollHeight, clientHeight } = main;
-    const pct = scrollHeight <= clientHeight ? 0 : (scrollTop / (scrollHeight - clientHeight)) * 100;
-    bar.style.width = pct + '%';
-
-    // Mark section complete when user scrolls 80%+
-    const partId = state.currentPartId;
-    if (partId && pct >= 80 && !scrollMarkedParts.has(partId)) {
-      if (scrollCompleteDebounce) clearTimeout(scrollCompleteDebounce);
-      scrollCompleteDebounce = setTimeout(() => {
-        scrollCompleteDebounce = null;
-        scrollMarkedParts.add(partId);
-        markSectionComplete(partId);
-      }, 500);
-    }
-  }, { passive: true });
+  // Listen on both: project-main scrolls when it has overflow; window scrolls when body scrolls
+  main.addEventListener('scroll', handleScrollForProgress, { passive: true });
+  window.addEventListener('scroll', handleScrollForProgress, { passive: true });
 }
 
 // ── MOBILE SIDEBAR DRAWER ────────────────────────────────────
