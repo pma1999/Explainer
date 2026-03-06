@@ -1058,12 +1058,12 @@ async function handleUpload() {
 }
 
 // ── PROJECTS LIST VIEW ─────────────────────────────────────
-function showProjectsLoading(show) {
+function showProjectsLoading(isLoading) {
   const grid = $('projects-grid');
   const empty = $('projects-empty');
   const loading = $('projects-loading');
   if (!loading) return;
-  if (show) {
+  if (isLoading) {
     hide(grid);
     hide(empty);
     show(loading);
