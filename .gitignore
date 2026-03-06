@@ -58,3 +58,23 @@ Thumbs.db
 # Fly.io
 .fly/
 .vercel
+
+# Node
+node_modules/
+
+# Test outputs
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# Secrets (never commit)
+koyeb_secrets.txt
+
+# IDE / editor (local settings)
+.claude/
+.cursor/
+
+# Temporary / dummy files
+dummy.txt
+dummy2.txt
