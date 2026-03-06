@@ -1,7 +1,17 @@
 {
   "name": "explainer",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "node scripts/generate-config.js"
+    "build": "node scripts/generate-config.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "node scripts/run-all-tests.js"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "playwright": "^1.49.0",
+    "vitest": "^2.1.6"
   }
 }

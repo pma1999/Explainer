@@ -64,7 +64,7 @@ export async function importProjectsBackup(file) {
   }
 }
 
-function sanitizeFolderName(raw) {
+export function sanitizeFolderName(raw) {
   return raw
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -75,11 +75,11 @@ function sanitizeFolderName(raw) {
     .slice(0, 60);
 }
 
-function buildSectionFolderName(numero, titulo) {
+export function buildSectionFolderName(numero, titulo) {
   return `${String(numero).padStart(2, '0')} - ${sanitizeFolderName(titulo)}`;
 }
 
-function prefillFromProjectName(projectName) {
+export function prefillFromProjectName(projectName) {
   if (!projectName) return { autor: '', obra: '' };
   const parts = projectName.split(/[-—]/);
   if (parts.length >= 2) {
