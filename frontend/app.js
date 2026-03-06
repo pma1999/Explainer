@@ -1583,14 +1583,19 @@ function selectPart(partId) {
   const parte = project.segmentation.partes.find(p => p.numero === partId);
   const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
 
-  $('content-part-number').textContent = `Sección ${partId}`;
   $('content-part-title').textContent = parte.titulo;
   $('content-part-description').textContent = parte.contenido;
-  $('content-part-badges').innerHTML = `
-    <span class="badge">${parte.extension_estimada}</span>
-    <span class="badge">Complejidad: ${parte.complejidad}</span>
-    <span class="badge">↑ ${parte.expansion_prevista}</span>
-  `;
+  const metaEl = $('content-part-meta');
+  if (metaEl) {
+    metaEl.textContent = [parte.extension_estimada, parte.complejidad].filter(Boolean).join(' · ');
+  }
+  resetDescriptionExpand();
+  const expandBtn = $('btn-description-expand');
+  const wrap = document.querySelector('.part-description-wrap');
+  if (expandBtn && wrap) {
+    const hasDescription = parte.contenido && parte.contenido.trim().length > 0;
+    wrap.classList.toggle('has-description', !!hasDescription);
+  }
 
   renderTab('explicacion', contenido);
   renderTab('recorrido', contenido);
@@ -2856,6 +2861,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initPartNavigation();
   initCopyLink();
   initToggleComplete();
+  initPartActionsOverflow();
+  initDescriptionExpand();
   initApp();
 });
 
@@ -3032,20 +3039,19 @@ function updateReadingToolbar() {
  */
 function updateToggleCompleteButton() {
   const btn = $('btn-toggle-complete');
-  if (!btn) return;
   const project = state.currentProject;
   const partId = state.currentPartId;
-  if (!project || !partId) {
-    btn.style.display = 'none';
-    return;
-  }
-  const contenido = project.partes_contenido?.[String(partId)];
-  if (!contenido || contenido.status !== 'completed') {
-    btn.style.display = 'none';
-    return;
-  }
+  const showToggle = project && partId && project.partes_contenido?.[String(partId)]?.status === 'completed';
+
+  document.querySelectorAll('.part-action-toggle-complete').forEach((el) => {
+    el.style.display = showToggle ? '' : 'none';
+  });
+
+  if (!btn) return;
+  if (!showToggle) return;
+
+  const contenido = project.partes_contenido[String(partId)];
   const isRead = new Set(project?.reading_progress?.completed_parts || []).has(partId);
-  btn.style.display = '';
   btn.title = isRead ? 'Marcar como no leída' : 'Marcar como leída';
   btn.dataset.completed = isRead ? 'true' : 'false';
   const textEl = btn.querySelector('.btn-toggle-complete-text');
@@ -3057,6 +3063,58 @@ function updateToggleCompleteButton() {
       : '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2" fill="none" />';
   }
   btn.classList.toggle('is-read', isRead);
+
+  document.querySelectorAll('.part-actions-dropdown .part-action-toggle-complete').forEach((item) => {
+    const textEl = item.querySelector('.part-action-item-text');
+    if (textEl) textEl.textContent = isRead ? 'Marcar como no leída' : 'Marcar como leída';
+  });
+}
+
+// ── PART ACTIONS OVERFLOW (mobile) ──────────────────────────
+function initPartActionsOverflow() {
+  const overflow = $('part-actions-overflow');
+  if (!overflow) return;
+
+  overflow.querySelectorAll('.part-action-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const targetId = item.dataset.trigger;
+      const target = targetId ? $(targetId) : null;
+      if (target) {
+        target.click();
+        overflow.removeAttribute('open');
+      }
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (overflow.open && !overflow.contains(e.target)) {
+      overflow.removeAttribute('open');
+    }
+  });
+}
+
+// ── DESCRIPTION EXPAND (mobile) ─────────────────────────────
+function initDescriptionExpand() {
+  const btn = $('btn-description-expand');
+  const wrap = document.querySelector('.part-description-wrap');
+  const desc = $('content-part-description');
+  if (!btn || !wrap || !desc) return;
+
+  btn.addEventListener('click', () => {
+    const expanded = wrap.classList.toggle('expanded');
+    btn.textContent = expanded ? 'Ver menos' : 'Ver más';
+    btn.setAttribute('aria-label', expanded ? 'Ver menos' : 'Ver más');
+  });
+}
+
+function resetDescriptionExpand() {
+  const wrap = document.querySelector('.part-description-wrap');
+  const btn = $('btn-description-expand');
+  if (wrap) wrap.classList.remove('expanded');
+  if (btn) {
+    btn.textContent = 'Ver más';
+    btn.setAttribute('aria-label', 'Ver más');
+  }
 }
 
 /**
