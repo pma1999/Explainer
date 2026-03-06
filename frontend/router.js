@@ -118,3 +118,10 @@ function initRouter(onRoute) {
     parseRoute,
   };
 }
+
+// Expose for ES modules (classic script adds to global scope)
+window.pushRoute = pushRoute;
+window.replaceRoute = replaceRoute;
+window.parseRoute = parseRoute;
+window.buildHash = buildHash;
+window.initRouter = initRouter;

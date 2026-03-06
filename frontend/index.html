@@ -721,13 +721,13 @@
 
   <!-- Supabase: config.js define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY -->
   <script src="/config.js"></script>
-  <script src="/router.js"></script>
   <script>
     window.SUPABASE_URL = window.EXPLAINER_SUPABASE_URL || '';
     window.SUPABASE_ANON_KEY = window.EXPLAINER_SUPABASE_ANON_KEY || '';
   </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="/app.js"></script>
+  <script src="/router.js"></script>
+  <script type="module" src="/js/main.js"></script>
 </body>
 
 </html>
