@@ -322,12 +322,22 @@
             Exportar a Obsidian
           </button>
           <button class="btn-danger-sm" id="btn-delete-project" data-shared-hide>Eliminar proyecto</button>
-          <div class="shared-cta-register hidden" id="shared-cta-register">
-            <p class="shared-cta-text">¿Quieres crear tus propios proyectos?</p>
+          <div class="shared-cta hidden" id="shared-cta-register">
+            <button type="button" class="shared-cta-close" id="shared-cta-close" aria-label="Cerrar">✕</button>
+            <span class="shared-cta-mark">⬡</span>
+            <h4 class="shared-cta-title">Crea tus propios análisis</h4>
+            <p class="shared-cta-sub">Sube un PDF o video, genera explicaciones como esta y guárdalas en la nube.</p>
             <a href="#" class="btn-primary btn-sm btn-block" id="shared-cta-link">Regístrate gratis</a>
           </div>
         </div>
       </aside>
+
+      <!-- Floating CTA (visible when sidebar hidden on shared view) -->
+      <div class="shared-cta-floating hidden" id="shared-cta-floating">
+        <button type="button" class="shared-cta-floating-close" id="shared-cta-floating-close" aria-label="Cerrar">✕</button>
+        <p class="shared-cta-floating-text">¿Te gusta? Regístrate para crear tus propios proyectos.</p>
+        <a href="#" class="btn-primary btn-sm" id="shared-cta-floating-link">Regístrate</a>
+      </div>
 
       <!-- Main content -->
       <main class="project-main" id="project-main">

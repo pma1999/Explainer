@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners } from './projectView.js';
 
 function saveViewState() {
   if (!state.user?.id) return;
@@ -175,9 +175,9 @@ async function initApp() {
   ensureProjectsFetched();
   refreshApiKeyStatus();
 
-  const route = window.parseRoute ? window.parseRoute() : null;
-  if (route && (route.view === 'projects' || (route.view === 'project' && route.projectId))) {
-    await navigateFromRoute(route);
+  const currentRoute = window.parseRoute ? window.parseRoute() : null;
+  if (currentRoute && (currentRoute.view === 'projects' || (currentRoute.view === 'project' && currentRoute.projectId))) {
+    await navigateFromRoute(currentRoute);
     return;
   }
 
@@ -282,13 +282,18 @@ function initSidebarMobile() {
     sidebar.classList.add('open');
     overlay.classList.add('active');
     document.body.style.overflow = 'hidden';
+    updateSharedCtaFloatingVisibility();
   });
 
-  overlay.addEventListener('click', closeMobileSidebar);
+  overlay.addEventListener('click', () => {
+    closeMobileSidebar();
+    updateSharedCtaFloatingVisibility();
+  });
 
   sidebar.addEventListener('click', (e) => {
     if (e.target.closest('.sidebar-part') && window.innerWidth <= 768) {
       closeMobileSidebar();
+      updateSharedCtaFloatingVisibility();
     }
   });
 
@@ -311,6 +316,7 @@ function initSidebarCollapse() {
     const collapsed = sidebar.classList.toggle('collapsed');
     collapseBtn.style.transform = collapsed ? 'rotate(180deg)' : '';
     if (layout) layout.classList.toggle('sidebar-hidden', collapsed);
+    updateSharedCtaFloatingVisibility();
   }
 
   collapseBtn.addEventListener('click', toggleSidebar);
@@ -499,7 +505,9 @@ function bootstrap() {
   initSettings();
   initVisibilityHandling();
   initShareModal();
+  initSharedCtaListeners();
   initObsidianExport();
+  window.addEventListener('resize', updateSharedCtaFloatingVisibility);
   initFullProjectExport();
   initReadingProgressBar();
   initSidebarMobile();
@@ -510,17 +518,18 @@ function bootstrap() {
   initPartActionsOverflow();
   initDescriptionExpand();
 
-  const sharedCtaLink = $('shared-cta-link');
-  if (sharedCtaLink) {
-    sharedCtaLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (state.isSharedView) {
-        exitSharedView();
-      }
-      showView('view-auth');
-      initAuth(navigateFromRoute, initLanding);
-    });
+  function handleSharedCtaClick(e) {
+    e.preventDefault();
+    if (state.isSharedView) {
+      exitSharedView();
+    }
+    showView('view-auth');
+    initAuth(navigateFromRoute, initLanding);
   }
+
+  [$('shared-cta-link'), $('shared-cta-floating-link')].forEach((el) => {
+    if (el) el.addEventListener('click', handleSharedCtaClick);
+  });
 
   initApp();
 }

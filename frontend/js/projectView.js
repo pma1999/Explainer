@@ -11,6 +11,61 @@ export function setSaveViewStateCallback(fn) {
   _saveViewState = fn;
 }
 
+const SHARED_CTA_FLOATING_DISMISSED_KEY = 'explainer.sharedCtaFloatingDismissed';
+
+function isSidebarVisible() {
+  const layout = document.querySelector('.project-layout');
+  const sidebar = $('project-sidebar');
+  if (!layout || !sidebar) return true;
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    return sidebar.classList.contains('open');
+  }
+  return !layout.classList.contains('sidebar-hidden');
+}
+
+export function updateSharedCtaFloatingVisibility() {
+  const floating = $('shared-cta-floating');
+  if (!floating) return;
+  if (!state.isSharedView) {
+    floating.classList.remove('visible');
+    floating.classList.add('hidden');
+    return;
+  }
+  if (sessionStorage.getItem(SHARED_CTA_FLOATING_DISMISSED_KEY)) {
+    floating.classList.remove('visible');
+    floating.classList.add('hidden');
+    return;
+  }
+  const sidebarVisible = isSidebarVisible();
+  if (sidebarVisible) {
+    floating.classList.remove('visible');
+    floating.classList.add('hidden');
+  } else {
+    floating.classList.remove('hidden');
+    floating.classList.add('visible');
+  }
+}
+
+export function initSharedCtaListeners() {
+  const sidebarClose = $('shared-cta-close');
+  const floatingClose = $('shared-cta-floating-close');
+  const sidebarCta = $('shared-cta-register');
+
+  sidebarClose?.addEventListener('click', () => {
+    if (sidebarCta) sidebarCta.classList.add('hidden');
+  });
+
+  floatingClose?.addEventListener('click', () => {
+    sessionStorage.setItem(SHARED_CTA_FLOATING_DISMISSED_KEY, '1');
+    const floating = $('shared-cta-floating');
+    if (floating) {
+      floating.classList.remove('visible');
+      floating.classList.add('hidden');
+    }
+  });
+}
+
 function applySharedViewVisibility() {
   const layout = document.querySelector('.project-layout');
   const sidebar = $('project-sidebar');
@@ -22,6 +77,7 @@ function applySharedViewVisibility() {
     document.querySelectorAll('[data-shared-hide]').forEach((el) => { el.style.display = 'none'; });
     const cta = $('shared-cta-register');
     if (cta) cta.classList.remove('hidden');
+    updateSharedCtaFloatingVisibility();
     const backBtn = $('btn-back-to-projects');
     if (backBtn) {
       backBtn.textContent = 'Iniciar sesión';
@@ -33,6 +89,12 @@ function applySharedViewVisibility() {
     document.querySelectorAll('[data-shared-hide]').forEach((el) => { el.style.display = ''; });
     const cta = $('shared-cta-register');
     if (cta) cta.classList.add('hidden');
+    const floating = $('shared-cta-floating');
+    if (floating) {
+      floating.classList.remove('visible');
+      floating.classList.add('hidden');
+    }
+    sessionStorage.removeItem(SHARED_CTA_FLOATING_DISMISSED_KEY);
     const backBtn = $('btn-back-to-projects');
     if (backBtn?.dataset.sharedBack === 'true') {
       backBtn.textContent = 'Proyectos';
