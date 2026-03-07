@@ -6,12 +6,12 @@ import { state } from './state.js';
 import { $, show, hide, showView, formatDate, statusLabel, escHtml, toast } from './dom.js';
 import { api } from './api.js';
 import {
-  loadLocalBackup,
+  loadBackupAsync,
   mergeProjects,
-  syncProjectsToLocal,
+  syncProjectsToBackup,
   ensureProjectsFetched,
   invalidateProjectsCache,
-  getCachedProject,
+  getCachedProjectAsync,
   getFirstIncompletePart,
   rehydrateProjectToServer,
 } from './storage.js';
@@ -102,14 +102,27 @@ function renderProjectsList(projects) {
 export async function loadProjectsView() {
   showView('view-projects');
   showProjectsLoading(true);
-  const localProjects = loadLocalBackup(state.user?.id).projects;
+
+  const userId = state.user?.id;
+  let cached = { projects: [] };
+  try {
+    cached = await loadBackupAsync(userId);
+    if (cached.projects.length > 0) {
+      renderProjectsList(cached.projects);
+      showProjectsLoading(false);
+    }
+  } catch (_) {}
+
+  const onQuotaExceeded = () => {
+    toast('Almacenamiento local lleno. Los proyectos se cargan desde el servidor; no se guardará copia offline.', 'warning');
+  };
 
   try {
-    const merged = await ensureProjectsFetched();
+    const merged = await ensureProjectsFetched({ onQuotaExceeded });
     renderProjectsList(merged);
   } catch (err) {
-    if (localProjects.length > 0) {
-      renderProjectsList(localProjects);
+    if (cached.projects.length > 0) {
+      renderProjectsList(cached.projects);
       toast('Servidor no disponible. Mostrando copia local de tus proyectos.', 'error');
     } else {
       toast('Error cargando proyectos: ' + err.message, 'error');
@@ -130,8 +143,9 @@ export async function openProjectView(projectId) {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
 
-    const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
-    syncProjectsToLocal(refreshed, state.user?.id);
+    const local = (await loadBackupAsync(state.user?.id)).projects;
+    const refreshed = mergeProjects([project], local);
+    await syncProjectsToBackup(refreshed, state.user?.id);
 
     renderProjectView(project);
 
@@ -166,7 +180,7 @@ export async function openProjectView(projectId) {
       }
     }
   } catch (err) {
-    const cachedProject = getCachedProject(projectId);
+    const cachedProject = await getCachedProjectAsync(projectId);
 
     if (cachedProject) {
       state.currentProject = cachedProject;
@@ -206,7 +220,7 @@ export async function restoreProjectView(projectId, partId, activeTab) {
   state.currentProjectId = projectId;
   showView('view-project');
 
-  const cached = partId ? getCachedProject(projectId) : null;
+  const cached = partId ? await getCachedProjectAsync(projectId) : null;
   const cachedHasSection = cached?.segmentation?.partes?.some((p) => p.numero === partId);
   const cachedNotProcessing = cached && !['pending', 'uploading', 'segmenting', 'processing'].includes(cached.status);
 
@@ -219,10 +233,11 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     activateTab(activeTab);
 
     api(`/api/projects/${projectId}`)
-      .then((project) => {
+      .then(async (project) => {
         state.currentProject = project;
-        const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
-        syncProjectsToLocal(refreshed, state.user?.id);
+        const local = (await loadBackupAsync(state.user?.id)).projects;
+        const refreshed = mergeProjects([project], local);
+        await syncProjectsToBackup(refreshed, state.user?.id);
         renderProjectView(project);
         selectPart(partId);
         activateTab(activeTab);
@@ -240,8 +255,9 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
 
-    const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
-    syncProjectsToLocal(refreshed, state.user?.id);
+    const local = (await loadBackupAsync(state.user?.id)).projects;
+    const refreshed = mergeProjects([project], local);
+    await syncProjectsToBackup(refreshed, state.user?.id);
 
     state.currentPartId = partId && project.segmentation?.partes?.some((p) => p.numero === partId) ? partId : null;
     state.activeTab = activeTab || 'explicacion';

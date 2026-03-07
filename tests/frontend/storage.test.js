@@ -6,6 +6,8 @@ import {
   getLocalBackupKey,
   mergeProjects,
   loadLocalBackup,
+  loadBackupAsync,
+  syncProjectsToBackup,
   getCachedApiKeyStatus,
   setCachedApiKeyStatus,
   getFirstIncompletePart,
@@ -81,6 +83,57 @@ describe('storage.js', () => {
       const result = loadLocalBackup('user-123');
       expect(result.projects).toHaveLength(1);
       expect(result.projects[0].name).toBe('Test');
+    });
+  });
+
+  describe('loadBackupAsync', () => {
+    it('returns empty backup for null userId', async () => {
+      const result = await loadBackupAsync(null);
+      expect(result).toEqual({ version: 1, projects: [] });
+    });
+
+    it('loads from localStorage fallback when IndexedDB unavailable', async () => {
+      const key = getLocalBackupKey('user-123');
+      localStorage.setItem(key, JSON.stringify({ version: 1, projects: [{ id: '1', name: 'Test' }] }));
+      const result = await loadBackupAsync('user-123');
+      expect(result.projects).toHaveLength(1);
+      expect(result.projects[0].name).toBe('Test');
+    });
+  });
+
+  describe('syncProjectsToBackup', () => {
+    it('does not throw on QuotaExceededError, falls back to lite or returns ok: false', async () => {
+      const origIndexedDB = globalThis.indexedDB;
+      vi.stubGlobal('indexedDB', undefined);
+
+      const origSetItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = vi.fn((key, value) => {
+        if (key?.includes('backup') && typeof value === 'string' && value.length > 100) {
+          const err = new DOMException('Quota exceeded', 'QuotaExceededError');
+          err.code = 22;
+          throw err;
+        }
+        origSetItem(key, value);
+      });
+
+      try {
+        const projects = [{ id: '1', name: 'Test', status: 'completed' }];
+        const result = await syncProjectsToBackup(projects, 'user-123');
+        expect(result).toBeDefined();
+        expect(typeof result.ok).toBe('boolean');
+      } finally {
+        vi.stubGlobal('indexedDB', origIndexedDB);
+      }
+    });
+
+    it('saves projects to backup storage', async () => {
+      const projects = [{ id: '1', name: 'Test', status: 'completed' }];
+      const result = await syncProjectsToBackup(projects, 'user-123');
+      expect(result.ok).toBe(true);
+
+      const loaded = await loadBackupAsync('user-123');
+      expect(loaded.projects).toHaveLength(1);
+      expect(loaded.projects[0].name).toBe('Test');
     });
   });
 

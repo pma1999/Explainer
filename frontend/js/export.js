@@ -6,9 +6,9 @@ import { state } from './state.js';
 import { $, show, hide, toast, escHtml } from './dom.js';
 import { api } from './api.js';
 import {
-  loadLocalBackup,
+  loadBackupAsync,
   mergeProjects,
-  syncProjectsToLocal,
+  syncProjectsToBackup,
   payloadToJsonFile,
   invalidateProjectsCache,
 } from './storage.js';
@@ -16,7 +16,8 @@ import { loadProjectsView } from './projects.js';
 
 export async function exportProjectsBackup() {
   try {
-    const localProjects = loadLocalBackup(state.user?.id).projects;
+    const local = await loadBackupAsync(state.user?.id);
+    const localProjects = local.projects;
     let payload = { version: 1, exported_at: new Date().toISOString(), projects: localProjects };
 
     try {
@@ -27,7 +28,10 @@ export async function exportProjectsBackup() {
       };
     } catch (_) {}
 
-    syncProjectsToLocal(payload.projects, state.user?.id);
+    const syncResult = await syncProjectsToBackup(payload.projects, state.user?.id);
+    if (!syncResult.ok && syncResult.quotaExceeded) {
+      toast('Backup exportado, pero no se pudo guardar copia local (almacenamiento lleno).', 'warning');
+    }
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -49,8 +53,12 @@ export async function importProjectsBackup(file) {
       throw new Error('Formato inválido: el backup no contiene una lista de proyectos');
     }
 
-    const localMerged = mergeProjects(parsed.projects, loadLocalBackup(state.user?.id).projects);
-    syncProjectsToLocal(localMerged, state.user?.id);
+    const local = await loadBackupAsync(state.user?.id);
+    const localMerged = mergeProjects(parsed.projects, local.projects);
+    const syncResult = await syncProjectsToBackup(localMerged, state.user?.id);
+    if (!syncResult.ok && syncResult.quotaExceeded) {
+      toast('Importación guardada en archivo, pero no se pudo guardar copia local (almacenamiento lleno).', 'warning');
+    }
 
     const fd = new FormData();
     fd.append('file', payloadToJsonFile(parsed, file.name || 'explainer-import.json'));

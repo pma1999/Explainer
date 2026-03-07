@@ -9,6 +9,7 @@ import {
   API_KEY_CACHE_TTL_MS,
 } from './state.js';
 import { api } from './api.js';
+import { loadBackup, saveBackup } from './backupStorage.js';
 
 export function getLocalBackupKey(userId) {
   return userId ? `explainer.projects.backup.v1.${userId}` : null;
@@ -38,6 +39,10 @@ export function setCachedApiKeyStatus(userId, hasApiKey) {
   } catch (_) {}
 }
 
+/**
+ * Sync load from localStorage only (legacy compatibility).
+ * Prefer loadBackupAsync for new code.
+ */
 export function loadLocalBackup(userId) {
   const key = getLocalBackupKey(userId);
   if (!key) return { version: 1, projects: [] };
@@ -52,34 +57,49 @@ export function loadLocalBackup(userId) {
   }
 }
 
-function saveLocalBackupToKey(key, payload) {
-  const safePayload = {
-    version: 1,
-    exported_at: new Date().toISOString(),
-    projects: Array.isArray(payload?.projects) ? payload.projects : [],
-  };
-  localStorage.setItem(key, JSON.stringify(safePayload));
+/**
+ * Async load from IndexedDB (primary) or localStorage (fallback).
+ */
+export async function loadBackupAsync(userId) {
+  return loadBackup(userId);
 }
 
+/**
+ * Async save to IndexedDB (primary) or localStorage (fallback).
+ * Never throws; returns { ok, quotaExceeded?, usedLite? }.
+ */
+export async function syncProjectsToBackup(projects, userId, opts = {}) {
+  if (!userId) return { ok: true };
+  try {
+    return await saveBackup(userId, { projects }, opts);
+  } catch (_) {
+    return { ok: false };
+  }
+}
+
+/**
+ * @deprecated Use syncProjectsToBackup. Kept for backward compatibility.
+ */
 export function syncProjectsToLocal(projects, userId) {
-  const key = getLocalBackupKey(userId);
-  if (!key) return;
-  saveLocalBackupToKey(key, { projects });
+  syncProjectsToBackup(projects, userId).catch(() => {});
 }
 
-export function migrateLegacyBackupIfNeeded(userId) {
+export async function migrateLegacyBackupIfNeeded(userId) {
   if (!userId) return;
   const userKey = getLocalBackupKey(userId);
   if (!userKey) return;
   try {
     const legacyRaw = localStorage.getItem(LOCAL_BACKUP_KEY_LEGACY);
-    if (!legacyRaw) return;
     const userRaw = localStorage.getItem(userKey);
-    if (userRaw) return;
-    const parsed = JSON.parse(legacyRaw);
+    const raw = userRaw || legacyRaw;
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.projects)) return;
-    saveLocalBackupToKey(userKey, { projects: parsed.projects });
-    localStorage.removeItem(LOCAL_BACKUP_KEY_LEGACY);
+    const result = await saveBackup(userId, { projects: parsed.projects });
+    if (result.ok) {
+      localStorage.removeItem(LOCAL_BACKUP_KEY_LEGACY);
+      localStorage.removeItem(userKey);
+    }
   } catch (_) {}
 }
 
@@ -103,8 +123,21 @@ export function mergeProjects(serverProjects = [], localProjects = []) {
   );
 }
 
+/**
+ * Sync get cached project (legacy). Prefer getCachedProjectAsync.
+ */
 export function getCachedProject(projectId) {
   const backup = loadLocalBackup(state.user?.id);
+  if (backup.lite) return null;
+  return backup.projects.find((p) => p.id === projectId) || null;
+}
+
+/**
+ * Async get cached project from backup. Returns null if backup is lite (no full content).
+ */
+export async function getCachedProjectAsync(projectId) {
+  const backup = await loadBackupAsync(state.user?.id);
+  if (backup.lite) return null;
   return backup.projects.find((p) => p.id === projectId) || null;
 }
 
@@ -131,21 +164,24 @@ export function invalidateProjectsCache() {
   projectsFetchPromise = null;
 }
 
-export function ensureProjectsFetched() {
+export function ensureProjectsFetched(opts = {}) {
   const userId = state.user?.id;
   if (!userId) return Promise.resolve([]);
   if (!projectsFetchPromise) {
-    projectsFetchPromise = api('/api/projects')
-      .then((serverProjects) => {
-        const local = loadLocalBackup(userId).projects;
-        const merged = mergeProjects(serverProjects, local);
-        syncProjectsToLocal(merged, userId);
+    projectsFetchPromise = (async () => {
+      try {
+        const [serverProjects, local] = await Promise.all([
+          api('/api/projects'),
+          loadBackupAsync(userId),
+        ]);
+        const merged = mergeProjects(serverProjects, local.projects);
+        await syncProjectsToBackup(merged, userId, opts);
         return merged;
-      })
-      .catch((err) => {
+      } catch (err) {
         projectsFetchPromise = null;
         throw err;
-      });
+      }
+    })();
   }
   return projectsFetchPromise;
 }

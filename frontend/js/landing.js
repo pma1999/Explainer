@@ -5,7 +5,7 @@
 import { state } from './state.js';
 import { $, show, hide, formatBytes, toast } from './dom.js';
 import { api } from './api.js';
-import { invalidateProjectsCache, loadLocalBackup, mergeProjects, syncProjectsToLocal } from './storage.js';
+import { invalidateProjectsCache, loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
 import { updateApiKeyUI, showSettings } from './auth.js';
 
 let selectedFile = null;
@@ -201,8 +201,9 @@ async function handleUpload() {
 
     const project = await api('/api/projects', { method: 'POST', body: fd });
     invalidateProjectsCache();
-    const mergedAfterCreate = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
-    syncProjectsToLocal(mergedAfterCreate, state.user?.id);
+    const local = (await loadBackupAsync(state.user?.id)).projects;
+    const mergedAfterCreate = mergeProjects([project], local);
+    await syncProjectsToBackup(mergedAfterCreate, state.user?.id);
     toast('Proyecto creado. Iniciando análisis...', 'success');
 
     clearFile();

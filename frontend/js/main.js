@@ -6,11 +6,11 @@ import { state, supabaseClient } from './state.js';
 import { $, show, hide, showView, setViewChangeCallback, toast } from './dom.js';
 import { api } from './api.js';
 import {
-  loadLocalBackup,
-  syncProjectsToLocal,
   migrateLegacyBackupIfNeeded,
+  syncProjectsToBackup,
   ensureProjectsFetched,
   invalidateProjectsCache,
+  loadBackupAsync,
 } from './storage.js';
 import { initAuth, initSettings, refreshApiKeyStatus } from './auth.js';
 import { initLanding } from './landing.js';
@@ -171,7 +171,7 @@ async function initApp() {
     return;
   }
 
-  migrateLegacyBackupIfNeeded(state.user?.id);
+  await migrateLegacyBackupIfNeeded(state.user?.id);
   ensureProjectsFetched();
   refreshApiKeyStatus();
 
@@ -492,8 +492,9 @@ function bootstrap() {
     try {
       await api(`/api/projects/${state.currentProjectId}`, { method: 'DELETE' });
       invalidateProjectsCache();
-      const remaining = loadLocalBackup(state.user?.id).projects.filter((p) => p.id !== state.currentProjectId);
-      syncProjectsToLocal(remaining, state.user?.id);
+      const local = (await loadBackupAsync(state.user?.id)).projects;
+      const remaining = local.filter((p) => p.id !== state.currentProjectId);
+      await syncProjectsToBackup(remaining, state.user?.id);
       toast('Proyecto eliminado.', 'success');
       if (state.processingSSE) { state.processingSSE.close(); state.processingSSE = null; }
       if (window.pushRoute) window.pushRoute({ view: 'projects' });

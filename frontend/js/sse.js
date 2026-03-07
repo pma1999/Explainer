@@ -12,7 +12,7 @@ import {
 } from './state.js';
 import { $, show, hide, toast } from './dom.js';
 import { api, API_BASE_URL, getAccessToken } from './api.js';
-import { loadLocalBackup, mergeProjects, syncProjectsToLocal } from './storage.js';
+import { loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
 import {
   renderProjectView,
   renderSidebarNav,
@@ -53,11 +53,13 @@ export function startProjectsListPolling(renderProjectsList) {
     const view = document.querySelector('.view.active');
     if (!view || view.id !== 'view-projects') return;
     try {
-      const serverProjects = await api('/api/projects');
-      const localProjects = loadLocalBackup(state.user?.id).projects;
-      const merged = mergeProjects(serverProjects, localProjects);
+      const [serverProjects, local] = await Promise.all([
+        api('/api/projects'),
+        loadBackupAsync(state.user?.id),
+      ]);
+      const merged = mergeProjects(serverProjects, local.projects);
       const hasActive = merged.some((p) => ['pending', 'uploading', 'segmenting', 'processing'].includes(p.status));
-      syncProjectsToLocal(merged, state.user?.id);
+      await syncProjectsToBackup(merged, state.user?.id);
       renderProjectsList(merged);
       if (!hasActive && state.pollProjectsInterval) {
         clearInterval(state.pollProjectsInterval);
