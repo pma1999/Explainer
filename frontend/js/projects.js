@@ -21,7 +21,7 @@ import {
   activateTab,
   syncProcessingUIWithState,
 } from './projectView.js';
-import { stopPolling, closeSSEIfDifferent, startSSE } from './sse.js';
+import { stopPolling, closeSSEIfDifferent, startSSE, startProjectsListPolling } from './sse.js';
 
 function showProjectsLoading(isLoading) {
   const grid = $('projects-grid');
