@@ -37,7 +37,7 @@ export async function markSectionComplete(partId) {
   } catch (_) {}
 }
 
-let _toggleInProgress = false;
+const _toggleInProgress = new Set();
 
 /** Toggle section read status manually. Optimistic UI: updates immediately, syncs in background. */
 export async function toggleSectionComplete(partId, completed) {
@@ -48,7 +48,7 @@ export async function toggleSectionComplete(partId, completed) {
   const completedSet = new Set(project?.reading_progress?.completed_parts || []);
   if (completed && completedSet.has(partId)) return;
   if (!completed && !completedSet.has(partId)) return;
-  if (_toggleInProgress) return;
+  if (_toggleInProgress.has(partId)) return;
 
   const prevCompleted = [...(project?.reading_progress?.completed_parts || [])];
 
@@ -68,9 +68,9 @@ export async function toggleSectionComplete(partId, completed) {
   }
   renderSidebarNav(state.currentProject);
   updateToggleCompleteButton();
-  setToggleButtonsDisabled(true);
+  setToggleDisabledForPart(partId, true);
+  _toggleInProgress.add(partId);
 
-  _toggleInProgress = true;
   try {
     const updated = await api(`/api/projects/${state.currentProjectId}/progress`, {
       method: 'PATCH',
@@ -82,7 +82,6 @@ export async function toggleSectionComplete(partId, completed) {
       renderSidebarNav(state.currentProject);
       updateToggleCompleteButton();
     }
-    toast(completed ? 'Marcada como leída' : 'Marcada como no leída', 'success');
   } catch (_) {
     state.currentProject.reading_progress = {
       ...state.currentProject.reading_progress,
@@ -92,15 +91,15 @@ export async function toggleSectionComplete(partId, completed) {
     updateToggleCompleteButton();
     toast('Error al actualizar el progreso', 'error');
   } finally {
-    _toggleInProgress = false;
-    setToggleButtonsDisabled(false);
+    _toggleInProgress.delete(partId);
+    setToggleDisabledForPart(partId, false);
   }
 }
 
-function setToggleButtonsDisabled(disabled) {
+function setToggleDisabledForPart(partId, disabled) {
   const btn = $('btn-toggle-complete');
-  if (btn) btn.disabled = disabled;
-  document.querySelectorAll('.part-read-toggle').forEach((el) => {
+  if (btn && state.currentPartId === partId) btn.disabled = disabled;
+  document.querySelectorAll(`.part-read-toggle[data-part-id="${partId}"]`).forEach((el) => {
     el.disabled = disabled;
   });
 }
