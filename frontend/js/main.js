@@ -196,7 +196,7 @@ async function initApp() {
   await refreshApiKeyStatus();
 }
 
-const NAVIGATION_COOLDOWN_MS = 400;
+const NAVIGATION_COOLDOWN_MS = 600;
 
 function initReadingProgressBar() {
   const scrollMarkedParts = new Set();

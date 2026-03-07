@@ -557,7 +557,12 @@ export function selectPart(partId) {
   activateTab(state.activeTab);
 
   const main = $('project-main');
-  if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+  if (main) {
+    // Use instant scroll to avoid intermediate scroll events during navigation
+    // that would incorrectly mark the new section as read (smooth scroll fires
+    // events with high pct before reaching top)
+    main.scrollTop = 0;
+  }
 
   updateReadingToolbar();
   updateMobileHeader();
