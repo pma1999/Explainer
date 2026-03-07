@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 
 ALLOWED_MODELS = {"gemini-3-flash-preview", "gemini-3.1-pro-preview"}
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +41,7 @@ from backend.supabase_data import (
 )
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
-from backend.rate_limit import project_create_rate_limit
+from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import run_segmentador
@@ -77,25 +77,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _validate_gemini_api_key(api_key: str) -> str:
+    """Validate and normalize Gemini API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if not key.startswith("AIza") or len(key) < 20 or len(key) > 64:
+        raise HTTPException(status_code=400, detail="API key de Gemini inválida")
+    return key
+
+
 @app.post("/api/settings/api-key")
+@api_key_rate_limit
 async def api_set_api_key(
+    request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
     api_key: str = Form(...),
 ):
     """Store user's API key (BYOK)."""
-    if not api_key.startswith("AIza") or len(api_key) < 20:
-        raise HTTPException(status_code=400, detail="API key de Gemini inválida")
-
+    api_key = _validate_gemini_api_key(api_key)
     set_user_api_key(user_id, api_key, provider="google_gemini")
-    print(f"[API Key] User {user_id[:8]}... configured API key: {mask_api_key(api_key)}")
+    logger.info("[API Key] User %s... configured API key: %s", user_id[:8], mask_api_key(api_key))
     return {"ok": True}
 
 
 @app.delete("/api/settings/api-key")
-async def api_delete_api_key(user_id: Annotated[str, Depends(get_current_user_id)]):
+@api_key_rate_limit
+async def api_delete_api_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
     """Delete user's API key."""
     delete_user_api_key(user_id)
-    print(f"[API Key] User {user_id[:8]}... deleted their API key")
+    logger.info("[API Key] User %s... deleted their API key", user_id[:8])
     return {"ok": True}
 
 

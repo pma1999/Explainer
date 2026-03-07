@@ -365,7 +365,7 @@ def has_user_api_key(user_id: str) -> bool:
     try:
         r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
         result = bool(r and r.data)
-        logger.info(f"[has_user_api_key] user={user_id[:8]}... result={result}")
+        logger.debug("[has_user_api_key] user=%s... result=%s", user_id[:8], result)
         return result
     except Exception as e:
         logger.error(f"[has_user_api_key] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
@@ -406,23 +406,14 @@ def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini"
     client = _client()
     encrypted_key = encrypt_user_api_key(api_key, user_id)
 
-    # Upsert: insert if not exists, update if exists
     row = {
         "user_id": user_id,
         "encrypted_api_key": encrypted_key,
         "provider": provider,
     }
 
-    # Try update first
-    try:
-        existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
-        if existing and existing.data:
-            client.table("user_api_keys").update(row).eq("user_id", user_id).execute()
-        else:
-            client.table("user_api_keys").insert(row).execute()
-    except Exception as e:
-        # If error (e.g., connection), try insert as fallback
-        client.table("user_api_keys").insert(row).execute()
+    # Atomic upsert: insert if not exists, update if exists (user_id is PK)
+    client.table("user_api_keys").upsert(row, on_conflict="user_id").execute()
 
 
 def delete_user_api_key(user_id: str) -> bool:

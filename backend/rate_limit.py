@@ -145,3 +145,8 @@ def api_rate_limit(func: Callable):
 def project_create_rate_limit(func: Callable):
     """Rate limit para crear proyectos: 10 por minuto."""
     return rate_limit(max_requests=10, window_seconds=60)(func)
+
+
+def api_key_rate_limit(func: Callable):
+    """Rate limit para endpoints de API key (POST/DELETE): 10 por minuto."""
+    return rate_limit(max_requests=10, window_seconds=60)(func)

@@ -59,14 +59,17 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 
 ### 1. Variables de Entorno de Seguridad
 
-Genera la clave de encriptación para la API key de Gemini:
+**APP_ENCRYPTION_KEY** es obligatoria en producción. Se usa para encriptar las API keys de Gemini de los usuarios (BYOK). La aplicación **no arrancará** si en `ENVIRONMENT=production` la clave está ausente o coincide con valores conocidos débiles.
+
+Genera una clave segura con:
 
 ```bash
-# Master key para encriptar la API key (32 bytes base64)
 openssl rand -base64 32
 ```
 
-Guarda este valor; lo necesitarás en Koyeb.
+- **Obligatorio en producción**: Sin esta clave, la API falla al iniciar.
+- **Nunca uses** valores de ejemplo (`.env.example`) o claves de desarrollo en producción.
+- Guarda el valor de forma segura; lo necesitarás en Koyeb.
 
 ---
 
@@ -160,7 +163,7 @@ En el dashboard de Koyeb (tu servicio → Settings → Environment Variables):
 
 | Secret | Descripción |
 |--------|-------------|
-| `APP_ENCRYPTION_KEY` | Clave maestra para encriptar API keys (32 bytes base64) |
+| `APP_ENCRYPTION_KEY` | Clave maestra para encriptar API keys. **Generar con:** `openssl rand -base64 32`. Obligatoria en producción. |
 | `SUPABASE_URL` | URL del proyecto Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key de Supabase |
 | `SUPABASE_JWT_SECRET` | JWT secret de Supabase |
@@ -169,7 +172,8 @@ En el dashboard de Koyeb (tu servicio → Settings → Environment Variables):
 
 **O vía CLI:**
 ```bash
-koyeb secret create APP_ENCRYPTION_KEY --value "tu-key-aqui"
+# APP_ENCRYPTION_KEY: genera con "openssl rand -base64 32" y pega el valor
+koyeb secret create APP_ENCRYPTION_KEY --value "tu-clave-generada"
 koyeb secret create SUPABASE_URL --value "https://xxx.supabase.co"
 koyeb secret create SUPABASE_SERVICE_ROLE_KEY --value "eyJ..."
 koyeb secret create SUPABASE_JWT_SECRET --value "tu-jwt-secret"

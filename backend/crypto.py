@@ -17,16 +17,34 @@ from cryptography.fernet import Fernet
 
 
 # Master key de la aplicación - DEBE estar en variable de entorno
-MASTER_KEY = os.environ.get("APP_ENCRYPTION_KEY")
-if not MASTER_KEY:
-    # En desarrollo, generar una key temporal (advertencia en logs)
+# In production, weak or missing keys cause immediate startup failure.
+_WEAK_KEYS = frozenset({
+    "dev_key_insecure_do_not_use_in_production_32bytes!",
+    "dev_key_cambiar_en_produccion_32bytes!!",
+})
+
+_raw_key = os.environ.get("APP_ENCRYPTION_KEY")
+if not _raw_key or not _raw_key.strip():
+    if os.environ.get("ENVIRONMENT") == "production":
+        raise RuntimeError(
+            "APP_ENCRYPTION_KEY is required in production. "
+            "Generate with: openssl rand -base64 32"
+        )
     import warnings
     warnings.warn(
         "APP_ENCRYPTION_KEY no configurada. Usando key temporal INSEGURA. "
         "Configura APP_ENCRYPTION_KEY en producción con: openssl rand -base64 32",
         RuntimeWarning
     )
-    MASTER_KEY = "dev_key_insecure_do_not_use_in_production_32bytes!"
+    _raw_key = "dev_key_insecure_do_not_use_in_production_32bytes!"
+
+if os.environ.get("ENVIRONMENT") == "production" and _raw_key.strip() in _WEAK_KEYS:
+    raise RuntimeError(
+        "APP_ENCRYPTION_KEY must not use a known weak value in production. "
+        "Generate a secure key with: openssl rand -base64 32"
+    )
+
+MASTER_KEY = _raw_key.strip()
 
 
 def mask_api_key(api_key: str) -> str:
