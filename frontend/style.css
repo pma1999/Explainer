@@ -1228,6 +1228,13 @@ body {
   border-color: rgba(16, 185, 129, 0.4);
 }
 
+.part-read-toggle:disabled,
+.btn-toggle-complete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .sidebar-part.part-read .part-label {
   color: var(--text-secondary);
 }

@@ -37,7 +37,9 @@ export async function markSectionComplete(partId) {
   } catch (_) {}
 }
 
-/** Toggle section read status manually. */
+let _toggleInProgress = false;
+
+/** Toggle section read status manually. Optimistic UI: updates immediately, syncs in background. */
 export async function toggleSectionComplete(partId, completed) {
   if (!state.currentProjectId || !state.currentProject || !state.user?.id) return;
   const project = state.currentProject;
@@ -46,7 +48,29 @@ export async function toggleSectionComplete(partId, completed) {
   const completedSet = new Set(project?.reading_progress?.completed_parts || []);
   if (completed && completedSet.has(partId)) return;
   if (!completed && !completedSet.has(partId)) return;
+  if (_toggleInProgress) return;
 
+  const prevCompleted = [...(project?.reading_progress?.completed_parts || [])];
+
+  // Optimistic update: apply immediately for instant feedback
+  if (completed) {
+    const next = new Set(prevCompleted);
+    next.add(partId);
+    state.currentProject.reading_progress = {
+      ...state.currentProject.reading_progress,
+      completed_parts: [...next].sort((a, b) => a - b),
+    };
+  } else {
+    state.currentProject.reading_progress = {
+      ...state.currentProject.reading_progress,
+      completed_parts: prevCompleted.filter((p) => p !== partId),
+    };
+  }
+  renderSidebarNav(state.currentProject);
+  updateToggleCompleteButton();
+  setToggleButtonsDisabled(true);
+
+  _toggleInProgress = true;
   try {
     const updated = await api(`/api/projects/${state.currentProjectId}/progress`, {
       method: 'PATCH',
@@ -57,11 +81,28 @@ export async function toggleSectionComplete(partId, completed) {
       state.currentProject.reading_progress = updated.reading_progress;
       renderSidebarNav(state.currentProject);
       updateToggleCompleteButton();
-      toast(completed ? 'Marcada como leída' : 'Marcada como no leída', 'success');
     }
+    toast(completed ? 'Marcada como leída' : 'Marcada como no leída', 'success');
   } catch (_) {
+    state.currentProject.reading_progress = {
+      ...state.currentProject.reading_progress,
+      completed_parts: prevCompleted,
+    };
+    renderSidebarNav(state.currentProject);
+    updateToggleCompleteButton();
     toast('Error al actualizar el progreso', 'error');
+  } finally {
+    _toggleInProgress = false;
+    setToggleButtonsDisabled(false);
   }
+}
+
+function setToggleButtonsDisabled(disabled) {
+  const btn = $('btn-toggle-complete');
+  if (btn) btn.disabled = disabled;
+  document.querySelectorAll('.part-read-toggle').forEach((el) => {
+    el.disabled = disabled;
+  });
 }
 
 export function showProcessingIndicator(status) {
