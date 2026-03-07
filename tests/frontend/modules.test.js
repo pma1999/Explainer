@@ -65,4 +65,9 @@ describe('Module loading', () => {
     expect(exp.exportProjectsBackup).toBeTypeOf('function');
     expect(exp.importProjectsBackup).toBeTypeOf('function');
   });
+
+  it('loads main.js without syntax errors', async () => {
+    await import('../../frontend/js/main.js');
+    // If we get here, the module loaded and bootstrap ran without throwing
+  });
 });
