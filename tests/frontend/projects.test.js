@@ -159,4 +159,55 @@ describe('projects.js boot behavior', () => {
     expect(showProjectLoadingState.mock.invocationCallOrder[0]).toBeLessThan(showView.mock.invocationCallOrder[0]);
     expect(showView.mock.invocationCallOrder[0]).toBeLessThan(api.mock.invocationCallOrder[0]);
   });
+
+  it('renders the cached section immediately on warm cache deep links', async () => {
+    const cachedProject = {
+      id: 'p1',
+      status: 'completed',
+      segmentation: { partes: [{ numero: 4 }] },
+    };
+
+    getCachedProjectAsync.mockResolvedValue(cachedProject);
+    api.mockResolvedValue(cachedProject);
+
+    const { restoreProjectView } = await import('../../frontend/js/projects.js');
+    await restoreProjectView('p1', 4, 'explicacion');
+
+    expect(showSectionLoadingState).toHaveBeenCalledWith(4);
+    expect(renderProjectView).toHaveBeenCalledWith(cachedProject);
+    expect(selectPart).toHaveBeenCalledWith(4);
+    expect(activateTab).toHaveBeenCalledWith('explicacion');
+    expect(api).toHaveBeenCalledWith('/api/projects/p1');
+  });
+
+  it('normalizes invalid part ids back to the project route after loading', async () => {
+    const project = {
+      id: 'p1',
+      status: 'completed',
+      segmentation: { partes: [{ numero: 1 }] },
+    };
+
+    getCachedProjectAsync.mockResolvedValue(null);
+    api.mockResolvedValue(project);
+
+    const { restoreProjectView } = await import('../../frontend/js/projects.js');
+    await restoreProjectView('p1', 99, 'explicacion');
+
+    expect(global.window.replaceRoute).toHaveBeenCalledWith({ view: 'project', projectId: 'p1' });
+  });
+
+  it('keeps processing projects on the SSE path', async () => {
+    const project = {
+      id: 'p1',
+      status: 'processing',
+      segmentation: { partes: [{ numero: 1 }] },
+    };
+    api.mockResolvedValue(project);
+
+    const { openProjectView } = await import('../../frontend/js/projects.js');
+    await openProjectView('p1');
+
+    expect(closeSSEIfDifferent).toHaveBeenCalledWith('p1');
+    expect(startSSE).toHaveBeenCalledWith('p1');
+  });
 });
