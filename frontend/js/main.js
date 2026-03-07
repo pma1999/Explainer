@@ -196,6 +196,8 @@ async function initApp() {
   await refreshApiKeyStatus();
 }
 
+const NAVIGATION_COOLDOWN_MS = 400;
+
 function initReadingProgressBar() {
   const scrollMarkedParts = new Set();
   let scrollCompleteDebounce = null;
@@ -226,6 +228,7 @@ function initReadingProgressBar() {
 
     const partId = state.currentPartId;
     if (partId && pct >= 80 && !scrollMarkedParts.has(partId)) {
+      if (Date.now() - state.lastPartChangeAt < NAVIGATION_COOLDOWN_MS) return;
       if (scrollCompleteDebounce) clearTimeout(scrollCompleteDebounce);
       scrollCompleteDebounce = setTimeout(() => {
         scrollCompleteDebounce = null;

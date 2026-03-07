@@ -25,6 +25,7 @@ export const state = {
   session: null,
   user: null,
   previousUserId: null,
+  lastPartChangeAt: 0,
 };
 
 export const SSE_RECONNECT_MAX = 5;

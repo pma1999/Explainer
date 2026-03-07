@@ -518,6 +518,7 @@ export function activateTab(tabName) {
 }
 
 export function selectPart(partId) {
+  state.lastPartChangeAt = Date.now();
   state.currentPartId = partId;
 
   const partContent = $('part-content');
