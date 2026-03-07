@@ -1359,6 +1359,125 @@ body {
 }
 
 /* ─────────────────────────────────────────────
+   PROJECT BOOT SHELL
+───────────────────────────────────────────── */
+.project-boot-shell {
+  min-height: 100vh;
+  padding: 42px 40px 56px;
+}
+
+.project-boot-shell.hidden {
+  display: none;
+}
+
+.project-boot-shell-inner {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.project-boot-kicker {
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 22px;
+}
+
+.project-boot-title-skeleton,
+.project-boot-pill,
+.project-boot-tab,
+.project-boot-line {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.project-boot-title-skeleton::after,
+.project-boot-pill::after,
+.project-boot-tab::after,
+.project-boot-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+.project-boot-title-skeleton {
+  height: 36px;
+  width: min(620px, 90%);
+  border-radius: 12px;
+  margin-bottom: 18px;
+}
+
+.project-boot-meta-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+
+.project-boot-pill {
+  height: 30px;
+  width: 140px;
+  border-radius: 999px;
+}
+
+.project-boot-pill.short {
+  width: 92px;
+}
+
+.project-boot-tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.project-boot-tab {
+  height: 38px;
+  width: 140px;
+  border-radius: 10px 10px 0 0;
+}
+
+.project-boot-tab.active {
+  background: rgba(232, 184, 109, 0.12);
+  border-color: rgba(232, 184, 109, 0.18);
+}
+
+.project-boot-body {
+  padding: 30px 28px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.project-boot-line {
+  height: 14px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+}
+
+.project-boot-line:last-child {
+  margin-bottom: 0;
+}
+
+.project-boot-line.w-100 { width: 100%; }
+.project-boot-line.w-96 { width: 96%; }
+.project-boot-line.w-92 { width: 92%; }
+.project-boot-line.w-88 { width: 88%; }
+.project-boot-line.w-78 { width: 78%; }
+.project-boot-line.w-65 { width: 65%; }
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ─────────────────────────────────────────────
    WELCOME STATE
 ───────────────────────────────────────────── */
 .main-welcome {
@@ -2314,6 +2433,24 @@ body {
   .part-actions-mobile {
     display: block;
     margin-left: auto;
+  }
+
+  .project-boot-shell {
+    padding: 28px 18px 40px;
+    min-height: calc(100vh - 54px);
+  }
+
+  .project-boot-title-skeleton,
+  .project-boot-tab {
+    width: 100%;
+  }
+
+  .project-boot-tabs {
+    gap: 8px;
+  }
+
+  .project-boot-body {
+    padding: 22px 18px;
   }
 
   .part-title {

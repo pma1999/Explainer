@@ -208,21 +208,64 @@ export function hideProcessingIndicator() {
   if (stage) stage.classList.add('hidden');
 }
 
+function setBootShellKicker(text) {
+  const kicker = $('project-boot-kicker');
+  if (kicker) kicker.textContent = text;
+}
+
+function primeProjectChrome(projectName = 'Cargando proyecto...') {
+  const sidebarName = $('sidebar-project-name');
+  const sidebarStatus = $('sidebar-status');
+  const sidebarNav = $('sidebar-nav');
+  const mobileProjectName = $('mobile-project-name');
+
+  if (sidebarName) sidebarName.textContent = projectName;
+  if (sidebarStatus) sidebarStatus.textContent = '';
+  if (sidebarNav) sidebarNav.innerHTML = '';
+  if (mobileProjectName) mobileProjectName.textContent = projectName;
+}
+
+function hideProjectBootShell() {
+  hide($('project-boot-shell'));
+}
+
+function resetProjectSurface() {
+  hide($('part-content'));
+  hide($('main-welcome'));
+  hide($('proc-stage'));
+  hideProjectBootShell();
+}
+
+export function showProjectLoadingState() {
+  resetProjectSurface();
+  setBootShellKicker('Cargando proyecto');
+  primeProjectChrome();
+  show($('project-boot-shell'));
+}
+
 /**
  * Show loading state when restoring a specific section from URL and project is not yet loaded.
  * Avoids showing "Selecciona una sección" when the user intent is to load a concrete section.
  */
 export function showSectionLoadingState(partId) {
-  hide($('part-content'));
-  hide($('proc-stage'));
-  const welcome = $('main-welcome');
-  if (welcome) {
-    const titleEl = $('welcome-title');
-    const subEl = $('welcome-sub');
-    if (titleEl) titleEl.textContent = 'Cargando sección...';
-    if (subEl) subEl.textContent = partId ? `Cargando sección ${partId}…` : 'Obteniendo el proyecto…';
-    show(welcome);
+  resetProjectSurface();
+  setBootShellKicker(partId ? `Cargando sección ${partId}` : 'Cargando sección');
+  primeProjectChrome();
+  show($('project-boot-shell'));
+}
+
+export function showProjectIdleState(hasPartes) {
+  resetProjectSurface();
+  const titleEl = $('welcome-title');
+  const subEl = $('welcome-sub');
+
+  if (titleEl) titleEl.textContent = hasPartes ? 'Selecciona una sección' : 'Sin contenido';
+  if (subEl) {
+    subEl.textContent = hasPartes
+      ? 'Haz clic en cualquier sección para ver su contenido.'
+      : 'No hay secciones disponibles.';
   }
+  show($('main-welcome'));
 }
 
 export function setProcPhase(status) {
@@ -679,6 +722,7 @@ export function selectPart(partId) {
     el.classList.toggle('active', Number(el.dataset.partId) === partId);
   });
 
+  hideProjectBootShell();
   hide($('proc-stage'));
   hide($('main-welcome'));
   show(partContent);
@@ -734,6 +778,7 @@ export function renderProjectView(project) {
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
 
+  hideProjectBootShell();
   renderSidebarNav(project);
   if (!state.isSharedView) {
     updateUsageUI(project.usage);
@@ -744,21 +789,16 @@ export function renderProjectView(project) {
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
 
   if (!state.currentPartId) {
-    hide($('part-content'));
     if (isProcessing) {
-      showProcessingIndicator(project.status);
+      hide($('part-content'));
       hide($('main-welcome'));
+      showProcessingIndicator(project.status);
       if (project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0) {
         renderProcPartsGrid(project);
       }
     } else {
-      hideProcessingIndicator();
-      show($('main-welcome'));
       const hasPartes = project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0;
-      $('welcome-title').textContent = hasPartes ? 'Selecciona una sección' : 'Sin contenido';
-      $('welcome-sub').textContent = hasPartes
-        ? 'Haz clic en cualquier sección para ver su contenido.'
-        : 'No hay secciones disponibles.';
+      showProjectIdleState(hasPartes);
     }
   }
 }
@@ -766,8 +806,11 @@ export function renderProjectView(project) {
 export function syncProcessingUIWithState() {
   const project = state.currentProject;
   if (!project) return;
+  hideProjectBootShell();
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
   if (isProcessing) {
+    hide($('part-content'));
+    hide($('main-welcome'));
     showProcessingIndicator(project.status);
     if (project.segmentation && project.segmentation.partes && project.segmentation.partes.length > 0) {
       renderProcPartsGrid(project);

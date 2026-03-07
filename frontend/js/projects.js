@@ -20,6 +20,7 @@ import {
   selectPart,
   activateTab,
   syncProcessingUIWithState,
+  showProjectLoadingState,
   showSectionLoadingState,
 } from './projectView.js';
 import { stopPolling, closeSSEIfDifferent, startSSE, startProjectsListPolling } from './sse.js';
@@ -137,6 +138,7 @@ export async function openProjectView(projectId) {
   state.currentPartId = null;
   state.activeTab = 'explicacion';
 
+  showProjectLoadingState();
   showView('view-project');
 
   try {
@@ -217,20 +219,36 @@ function setupSSEForProject(projectId, project) {
 }
 
 export async function restoreProjectView(projectId, partId, activeTab) {
+  const resolvedTab = activeTab || 'explicacion';
   state.currentProjectId = projectId;
+  state.currentPartId = null;
+  state.activeTab = resolvedTab;
+
+  if (partId) {
+    showSectionLoadingState(partId);
+  } else {
+    showProjectLoadingState();
+  }
   showView('view-project');
 
-  const cached = partId ? await getCachedProjectAsync(projectId) : null;
+  let cached = null;
+  if (partId) {
+    try {
+      cached = await getCachedProjectAsync(projectId);
+    } catch (_) {
+      cached = null;
+    }
+  }
   const cachedHasSection = cached?.segmentation?.partes?.some((p) => p.numero === partId);
   const cachedNotProcessing = cached && !['pending', 'uploading', 'segmenting', 'processing'].includes(cached.status);
 
   if (partId && cached && cachedHasSection && cachedNotProcessing) {
     state.currentProject = cached;
     state.currentPartId = partId;
-    state.activeTab = activeTab;
+    state.activeTab = resolvedTab;
     renderProjectView(cached);
     selectPart(partId);
-    activateTab(activeTab);
+    activateTab(resolvedTab);
 
     api(`/api/projects/${projectId}`)
       .then(async (project) => {
@@ -240,15 +258,11 @@ export async function restoreProjectView(projectId, partId, activeTab) {
         await syncProjectsToBackup(refreshed, state.user?.id);
         renderProjectView(project);
         selectPart(partId);
-        activateTab(activeTab);
+        activateTab(resolvedTab);
         setupSSEForProject(projectId, project);
       })
       .catch(() => {});
     return;
-  }
-
-  if (partId) {
-    showSectionLoadingState(partId);
   }
 
   try {
@@ -260,7 +274,7 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     await syncProjectsToBackup(refreshed, state.user?.id);
 
     state.currentPartId = partId && project.segmentation?.partes?.some((p) => p.numero === partId) ? partId : null;
-    state.activeTab = activeTab || 'explicacion';
+    state.activeTab = resolvedTab;
 
     renderProjectView(project);
 
