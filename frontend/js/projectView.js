@@ -116,6 +116,23 @@ export function hideProcessingIndicator() {
   if (stage) stage.classList.add('hidden');
 }
 
+/**
+ * Show loading state when restoring a specific section from URL and project is not yet loaded.
+ * Avoids showing "Selecciona una sección" when the user intent is to load a concrete section.
+ */
+export function showSectionLoadingState(partId) {
+  hide($('part-content'));
+  hide($('proc-stage'));
+  const welcome = $('main-welcome');
+  if (welcome) {
+    const titleEl = $('welcome-title');
+    const subEl = $('welcome-sub');
+    if (titleEl) titleEl.textContent = 'Cargando sección...';
+    if (subEl) subEl.textContent = partId ? `Cargando sección ${partId}…` : 'Obteniendo el proyecto…';
+    show(welcome);
+  }
+}
+
 export function setProcPhase(status) {
   const labelMap = {
     pending: 'Iniciando',

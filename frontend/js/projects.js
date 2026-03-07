@@ -20,6 +20,7 @@ import {
   selectPart,
   activateTab,
   syncProcessingUIWithState,
+  showSectionLoadingState,
 } from './projectView.js';
 import { stopPolling, closeSSEIfDifferent, startSSE, startProjectsListPolling } from './sse.js';
 
@@ -180,9 +181,61 @@ export async function openProjectView(projectId) {
   }
 }
 
+function setupSSEForProject(projectId, project) {
+  const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
+  if (isProcessing) {
+    if (state.sseProjectId === projectId && state.processingSSE) {
+      if (state.processingSSE.readyState === EventSource.CLOSED) {
+        startSSE(projectId, { forceReconnect: true });
+      }
+      syncProcessingUIWithState();
+    } else {
+      closeSSEIfDifferent(projectId);
+      startSSE(projectId);
+    }
+  } else {
+    if (state.processingSSE && state.sseProjectId === projectId) {
+      state.processingSSE.close();
+      state.processingSSE = null;
+      state.sseProjectId = null;
+    }
+  }
+}
+
 export async function restoreProjectView(projectId, partId, activeTab) {
   state.currentProjectId = projectId;
   showView('view-project');
+
+  const cached = partId ? getCachedProject(projectId) : null;
+  const cachedHasSection = cached?.segmentation?.partes?.some((p) => p.numero === partId);
+  const cachedNotProcessing = cached && !['pending', 'uploading', 'segmenting', 'processing'].includes(cached.status);
+
+  if (partId && cached && cachedHasSection && cachedNotProcessing) {
+    state.currentProject = cached;
+    state.currentPartId = partId;
+    state.activeTab = activeTab;
+    renderProjectView(cached);
+    selectPart(partId);
+    activateTab(activeTab);
+
+    api(`/api/projects/${projectId}`)
+      .then((project) => {
+        state.currentProject = project;
+        const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
+        syncProjectsToLocal(refreshed, state.user?.id);
+        renderProjectView(project);
+        selectPart(partId);
+        activateTab(activeTab);
+        setupSSEForProject(projectId, project);
+      })
+      .catch(() => {});
+    return;
+  }
+
+  if (partId) {
+    showSectionLoadingState(partId);
+  }
+
   try {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
@@ -190,13 +243,14 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     const refreshed = mergeProjects([project], loadLocalBackup(state.user?.id).projects);
     syncProjectsToLocal(refreshed, state.user?.id);
 
+    state.currentPartId = partId && project.segmentation?.partes?.some((p) => p.numero === partId) ? partId : null;
+    state.activeTab = activeTab || 'explicacion';
+
     renderProjectView(project);
 
-    if (partId && project.segmentation?.partes?.some(p => p.numero === partId)) {
-      state.currentPartId = partId;
-      state.activeTab = activeTab;
-      selectPart(partId);
-      activateTab(activeTab);
+    if (state.currentPartId) {
+      selectPart(state.currentPartId);
+      activateTab(state.activeTab);
     } else if (partId) {
       if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
     } else if (project.status === 'completed') {
@@ -211,17 +265,7 @@ export async function restoreProjectView(projectId, partId, activeTab) {
       }
     }
 
-    const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
-    if (isProcessing) {
-      if (state.sseProjectId === projectId && state.processingSSE) {
-        if (state.processingSSE.readyState === EventSource.CLOSED) {
-          startSSE(projectId, { forceReconnect: true });
-        }
-      } else {
-        closeSSEIfDifferent(projectId);
-        startSSE(projectId);
-      }
-    }
+    setupSSEForProject(projectId, project);
   } catch (err) {
     showView('view-projects');
     loadProjectsView();
