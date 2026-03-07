@@ -13,6 +13,8 @@ export const state = {
   currentProject: null,
   currentPartId: null,
   activeTab: 'explicacion',
+  isSharedView: false,
+  shareToken: null,
   processingSSE: null,
   sseProjectId: null,
   sseReconnectAttempts: 0,

@@ -1,13 +1,14 @@
 /* ============================================================
    EXPLAINER — Hash-based Router
-   URL format: #/ | #/projects | #/p/{projectId} | #/p/{projectId}/s/{partId} | #/p/{projectId}/s/{partId}/t/{tab}
+   URL format: #/ | #/projects | #/p/{projectId} | #/p/{projectId}/s/{partId}/t/{tab}
+   Shared: #/s/{token} | #/s/{token}/s/{partId}/t/{tab}
    ============================================================ */
 
 const VALID_TABS = ['explicacion', 'recorrido', 'recursos'];
 
 /**
  * Parse the current location hash into a route object.
- * @returns {{ view: string, projectId?: string, partId?: number, tab?: string } | null}
+ * @returns {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string } | null}
  */
 function parseRoute() {
   const hash = (location.hash || '').replace(/^#/, '').trim();
@@ -19,6 +20,26 @@ function parseRoute() {
 
   if (segments[0] === 'projects') {
     return { view: 'projects' };
+  }
+
+  if (segments[0] === 's' && segments[1]) {
+    const route = { view: 'shared', shareToken: segments[1] };
+    if (segments[2] === 's' && segments[3]) {
+      const partId = Number(segments[3]);
+      if (!Number.isNaN(partId) && partId > 0) {
+        route.partId = partId;
+      }
+    }
+    if (route.partId && segments[4] === 't' && segments[5]) {
+      const tab = segments[5].toLowerCase();
+      if (VALID_TABS.includes(tab)) {
+        route.tab = tab;
+      }
+    }
+    if (route.partId && !route.tab) {
+      route.tab = 'explicacion';
+    }
+    return route;
   }
 
   if (segments[0] === 'p' && segments[1]) {
@@ -61,6 +82,15 @@ function buildHash(route) {
 
   if (route.view === 'landing') return '#/';
   if (route.view === 'projects') return '#/projects';
+
+  if (route.view === 'shared' && route.shareToken) {
+    let hash = `#/s/${route.shareToken}`;
+    if (route.partId) {
+      hash += `/s/${route.partId}`;
+      hash += `/t/${route.tab && VALID_TABS.includes(route.tab) ? route.tab : 'explicacion'}`;
+    }
+    return hash;
+  }
 
   if (route.view === 'project' && route.projectId) {
     let hash = `#/p/${route.projectId}`;

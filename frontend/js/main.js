@@ -15,10 +15,12 @@ import {
 import { initAuth, initSettings, refreshApiKeyStatus } from './auth.js';
 import { initLanding } from './landing.js';
 import { loadProjectsView, openProjectView, restoreProjectView } from './projects.js';
+import { loadSharedProject, exitSharedView } from './shared.js';
 import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete } from './projectView.js';
+import { initShareModal } from './share.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView } from './projectView.js';
 
 function saveViewState() {
   if (!state.user?.id) return;
@@ -37,6 +39,23 @@ function saveViewState() {
 
 function navigateFromRoute(route) {
   if (!route) return;
+
+  if (route.view === 'shared' && route.shareToken) {
+    if (state.isSharedView && state.shareToken === route.shareToken && state.currentProject) {
+      if (route.partId) {
+        state.currentPartId = route.partId;
+        state.activeTab = route.tab || 'explicacion';
+        selectPart(route.partId);
+        activateTab(state.activeTab);
+      } else {
+        state.currentPartId = null;
+        renderProjectView(state.currentProject);
+      }
+    } else {
+      loadSharedProject(route.shareToken, route.partId, route.tab);
+    }
+    return;
+  }
 
   if (route.view === 'landing') {
     showView('view-landing');
@@ -79,6 +98,16 @@ function navigateFromRoute(route) {
 }
 
 async function initApp() {
+  if (typeof window.initRouter === 'function') {
+    window.initRouter(navigateFromRoute);
+  }
+
+  const route = window.parseRoute ? window.parseRoute() : null;
+  if (route && route.view === 'shared' && route.shareToken) {
+    await loadSharedProject(route.shareToken, route.partId, route.tab);
+    return;
+  }
+
   if (!supabaseClient) {
     showView('view-auth');
     document.querySelector('.auth-subtitle').textContent = 'Supabase no configurado. Define EXPLAINER_SUPABASE_URL y EXPLAINER_SUPABASE_ANON_KEY.';
@@ -89,10 +118,6 @@ async function initApp() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   state.session = session;
   state.user = session?.user ?? null;
-
-  if (typeof window.initRouter === 'function') {
-    window.initRouter(navigateFromRoute);
-  }
 
   supabaseClient.auth.onAuthStateChange((_event, newSession) => {
     const prevUserId = state.user?.id ?? null;
@@ -309,15 +334,24 @@ function navigateToPart(delta) {
   if (idx === -1) return;
   const next = partes[idx + delta];
   if (next && window.pushRoute) {
-    if (delta === 1 && state.currentPartId) {
+    if (delta === 1 && state.currentPartId && !state.isSharedView) {
       markSectionComplete(state.currentPartId);
     }
-    window.pushRoute({
-      view: 'project',
-      projectId: state.currentProjectId,
-      partId: next.numero,
-      tab: state.activeTab,
-    });
+    if (state.isSharedView && state.shareToken) {
+      window.pushRoute({
+        view: 'shared',
+        shareToken: state.shareToken,
+        partId: next.numero,
+        tab: state.activeTab,
+      });
+    } else {
+      window.pushRoute({
+        view: 'project',
+        projectId: state.currentProjectId,
+        partId: next.numero,
+        tab: state.activeTab,
+      });
+    }
   }
 }
 
@@ -326,14 +360,12 @@ function initCopyLink() {
   if (!btn) return;
 
   btn.addEventListener('click', async () => {
-    if (!state.currentProjectId || !state.currentPartId) return;
+    if (!state.currentPartId) return;
+    const route = state.isSharedView && state.shareToken
+      ? { view: 'shared', shareToken: state.shareToken, partId: state.currentPartId, tab: state.activeTab }
+      : { view: 'project', projectId: state.currentProjectId, partId: state.currentPartId, tab: state.activeTab };
     const url = location.origin + location.pathname + (typeof window.buildHash === 'function'
-      ? window.buildHash({
-          view: 'project',
-          projectId: state.currentProjectId,
-          partId: state.currentPartId,
-          tab: state.activeTab,
-        })
+      ? window.buildHash(route)
       : location.hash || '#/');
     try {
       await navigator.clipboard.writeText(url);
@@ -396,13 +428,24 @@ function bootstrap() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
-      if (state.currentProjectId && state.currentPartId && window.pushRoute) {
-        window.pushRoute({
-          view: 'project',
-          projectId: state.currentProjectId,
-          partId: state.currentPartId,
-          tab,
-        });
+      if (state.currentPartId && window.pushRoute) {
+        if (state.isSharedView && state.shareToken) {
+          window.pushRoute({
+            view: 'shared',
+            shareToken: state.shareToken,
+            partId: state.currentPartId,
+            tab,
+          });
+        } else if (state.currentProjectId) {
+          window.pushRoute({
+            view: 'project',
+            projectId: state.currentProjectId,
+            partId: state.currentPartId,
+            tab,
+          });
+        } else {
+          activateTab(tab);
+        }
       } else {
         activateTab(tab);
       }
@@ -428,7 +471,13 @@ function bootstrap() {
   });
 
   $('btn-back-to-projects').addEventListener('click', () => {
-    if (window.pushRoute) window.pushRoute({ view: 'projects' });
+    if (state.isSharedView) {
+      exitSharedView();
+      showView('view-auth');
+      initAuth(navigateFromRoute, initLanding);
+    } else if (window.pushRoute) {
+      window.pushRoute({ view: 'projects' });
+    }
   });
 
   $('btn-delete-project').addEventListener('click', async () => {
@@ -449,6 +498,7 @@ function bootstrap() {
 
   initSettings();
   initVisibilityHandling();
+  initShareModal();
   initObsidianExport();
   initFullProjectExport();
   initReadingProgressBar();
@@ -459,6 +509,19 @@ function bootstrap() {
   initToggleComplete();
   initPartActionsOverflow();
   initDescriptionExpand();
+
+  const sharedCtaLink = $('shared-cta-link');
+  if (sharedCtaLink) {
+    sharedCtaLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (state.isSharedView) {
+        exitSharedView();
+      }
+      showView('view-auth');
+      initAuth(navigateFromRoute, initLanding);
+    });
+  }
+
   initApp();
 }
 

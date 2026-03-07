@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import tempfile
 import uuid
 from datetime import datetime
@@ -32,7 +33,7 @@ def _now_iso() -> str:
 
 def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
     """Convert DB row to API-shaped project dict (id str, dates ISO)."""
-    return {
+    result = {
         "id": str(row["id"]),
         "name": row["name"],
         "description": row["description"],
@@ -49,6 +50,9 @@ def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
         "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
     }
+    if "share_token" in row:
+        result["share_token"] = row.get("share_token")
+    return result
 
 
 def create_project(
@@ -123,7 +127,7 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     project = get_project(project_id, user_id)
     if not project:
         return None
-    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "reading_progress", "error_message"}
+    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "reading_progress", "error_message", "share_token"}
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
     client = _client()
@@ -185,6 +189,91 @@ def delete_project(project_id: str, user_id: str) -> bool:
             pass
 
     _client().table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
+    return True
+
+
+# ========== Project Sharing ==========
+
+
+def _sanitize_project_for_shared(project: dict[str, Any]) -> dict[str, Any]:
+    """Remove sensitive data and trim segmentation/partes_contenido for public sharing."""
+    # Strip sensitive fields
+    out = {
+        "id": project["id"],
+        "name": project["name"],
+        "description": project["description"],
+        "status": project["status"],
+        "created_at": project["created_at"],
+        "updated_at": project["updated_at"],
+    }
+
+    # Segmentation: numero, titulo, contenido for navigation and part header
+    seg = project.get("segmentation") or {}
+    partes_raw = seg.get("partes") or []
+    out["segmentation"] = {
+        "partes": [
+            {"numero": p["numero"], "titulo": p.get("titulo", ""), "contenido": p.get("contenido", "")}
+            for p in partes_raw
+        ],
+    }
+
+    # Partes contenido: only completed parts, only explainer/recorrido/resources
+    contenido_raw = project.get("partes_contenido") or {}
+    out["partes_contenido"] = {}
+    for part_key, part_data in contenido_raw.items():
+        if not isinstance(part_data, dict):
+            continue
+        if part_data.get("status") != "completed":
+            continue
+        out["partes_contenido"][part_key] = {
+            "explainer": part_data.get("explainer"),
+            "recorrido": part_data.get("recorrido"),
+            "resources": part_data.get("resources"),
+        }
+
+    return out
+
+
+def get_project_by_share_token(share_token: str) -> Optional[dict[str, Any]]:
+    """Load project by share_token for public viewing. Returns sanitized project or None."""
+    if not share_token or not share_token.strip():
+        return None
+    client = _client()
+    r = (
+        client.table("projects")
+        .select("*")
+        .eq("share_token", share_token.strip())
+        .maybe_single()
+        .execute()
+    )
+    if not r.data:
+        return None
+    project = _row_to_project(r.data)
+    if project.get("status") != "completed":
+        return None
+    return _sanitize_project_for_shared(project)
+
+
+def create_share_token(project_id: str, user_id: str) -> Optional[str]:
+    """Create share token for project. Verifies ownership. Returns token or None."""
+    project = get_project(project_id, user_id)
+    if not project:
+        return None
+    if project.get("status") != "completed":
+        return None
+    if project.get("share_token"):
+        return project["share_token"]
+    token = secrets.token_urlsafe(24)
+    update_project(project_id, user_id, {"share_token": token})
+    return token
+
+
+def revoke_share_token(project_id: str, user_id: str) -> bool:
+    """Revoke share token. Verifies ownership. Returns True if revoked."""
+    project = get_project(project_id, user_id)
+    if not project:
+        return False
+    update_project(project_id, user_id, {"share_token": None})
     return True
 
 

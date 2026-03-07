@@ -3831,3 +3831,42 @@ body {
     font-size: 14px;
   }
 }
+
+/* ── Share Modal ── */
+.share-link-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 1rem;
+  align-items: stretch;
+}
+.share-link-input {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+.share-actions {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Shared View CTA ── */
+.shared-cta-register {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber-border);
+  border-radius: var(--radius-md);
+}
+.shared-cta-register.hidden {
+  display: none !important;
+}
+.shared-cta-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+.shared-cta-register .btn-primary {
+  width: 100%;
+  justify-content: center;
+}

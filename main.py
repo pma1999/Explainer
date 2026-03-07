@@ -23,6 +23,9 @@ from backend.auth import get_current_user_id, get_user_id_from_token
 from backend.supabase_data import (
     create_project as supabase_create_project,
     get_project,
+    get_project_by_share_token,
+    create_share_token,
+    revoke_share_token,
     list_projects,
     update_project,
     set_section_read_status,
@@ -210,6 +213,46 @@ async def api_get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
+
+
+@app.get("/api/shared/{share_token}")
+async def api_get_shared_project(share_token: str):
+    """Public endpoint: get sanitized project by share token. No auth required."""
+    project = get_project_by_share_token(share_token)
+    if not project:
+        raise HTTPException(status_code=404, detail="Enlace no válido o expirado")
+    return project
+
+
+@app.post("/api/projects/{project_id}/share")
+async def api_create_share(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+):
+    """Create share link for a completed project. Returns share_token and share_url."""
+    token = create_share_token(project_id, user_id)
+    if not token:
+        project = get_project(project_id, user_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+        if project.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Solo se pueden compartir proyectos completados")
+        raise HTTPException(status_code=400, detail="No se pudo crear el enlace")
+    base = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+    share_url = f"{base}/#/s/{token}"
+    return {"share_token": token, "share_url": share_url}
+
+
+@app.delete("/api/projects/{project_id}/share")
+async def api_revoke_share(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+):
+    """Revoke share link for a project."""
+    if not get_project(project_id, user_id):
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    revoke_share_token(project_id, user_id)
+    return {"ok": True}
 
 
 @app.patch("/api/projects/{project_id}/progress")

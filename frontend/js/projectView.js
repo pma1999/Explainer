@@ -11,6 +11,36 @@ export function setSaveViewStateCallback(fn) {
   _saveViewState = fn;
 }
 
+function applySharedViewVisibility() {
+  const layout = document.querySelector('.project-layout');
+  const sidebar = $('project-sidebar');
+  if (!layout && !sidebar) return;
+
+  if (state.isSharedView) {
+    layout?.classList.add('shared-mode');
+    sidebar?.classList.add('shared-mode');
+    document.querySelectorAll('[data-shared-hide]').forEach((el) => { el.style.display = 'none'; });
+    const cta = $('shared-cta-register');
+    if (cta) cta.classList.remove('hidden');
+    const backBtn = $('btn-back-to-projects');
+    if (backBtn) {
+      backBtn.textContent = 'Iniciar sesión';
+      backBtn.dataset.sharedBack = 'true';
+    }
+  } else {
+    layout?.classList.remove('shared-mode');
+    sidebar?.classList.remove('shared-mode');
+    document.querySelectorAll('[data-shared-hide]').forEach((el) => { el.style.display = ''; });
+    const cta = $('shared-cta-register');
+    if (cta) cta.classList.add('hidden');
+    const backBtn = $('btn-back-to-projects');
+    if (backBtn?.dataset.sharedBack === 'true') {
+      backBtn.textContent = 'Proyectos';
+      delete backBtn.dataset.sharedBack;
+    }
+  }
+}
+
 function saveViewState() {
   if (_saveViewState) _saveViewState();
 }
@@ -320,14 +350,16 @@ export function renderSidebarNav(project) {
   if (!project.segmentation || !project.segmentation.partes) return;
 
   const projectId = state.currentProjectId;
+  const isShared = state.isSharedView && state.shareToken;
   const completedParts = new Set(project?.reading_progress?.completed_parts || []);
+  const contenidoRaw = project.partes_contenido || {};
 
   project.segmentation.partes.forEach(parte => {
     const partId = parte.numero;
-    const contenido = project.partes_contenido ? project.partes_contenido[String(partId)] : null;
-    const status = contenido ? contenido.status : 'pending';
+    const contenido = contenidoRaw[String(partId)];
+    const status = contenido ? (contenido.status || (contenido.explainer || contenido.recorrido || contenido.resources ? 'completed' : 'pending')) : 'pending';
     const isRead = completedParts.has(partId);
-    const canToggle = status === 'completed';
+    const canToggle = !isShared && status === 'completed';
 
     const dotClass = {
       pending: 'dot-pending',
@@ -336,14 +368,14 @@ export function renderSidebarNav(project) {
       error: 'dot-error',
     }[status] || 'dot-pending';
 
-    const href = (typeof window.buildHash === 'function' && projectId)
-      ? window.buildHash({
-          view: 'project',
-          projectId,
-          partId,
-          tab: state.activeTab,
-        })
-      : '#';
+    let href = '#';
+    if (typeof window.buildHash === 'function') {
+      if (isShared) {
+        href = window.buildHash({ view: 'shared', shareToken: state.shareToken, partId, tab: state.activeTab });
+      } else if (projectId) {
+        href = window.buildHash({ view: 'project', projectId, partId, tab: state.activeTab });
+      }
+    }
 
     const toggleBtnHtml = canToggle
       ? `<button type="button" class="part-read-toggle${isRead ? ' is-read' : ''}" data-part-id="${partId}" aria-label="${isRead ? 'Marcar como no leída' : 'Marcar como leída'}" title="${isRead ? 'Marcar como no leída' : 'Marcar como leída'}">${isRead ? '✓' : '○'}</button>`
@@ -598,7 +630,15 @@ export function selectPart(partId) {
   const metaEl = $('content-part-meta');
   if (titleEl) titleEl.textContent = parte?.titulo ?? '';
   if (descEl) descEl.textContent = parte?.contenido ?? '';
-  if (metaEl) metaEl.textContent = [parte?.extension_estimada, parte?.complejidad].filter(Boolean).join(' · ');
+  if (metaEl) {
+    if (state.isSharedView) {
+      metaEl.textContent = '';
+      metaEl.closest('.part-header-row')?.classList.add('meta-hidden');
+    } else {
+      metaEl.closest('.part-header-row')?.classList.remove('meta-hidden');
+      metaEl.textContent = [parte?.extension_estimada, parte?.complejidad].filter(Boolean).join(' · ');
+    }
+  }
   resetDescriptionExpand();
   const expandBtn = $('btn-description-expand');
   const wrap = document.querySelector('.part-description-wrap');
@@ -633,8 +673,11 @@ export function renderProjectView(project) {
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
 
   renderSidebarNav(project);
-  updateUsageUI(project.usage);
+  if (!state.isSharedView) {
+    updateUsageUI(project.usage);
+  }
   updateMobileHeader();
+  applySharedViewVisibility();
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
 
@@ -694,10 +737,12 @@ export function updateReadingToolbar() {
 }
 
 export function updateToggleCompleteButton() {
+  if (state.isSharedView) return;
   const btn = $('btn-toggle-complete');
   const project = state.currentProject;
   const partId = state.currentPartId;
-  const showToggle = project && partId && project.partes_contenido?.[String(partId)]?.status === 'completed';
+  const contenido = project?.partes_contenido?.[String(partId)];
+  const showToggle = project && partId && (contenido?.status === 'completed' || (contenido && (contenido.explainer || contenido.recorrido || contenido.resources)));
 
   document.querySelectorAll('.part-action-toggle-complete').forEach((el) => {
     el.style.display = showToggle ? '' : 'none';
@@ -706,7 +751,6 @@ export function updateToggleCompleteButton() {
   if (!btn) return;
   if (!showToggle) return;
 
-  const contenido = project.partes_contenido[String(partId)];
   const isRead = new Set(project?.reading_progress?.completed_parts || []).has(partId);
   btn.title = isRead ? 'Marcar como no leída' : 'Marcar como leída';
   btn.dataset.completed = isRead ? 'true' : 'false';
