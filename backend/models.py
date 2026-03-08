@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class UsageInfo(BaseModel):
     prompt_tokens: int = 0
+    tool_use_prompt_tokens: int = 0
     candidates_tokens: int = 0
     thoughts_tokens: int = 0
     total_tokens: int = 0
@@ -33,6 +34,7 @@ class Project(BaseModel):
     pdf_filename: str
     source_type: str = 'pdf'
     source_url: Optional[str] = None
+    source_metadata: dict[str, Any] = {}
     file_uri: Optional[str] = None
     segmentation: Optional[dict[str, Any]] = None
     partes_contenido: dict[str, Any] = {}

@@ -341,7 +341,13 @@ RESPONSE_SCHEMA = genai.types.Schema(
 
 
 @gemini_retry(max_retries=5)
-def run_recorrido(api_key: str, file_uri: str, identificacion: str, model: str = "gemini-3-flash-preview") -> tuple[dict[str, Any], Any]:
+def run_recorrido(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    model: str = "gemini-3-flash-preview",
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any]:
     """Run the Recorrido Anotado agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
     logger.info(
@@ -350,6 +356,7 @@ def run_recorrido(api_key: str, file_uri: str, identificacion: str, model: str =
             "file_uri_prefix": file_uri[:60] + "..." if len(file_uri) > 60 else file_uri,
             "identificacion_length": len(identificacion),
             "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "mime_type": mime_type,
         }
     )
 
@@ -359,7 +366,7 @@ def run_recorrido(api_key: str, file_uri: str, identificacion: str, model: str =
         types.Content(
             role="user",
             parts=[
-                types.Part.from_uri(file_uri=file_uri, mime_type="application/pdf"),
+                types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
                 types.Part.from_text(text=identificacion),
             ],
         ),

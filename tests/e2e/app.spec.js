@@ -92,4 +92,72 @@ test.describe('Explainer App', () => {
 
     await expect(page.locator('#modal-settings')).toBeAttached();
   });
+
+  test('submits a public web URL from the landing form', async ({ page }) => {
+    let createBody = '';
+    let processCalled = false;
+
+    await page.route('**/api/projects', async (route) => {
+      if (route.request().method() === 'POST') {
+        createBody = route.request().postData() || '';
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 'web-1',
+            name: 'Artículo web',
+            description: '',
+            source_type: 'web',
+            source_url: 'https://example.com/article',
+            status: 'pending',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      });
+    });
+
+    await page.route('**/api/projects/web-1/process**', async (route) => {
+      processCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, status: 'started' }),
+      });
+    });
+
+    await page.goto('/#/');
+    await page.waitForLoadState('domcontentloaded');
+
+    await page.evaluate(async () => {
+      const { state } = await import('/js/state.js');
+      const { showView } = await import('/js/dom.js');
+      const landingModule = await import('/js/landing.js');
+
+      state.hasApiKey = true;
+      state.user = { id: 'user-123', email: 'test@example.com' };
+      window.pushRoute = () => {};
+
+      showView('view-landing');
+      landingModule.initLanding();
+    });
+
+    await page.locator('#tab-web').click();
+    await page.fill('#project-name', 'Artículo web');
+    await page.fill('#web-url', 'https://example.com/article#intro');
+
+    await expect(page.locator('#btn-upload')).toBeEnabled();
+    await page.locator('#btn-upload').click();
+
+    await expect.poll(() => processCalled).toBe(true);
+    expect(createBody).toContain('name="web_url"');
+    expect(createBody).toContain('https://example.com/article');
+  });
 });

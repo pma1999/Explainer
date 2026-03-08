@@ -745,20 +745,25 @@ def test_toc_missing_pages():
 # TEST 17: YouTube flow isolation
 # ============================================================
 
-def test_youtube_flow_isolation():
-    """Verify that is_pdf_source flag correctly isolates YouTube."""
-    print("\n═══ TEST 17: YouTube flow isolation ═══")
+def test_source_type_routing_flags():
+    """Verify that PDF routing is explicit and web stays outside the PDF branch."""
+    print("\n═══ TEST 17: Source type routing flags ═══")
     all_passed = True
 
     # Same logic as main.py
-    for source_type, expected in [("pdf", True), ("youtube", False), ("", True)]:
-        is_pdf_source = source_type != "youtube"
+    for source_type, expected in [("pdf", True), ("youtube", False), ("web", False), ("", False)]:
+        is_pdf_source = source_type == "pdf"
         all_passed &= print_test(
             f"source_type='{source_type}' → is_pdf_source={expected}",
             is_pdf_source == expected
         )
 
     return all_passed
+
+
+def test_youtube_flow_isolation():
+    """Backward-compatible alias for the updated routing test."""
+    return test_source_type_routing_flags()
 
 
 # ============================================================
@@ -850,6 +855,123 @@ def test_segmentador_prompt_content():
 
 
 # ============================================================
+# TEST 20: Text/web segmentador prompt keeps block rigor
+# ============================================================
+
+def test_text_segmentador_prompt_content():
+    """Verify text/web segmentador system instruction is rigorous and block-aware."""
+    print("\n═══ TEST 20: Text/Web segmentador prompt content ═══")
+    all_passed = True
+
+    from backend.agents.segmentador import TEXT_SYSTEM_INSTRUCTION
+
+    all_passed &= print_test(
+        "Text prompt mentions visible block markers",
+        "=== BLOQUE X ===" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt mentions bloque_inicio",
+        "bloque_inicio" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt mentions bloque_fin",
+        "bloque_fin" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt requires exact visible marker matching",
+        "EXACTAMENTE" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt enforces contiguous block ranges",
+        "rango continuo de bloques" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt distinguishes technical header from substantive content",
+        "cabecera técnica" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt includes six-step thinking protocol",
+        "PASO 6 - DEFINICIÓN PRECISA DE IDENTIFICACIÓN Y BLOQUES" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt mentions bad scrape detection",
+        "mal scrape" in TEXT_SYSTEM_INSTRUCTION or "scrape defectuoso" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    all_passed &= print_test(
+        "Text prompt requires evaluacion_fuente.es_segmentable",
+        "evaluacion_fuente.es_segmentable" in TEXT_SYSTEM_INSTRUCTION
+    )
+
+    return all_passed
+
+
+# ============================================================
+# TEST 21: Text/web segmentador schema includes refusal contract
+# ============================================================
+
+def test_text_segmentador_schema_refusal_contract():
+    """Verify text/web schema requires the bad-scrape refusal contract."""
+    print("\n═══ TEST 21: Text/Web segmentador schema refusal contract ═══")
+    all_passed = True
+
+    from backend.agents.segmentador import TEXT_RESPONSE_SCHEMA
+    from google.genai import types as genai_types
+
+    required_fields = TEXT_RESPONSE_SCHEMA.required
+    properties = TEXT_RESPONSE_SCHEMA.properties
+    evaluation_schema = properties["evaluacion_fuente"]
+
+    all_passed &= print_test(
+        "evaluacion_fuente is required",
+        "evaluacion_fuente" in required_fields,
+        f"Required: {required_fields}"
+    )
+
+    all_passed &= print_test(
+        "evaluacion_fuente property exists",
+        "evaluacion_fuente" in properties
+    )
+
+    all_passed &= print_test(
+        "evaluacion_fuente is OBJECT type",
+        evaluation_schema.type == genai_types.Type.OBJECT
+    )
+
+    all_passed &= print_test(
+        "es_segmentable is required inside evaluacion_fuente",
+        "es_segmentable" in evaluation_schema.required,
+        f"Required: {evaluation_schema.required}"
+    )
+
+    all_passed &= print_test(
+        "motivo is required inside evaluacion_fuente",
+        "motivo" in evaluation_schema.required,
+        f"Required: {evaluation_schema.required}"
+    )
+
+    all_passed &= print_test(
+        "indicios is required inside evaluacion_fuente",
+        "indicios" in evaluation_schema.required,
+        f"Required: {evaluation_schema.required}"
+    )
+
+    all_passed &= print_test(
+        "es_segmentable is BOOLEAN type",
+        evaluation_schema.properties["es_segmentable"].type == genai_types.Type.BOOLEAN
+    )
+
+    return all_passed
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -878,6 +1000,8 @@ def main():
         test_youtube_flow_isolation,
         test_multiple_sequential_extractions,
         test_segmentador_prompt_content,
+        test_text_segmentador_prompt_content,
+        test_text_segmentador_schema_refusal_contract,
     ]
 
     results = []

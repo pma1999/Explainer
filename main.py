@@ -6,6 +6,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -50,6 +51,15 @@ from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.pdf_utils import add_page_numbers, extract_page_range
+from backend.url_extraction import (
+    WebExtractionError,
+    build_text_blocks,
+    extract_web_content,
+    normalize_public_web_url,
+    render_block_marked_document,
+    slice_block_range,
+    write_text_document_temp,
+)
 
 
 # Configurar logging al importar el módulo
@@ -138,6 +148,11 @@ def _is_valid_youtube_url(url: str) -> bool:
     return _extract_youtube_video_id(url) is not None
 
 
+def _normalize_web_source_url(url: str) -> str:
+    """Validate and normalize a public web URL."""
+    return normalize_public_web_url(url)
+
+
 @app.post("/api/projects")
 @project_create_rate_limit
 async def api_create_project(
@@ -146,15 +161,29 @@ async def api_create_project(
     description: str = Form(""),
     file: UploadFile | None = File(None),
     youtube_url: str | None = Form(None),
+    web_url: str | None = Form(None),
 ):
-    """Create a project from either a PDF file or a YouTube URL."""
+    """Create a project from a PDF upload, a YouTube URL, or a public web URL."""
 
-    # Validate that exactly one source is provided
-    if file and youtube_url:
-        raise HTTPException(status_code=400, detail="Proporciona solo un archivo PDF o una URL de YouTube, no ambos")
+    normalized_youtube = (youtube_url or "").strip() or None
+    normalized_web = (web_url or "").strip() or None
 
-    if not file and not youtube_url:
-        raise HTTPException(status_code=400, detail="Debes proporcionar un archivo PDF o una URL de YouTube")
+    provided_sources = [
+        bool(file),
+        bool(normalized_youtube),
+        bool(normalized_web),
+    ]
+    if sum(provided_sources) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Proporciona solo una fuente: un PDF, una URL de YouTube o una URL web.",
+        )
+
+    if sum(provided_sources) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes proporcionar un archivo PDF, una URL de YouTube o una URL web.",
+        )
 
     if file:
         # PDF source
@@ -169,12 +198,12 @@ async def api_create_project(
             source_type="pdf",
             source_url=None,
         )
-    else:
+    elif normalized_youtube:
         # YouTube source
-        if not _is_valid_youtube_url(youtube_url):
+        if not _is_valid_youtube_url(normalized_youtube):
             raise HTTPException(status_code=400, detail="URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID")
 
-        video_id = _extract_youtube_video_id(youtube_url)
+        video_id = _extract_youtube_video_id(normalized_youtube)
         pdf_filename = f"YouTube: {video_id}"
 
         project = supabase_create_project(
@@ -184,7 +213,26 @@ async def api_create_project(
             pdf_filename=pdf_filename,
             pdf_content=None,
             source_type="youtube",
-            source_url=youtube_url,
+            source_url=normalized_youtube,
+        )
+    else:
+        try:
+            validated_web_url = _normalize_web_source_url(normalized_web or "")
+        except WebExtractionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        parsed = urlparse(validated_web_url)
+        source_label = parsed.netloc or "web"
+        pdf_filename = f"Web: {source_label}"
+
+        project = supabase_create_project(
+            user_id=user_id,
+            name=name,
+            description=description,
+            pdf_filename=pdf_filename,
+            pdf_content=None,
+            source_type="web",
+            source_url=validated_web_url,
         )
 
     return project
@@ -318,11 +366,127 @@ async def api_delete_project(
     return {"ok": True}
 
 
+def _build_pdf_table_of_contents(segmentation: dict, num_partes: int) -> str:
+    toc_lines = ["TABLA DE CONTENIDOS DEL DOCUMENTO COMPLETO:"]
+    for p in segmentation["partes"]:
+        pg_start = p.get("pagina_inicio", "?")
+        pg_end = p.get("pagina_fin", "?")
+        toc_lines.append(
+            f"  Parte {p['numero']}/{num_partes}: \"{p['titulo']}\" (Páginas {pg_start}-{pg_end})"
+        )
+    return "\n".join(toc_lines)
+
+
+def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
+    toc_lines = ["TABLA DE CONTENIDOS DEL TEXTO COMPLETO:"]
+    for p in segmentation["partes"]:
+        block_start = p.get("bloque_inicio", "?")
+        block_end = p.get("bloque_fin", "?")
+        toc_lines.append(
+            f"  Parte {p['numero']}/{num_partes}: \"{p['titulo']}\" (Bloques {block_start}-{block_end})"
+        )
+    return "\n".join(toc_lines)
+
+
+def _build_pdf_agent_prompt(table_of_contents: str, identificacion: str, part_id: int, num_partes: int) -> str:
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+    )
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"INSTRUCCIONES PARA ESTA PARTE:\n"
+        f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
+        f"El PDF adjunto contiene las páginas relevantes para esta parte. "
+        f"La tabla de contenidos anterior muestra la estructura completa del documento "
+        f"para que tengas contexto de dónde se sitúa esta parte.\n\n"
+        f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+    )
+
+
+def _build_text_agent_prompt(table_of_contents: str, identificacion: str, part_id: int, num_partes: int) -> str:
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+    )
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"INSTRUCCIONES PARA ESTA PARTE:\n"
+        f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
+        f"El archivo de texto adjunto contiene exclusivamente los bloques relevantes de esta parte. "
+        f"La tabla de contenidos anterior muestra la estructura completa del texto para que "
+        f"tengas contexto global sin salirte del tramo adjunto.\n\n"
+        f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+    )
+
+
+def _parse_text_source_evaluation(segmentation: dict[str, object]) -> dict[str, object]:
+    evaluation = segmentation.get("evaluacion_fuente")
+    if not isinstance(evaluation, dict):
+        raise WebExtractionError(
+            "El segmentador no devolvió la evaluación de integridad necesaria para la fuente web."
+        )
+
+    is_segmentable = evaluation.get("es_segmentable")
+    if not isinstance(is_segmentable, bool):
+        raise WebExtractionError(
+            "El segmentador devolvió una evaluación inválida para la fuente web."
+        )
+
+    reason = str(evaluation.get("motivo") or "").strip()
+    if not reason:
+        reason = (
+            "El segmentador considera que la fuente es segmentable."
+            if is_segmentable
+            else "El segmentador considera que el texto extraído no es contenido real segmentable."
+        )
+
+    clues_raw = evaluation.get("indicios")
+    if clues_raw is None:
+        clues: list[str] = []
+    elif isinstance(clues_raw, list):
+        clues = [str(item).strip() for item in clues_raw if str(item).strip()]
+    else:
+        raise WebExtractionError(
+            "El segmentador devolvió indicios inválidos para la evaluación de la fuente web."
+        )
+
+    return {
+        "es_segmentable": is_segmentable,
+        "motivo": reason,
+        "indicios": clues,
+    }
+
+
+def _build_web_segmentation_rejection_message(evaluation: dict[str, object]) -> str:
+    reason = str(evaluation.get("motivo") or "").strip()
+    clues = [str(item).strip() for item in (evaluation.get("indicios") or []) if str(item).strip()]
+
+    message = (
+        "Se abortó el procesamiento porque el texto extraído de la URL parece un scrape defectuoso "
+        "o no corresponde a contenido real segmentable."
+    )
+    if reason:
+        message = f"{message} {reason}"
+    if clues:
+        message = f"{message} Indicios detectados: {', '.join(clues[:3])}."
+    return message
+
+
 async def _process_project(project_id: str, user_id: str, model_name: str = "gemini-3-flash-preview") -> None:
     process_start_time = time.time()
     pdf_temp_path = None
     numbered_pdf_path = None
     segment_pdf_paths: list[str] = []
+    temp_paths: list[str] = []
+    web_blocks = []
+    source_mime_type = "application/pdf"
+    source_kind = "pdf"
+    source_title = ""
+    resolved_source_url = ""
+    source_metadata: dict[str, object] = {}
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -332,7 +496,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         )
 
     try:
-        project = get_project(project_id, user_id)
+        project = get_project(project_id, user_id, include_internal=True)
         if not project:
             logger.error(f"[Process] Proyecto no encontrado: {project_id}")
             await send_event(project_id, {"type": "error", "message": "Proyecto no encontrado"})
@@ -365,6 +529,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         cumulative_usage = {
             "model": model_name,
             "prompt_tokens": 0,
+            "tool_use_prompt_tokens": 0,
             "candidates_tokens": 0,
             "thoughts_tokens": 0,
             "total_tokens": 0,
@@ -375,10 +540,12 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             if not usage_meta:
                 return
             p = getattr(usage_meta, "prompt_token_count", 0) or 0
+            tp = getattr(usage_meta, "tool_use_prompt_token_count", 0) or 0
             c = getattr(usage_meta, "candidates_token_count", 0) or 0
             t = getattr(usage_meta, "thoughts_token_count", 0) or 0
             tt = getattr(usage_meta, "total_token_count", 0) or 0
-            cumulative_usage["prompt_tokens"] += p
+            cumulative_usage["prompt_tokens"] += p + tp
+            cumulative_usage["tool_use_prompt_tokens"] += tp
             cumulative_usage["candidates_tokens"] += c
             cumulative_usage["thoughts_tokens"] += t
             cumulative_usage["total_tokens"] += tt
@@ -411,8 +578,106 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 return
 
             logger.info(f"[Process] Usando URL de YouTube: {file_uri[:80]}...")
+            resolved_source_url = file_uri
 
             # Skip "uploading" phase for YouTube - just update status to segmenting
+            update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
+            await send_event(project_id, {"type": "segmenting"})
+
+        elif source_type == "web":
+            source_url = project.get("source_url")
+            if not source_url:
+                logger.error("[Process] URL web no encontrada en el proyecto")
+                await send_event(project_id, {"type": "error", "message": "URL web no encontrada en el proyecto"})
+                update_project(project_id, user_id, {"status": "error", "error_message": "URL web no configurada"})
+                return
+
+            logger.info("[Process] Iniciando preparación de fuente web")
+            await send_event(project_id, {"type": "uploading"})
+            update_project(project_id, user_id, {"status": "uploading"})
+
+            source_text = project.get("source_text")
+            source_metadata = project.get("source_metadata") or {}
+            extraction_usage = None
+
+            if not source_text:
+                extracted_content, extraction_usage = await asyncio.to_thread(
+                    extract_web_content,
+                    source_url,
+                    api_key,
+                    model_name,
+                )
+                source_text = extracted_content.text
+                source_title = extracted_content.title
+                resolved_source_url = extracted_content.resolved_url
+                source_metadata = {
+                    **(extracted_content.metadata or {}),
+                    "title": extracted_content.title,
+                    "resolved_url": extracted_content.resolved_url,
+                    "content_type": extracted_content.content_type,
+                    "extraction_method": extracted_content.extraction_method,
+                }
+                update_project(
+                    project_id,
+                    user_id,
+                    {
+                        "source_text": source_text,
+                        "source_metadata": source_metadata,
+                        "pdf_filename": f"Web: {source_title[:120] or 'URL pública'}",
+                    },
+                )
+            else:
+                source_title = source_metadata.get("title") or project.get("name") or project.get("pdf_filename") or "Texto web"
+                resolved_source_url = source_metadata.get("resolved_url") or source_url
+
+            if extraction_usage:
+                _update_usage(extraction_usage, phase="web_extraction")
+                await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+
+            web_blocks = await asyncio.to_thread(build_text_blocks, source_text)
+            if not web_blocks:
+                raise WebExtractionError(
+                    "La URL no contiene suficiente texto utilizable tras la extracción. "
+                    "Se aborta el procesamiento para no malgastar tokens."
+                )
+
+            source_title = source_title or "Texto web"
+            resolved_source_url = resolved_source_url or source_url
+            source_metadata = {
+                **source_metadata,
+                "title": source_title,
+                "resolved_url": resolved_source_url,
+                "block_count": len(web_blocks),
+                "word_count": len(source_text.split()),
+            }
+            update_project(project_id, user_id, {"source_metadata": source_metadata})
+
+            web_document = await asyncio.to_thread(
+                render_block_marked_document,
+                title=source_title,
+                source_url=resolved_source_url,
+                blocks=web_blocks,
+            )
+            web_temp_path = await asyncio.to_thread(write_text_document_temp, web_document)
+            temp_paths.append(web_temp_path)
+
+            upload_start = time.time()
+            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, web_temp_path, max_retries=5))
+            upload_duration = (time.time() - upload_start) * 1000
+            file_uri = uploaded_file.uri
+            source_mime_type = getattr(uploaded_file, "mime_type", None) or "text/plain"
+            source_kind = "text"
+
+            logger.info(
+                f"[Process] Fuente web preparada y subida en {int(upload_duration)}ms",
+                extra={
+                    "file_uri": file_uri,
+                    "upload_duration_ms": int(upload_duration),
+                    "block_count": len(web_blocks),
+                    "resolved_url": resolved_source_url,
+                }
+            )
+
             update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
             await send_event(project_id, {"type": "segmenting"})
 
@@ -430,17 +695,20 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 return
 
             logger.info(f"[Process] PDF descargado temporalmente: {pdf_temp_path}")
+            temp_paths.append(pdf_temp_path)
 
             # Add visible page numbers to the PDF before uploading
             logger.info("[Process] Añadiendo numeración de páginas al PDF")
             numbered_pdf_path = await asyncio.to_thread(add_page_numbers, pdf_temp_path)
             logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
+            temp_paths.append(numbered_pdf_path)
 
             upload_start = time.time()
             uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
             upload_duration = (time.time() - upload_start) * 1000
 
             file_uri = uploaded_file.uri
+            source_mime_type = getattr(uploaded_file, "mime_type", None) or "application/pdf"
             logger.info(
                 f"[Process] Upload completado en {int(upload_duration)}ms",
                 extra={
@@ -455,7 +723,15 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         # Fase de segmentación
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
-        segmentation, usage_meta = await asyncio.to_thread(run_segmentador, api_key, file_uri, project["description"], model_name)
+        segmentation, usage_meta = await asyncio.to_thread(
+            run_segmentador,
+            api_key,
+            file_uri,
+            project["description"],
+            model_name,
+            source_mime_type,
+            source_kind,
+        )
         seg_duration = (time.time() - seg_start) * 1000
 
         _update_usage(usage_meta, phase="segmentation")
@@ -472,6 +748,35 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             }
         )
 
+        is_pdf_source = source_type == "pdf"
+        is_text_source = source_type == "web"
+
+        if is_text_source:
+            text_source_evaluation = _parse_text_source_evaluation(segmentation)
+            source_metadata = {
+                **source_metadata,
+                "segmentador_evaluacion_fuente": text_source_evaluation,
+            }
+            if not text_source_evaluation["es_segmentable"]:
+                error_message = _build_web_segmentation_rejection_message(text_source_evaluation)
+                logger.warning(
+                    "[Process] Segmentación rechazada por bad scrape detectado",
+                    extra={
+                        "project_id": project_id,
+                        "motivo": text_source_evaluation["motivo"],
+                        "indicios": text_source_evaluation["indicios"],
+                    }
+                )
+                update_project(project_id, user_id, {
+                    "segmentation": segmentation,
+                    "partes_contenido": {},
+                    "source_metadata": source_metadata,
+                    "status": "error",
+                    "error_message": error_message,
+                })
+                await send_event(project_id, {"type": "error", "message": error_message})
+                return
+
         partes_preview = [{"numero": p["numero"], "titulo": p["titulo"]} for p in segmentation["partes"]]
         partes_contenido = {}
         for parte in segmentation["partes"]:
@@ -482,27 +787,28 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 "resources": None,
             }
 
-        update_project(project_id, user_id, {
+        update_payload = {
             "segmentation": segmentation,
             "partes_contenido": partes_contenido,
             "status": "processing",
-        })
+        }
+        if is_text_source:
+            update_payload["source_metadata"] = source_metadata
+        update_project(project_id, user_id, update_payload)
         await send_event(project_id, {"type": "segmented", "partes": partes_preview})
 
-        # Build Table of Contents for downstream agents (PDF only)
+        # Build Table of Contents for downstream agents
         table_of_contents = ""
-        is_pdf_source = source_type != "youtube"
         if is_pdf_source:
-            toc_lines = ["TABLA DE CONTENIDOS DEL DOCUMENTO COMPLETO:"]
-            for p in segmentation["partes"]:
-                pg_start = p.get("pagina_inicio", "?")
-                pg_end = p.get("pagina_fin", "?")
-                toc_lines.append(
-                    f"  Parte {p['numero']}/{num_partes}: \"{p['titulo']}\" (Páginas {pg_start}-{pg_end})"
-                )
-            table_of_contents = "\n".join(toc_lines)
+            table_of_contents = _build_pdf_table_of_contents(segmentation, num_partes)
             logger.info(
-                f"[Process] Tabla de contenidos generada ({len(toc_lines)-1} entradas)",
+                f"[Process] Tabla de contenidos PDF generada ({num_partes} entradas)",
+                extra={"toc_preview": table_of_contents[:300]}
+            )
+        elif is_text_source:
+            table_of_contents = _build_text_table_of_contents(segmentation, num_partes)
+            logger.info(
+                f"[Process] Tabla de contenidos textual generada ({num_partes} entradas)",
                 extra={"toc_preview": table_of_contents[:300]}
             )
 
@@ -531,8 +837,10 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
             # For PDF: extract sub-PDF with relevant pages and upload it
+            # For Web: upload only the exact text blocks for this part
             # For YouTube: use the full file_uri as before
             agent_file_uri = file_uri
+            agent_mime_type = source_mime_type
             agent_prompt = identificacion
             segment_temp_path = None
 
@@ -551,6 +859,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                             extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
                         )
                         segment_pdf_paths.append(segment_temp_path)
+                        temp_paths.append(segment_temp_path)
 
                         # Upload sub-PDF to Gemini
                         seg_upload_start = time.time()
@@ -559,6 +868,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                         )
                         seg_upload_duration = (time.time() - seg_upload_start) * 1000
                         agent_file_uri = segment_uploaded.uri
+                        agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
 
                         logger.info(
                             f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
@@ -579,28 +889,52 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                         f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
                     )
 
-                # Build augmented prompt with TOC for PDF source
-                toc_with_marker = table_of_contents.replace(
-                    f"  Parte {part_id}/{num_partes}:",
-                    f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+                agent_prompt = _build_pdf_agent_prompt(table_of_contents, identificacion, part_id, num_partes)
+            elif is_text_source:
+                bloque_inicio = parte.get("bloque_inicio")
+                bloque_fin = parte.get("bloque_fin")
+                if bloque_inicio is None or bloque_fin is None:
+                    raise WebExtractionError(
+                        f"La parte {part_id} no incluye bloque_inicio/bloque_fin válidos. "
+                        "Se aborta para no procesar texto fuera de rango."
+                    )
+
+                selected_blocks = await asyncio.to_thread(slice_block_range, web_blocks, int(bloque_inicio), int(bloque_fin))
+                part_document = await asyncio.to_thread(
+                    render_block_marked_document,
+                    title=source_title or project.get("name") or "Texto web",
+                    source_url=resolved_source_url or project.get("source_url") or "",
+                    blocks=selected_blocks,
                 )
-                agent_prompt = (
-                    f"{toc_with_marker}\n\n"
-                    f"---\n\n"
-                    f"INSTRUCCIONES PARA ESTA PARTE:\n"
-                    f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
-                    f"El PDF adjunto contiene las páginas relevantes para esta parte. "
-                    f"La tabla de contenidos anterior muestra la estructura completa del documento "
-                    f"para que tengas contexto de dónde se sitúa esta parte.\n\n"
-                    f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+                segment_temp_path = await asyncio.to_thread(write_text_document_temp, part_document)
+                temp_paths.append(segment_temp_path)
+
+                seg_upload_start = time.time()
+                segment_uploaded = await asyncio.to_thread(
+                    lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
                 )
+                seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                agent_file_uri = segment_uploaded.uri
+                agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "text/plain"
+
+                logger.info(
+                    f"[Process] Segmento textual parte {part_id} subido en {int(seg_upload_duration)}ms",
+                    extra={
+                        "segment_uri": agent_file_uri,
+                        "seg_upload_duration_ms": int(seg_upload_duration),
+                        "bloque_inicio": bloque_inicio,
+                        "bloque_fin": bloque_fin,
+                    }
+                )
+
+                agent_prompt = _build_text_agent_prompt(table_of_contents, identificacion, part_id, num_partes)
 
             # Ejecutar los tres agentes en paralelo
             agents_start = time.time()
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, agent_file_uri, agent_prompt, model_name),
-                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, model_name),
-                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, model_name),
+                asyncio.to_thread(run_explainer, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
+                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
+                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
                 return_exceptions=True,
             )
             agents_duration = (time.time() - agents_start) * 1000
@@ -748,8 +1082,8 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
-        # Clean up all temporary PDF files
-        for temp_path in [pdf_temp_path, numbered_pdf_path] + segment_pdf_paths:
+        # Clean up all temporary files created during processing.
+        for temp_path in dict.fromkeys(temp_paths):
             if temp_path and os.path.isfile(temp_path):
                 try:
                     os.unlink(temp_path)

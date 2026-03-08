@@ -31,7 +31,7 @@ def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
-def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
+def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict[str, Any]:
     """Convert DB row to API-shaped project dict (id str, dates ISO)."""
     result = {
         "id": str(row["id"]),
@@ -40,6 +40,7 @@ def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
         "pdf_filename": row["pdf_filename"],
         "source_type": row.get("source_type", "pdf"),
         "source_url": row.get("source_url"),
+        "source_metadata": row.get("source_metadata") or {},
         "file_uri": row.get("file_uri"),
         "status": row["status"],
         "segmentation": row.get("segmentation"),
@@ -52,6 +53,8 @@ def _row_to_project(row: dict[str, Any]) -> dict[str, Any]:
     }
     if "share_token" in row:
         result["share_token"] = row.get("share_token")
+    if include_internal:
+        result["source_text"] = row.get("source_text")
     return result
 
 
@@ -63,6 +66,8 @@ def create_project(
     pdf_content: bytes | None = None,
     source_type: str = "pdf",
     source_url: str | None = None,
+    source_text: str | None = None,
+    source_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Insert project and optionally upload PDF to Storage. Returns project dict.
 
@@ -72,8 +77,10 @@ def create_project(
         description: Project description
         pdf_filename: Filename (for PDFs) or display name (for YouTube)
         pdf_content: PDF file bytes (only for source_type='pdf')
-        source_type: 'pdf' or 'youtube'
-        source_url: YouTube URL (only for source_type='youtube')
+        source_type: 'pdf', 'youtube' or 'web'
+        source_url: Source URL for URL-based source types
+        source_text: Extracted source text cached for non-PDF sources
+        source_metadata: Extra metadata for the source extraction pipeline
     """
     client = _client()
     project_id = str(uuid.uuid4())
@@ -86,6 +93,8 @@ def create_project(
         "pdf_filename": pdf_filename,
         "source_type": source_type,
         "source_url": source_url,
+        "source_text": source_text,
+        "source_metadata": source_metadata or {},
         "file_uri": None,
         "status": "pending",
         "segmentation": None,
@@ -106,13 +115,13 @@ def create_project(
     return _row_to_project(row)
 
 
-def get_project(project_id: str, user_id: str) -> Optional[dict[str, Any]]:
+def get_project(project_id: str, user_id: str, include_internal: bool = False) -> Optional[dict[str, Any]]:
     """Load project by id and user_id. Returns None if not found."""
     client = _client()
     r = client.table("projects").select("*").eq("id", project_id).eq("user_id", user_id).maybe_single().execute()
     if not r.data:
         return None
-    return _row_to_project(r.data)
+    return _row_to_project(r.data, include_internal=include_internal)
 
 
 def list_projects(user_id: str) -> list[dict[str, Any]]:
@@ -127,7 +136,23 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     project = get_project(project_id, user_id)
     if not project:
         return None
-    allowed = {"name", "description", "pdf_filename", "source_type", "source_url", "file_uri", "status", "segmentation", "partes_contenido", "usage", "reading_progress", "error_message", "share_token"}
+    allowed = {
+        "name",
+        "description",
+        "pdf_filename",
+        "source_type",
+        "source_url",
+        "source_text",
+        "source_metadata",
+        "file_uri",
+        "status",
+        "segmentation",
+        "partes_contenido",
+        "usage",
+        "reading_progress",
+        "error_message",
+        "share_token",
+    }
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
     client = _client()
@@ -313,6 +338,7 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
             "pdf_filename": project["pdf_filename"],
             "source_type": project.get("source_type", "pdf"),
             "source_url": project.get("source_url"),
+            "source_metadata": project.get("source_metadata") or {},
             "file_uri": project.get("file_uri"),
             "status": project.get("status", "completed"),
             "segmentation": project.get("segmentation"),
@@ -340,8 +366,8 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
     if not project:
         return None
 
-    # YouTube projects don't have a PDF to download
-    if project.get("source_type") == "youtube":
+    # Only PDF projects are backed by Storage uploads.
+    if project.get("source_type") != "pdf":
         return None
 
     storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"

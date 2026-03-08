@@ -30,6 +30,22 @@ export function isValidYouTubeUrl(url) {
   return extractYouTubeVideoId(url) !== null;
 }
 
+export function normalizeWebUrl(url) {
+  if (!url || url.trim().length === 0) return null;
+  try {
+    const parsed = new URL(url.trim());
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    parsed.hash = '';
+    return parsed.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+export function isValidWebUrl(url) {
+  return normalizeWebUrl(url) !== null;
+}
+
 export function initLanding() {
   updateApiKeyUI();
 
@@ -39,44 +55,61 @@ export function initLanding() {
   const nameInput = $('project-name');
   const descInput = $('project-description');
   const youtubeUrlInput = $('youtube-url');
+  const webUrlInput = $('web-url');
 
   const tabPdf = $('tab-pdf');
   const tabYoutube = $('tab-youtube');
+  const tabWeb = $('tab-web');
   const panelPdf = $('panel-pdf');
   const panelYoutube = $('panel-youtube');
+  const panelWeb = $('panel-web');
 
   function switchSourceType(type) {
     currentSourceType = type;
 
     tabPdf.classList.toggle('active', type === 'pdf');
     tabYoutube.classList.toggle('active', type === 'youtube');
+    tabWeb.classList.toggle('active', type === 'web');
 
     if (type === 'pdf') {
       show(panelPdf);
       hide(panelYoutube);
-    } else {
+      hide(panelWeb);
+    } else if (type === 'youtube') {
       hide(panelPdf);
       show(panelYoutube);
+      hide(panelWeb);
+    } else {
+      hide(panelPdf);
+      hide(panelYoutube);
+      show(panelWeb);
     }
 
     $('upload-error').textContent = '';
     $('youtube-url-error').textContent = '';
+    $('web-url-error').textContent = '';
     hide($('youtube-url-error'));
+    hide($('web-url-error'));
 
     validateForm();
   }
 
   tabPdf.addEventListener('click', () => switchSourceType('pdf'));
   tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
+  tabWeb.addEventListener('click', () => switchSourceType('web'));
 
   function checkReady() {
     const hasName = nameInput.value.trim();
     if (currentSourceType === 'pdf') {
       const ready = selectedFile && hasName;
       btnUpload.disabled = !ready;
-    } else {
+    } else if (currentSourceType === 'youtube') {
       const url = youtubeUrlInput.value.trim();
       const ready = isValidYouTubeUrl(url) && hasName;
+      btnUpload.disabled = !ready;
+    } else {
+      const url = webUrlInput.value.trim();
+      const ready = isValidWebUrl(url) && hasName;
       btnUpload.disabled = !ready;
     }
   }
@@ -107,6 +140,20 @@ export function initLanding() {
 
     if (url && !isValidYouTubeUrl(url)) {
       urlError.textContent = 'URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID';
+      show(urlError);
+    } else {
+      urlError.textContent = '';
+      hide(urlError);
+    }
+    checkReady();
+  });
+
+  webUrlInput.addEventListener('input', () => {
+    const url = webUrlInput.value.trim();
+    const urlError = $('web-url-error');
+
+    if (url && !isValidWebUrl(url)) {
+      urlError.textContent = 'URL web inválida. Usa una URL pública completa con http:// o https://';
       show(urlError);
     } else {
       urlError.textContent = '';
@@ -148,14 +195,19 @@ function clearFile() {
 function validateForm() {
   const nameInput = $('project-name');
   const youtubeUrlInput = $('youtube-url');
+  const webUrlInput = $('web-url');
   const hasName = nameInput.value.trim();
 
   if (currentSourceType === 'pdf') {
     const ready = selectedFile && hasName;
     $('btn-upload').disabled = !ready;
-  } else {
+  } else if (currentSourceType === 'youtube') {
     const url = youtubeUrlInput.value.trim();
     const ready = isValidYouTubeUrl(url) && hasName;
+    $('btn-upload').disabled = !ready;
+  } else {
+    const url = webUrlInput.value.trim();
+    const ready = isValidWebUrl(url) && hasName;
     $('btn-upload').disabled = !ready;
   }
 }
@@ -188,7 +240,7 @@ async function handleUpload() {
       }
       btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
       fd.append('file', selectedFile);
-    } else {
+    } else if (currentSourceType === 'youtube') {
       const youtubeUrl = $('youtube-url').value.trim();
       if (!isValidYouTubeUrl(youtubeUrl)) {
         errEl.textContent = 'URL de YouTube inválida.';
@@ -197,6 +249,15 @@ async function handleUpload() {
       }
       btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
       fd.append('youtube_url', youtubeUrl);
+    } else {
+      const webUrl = normalizeWebUrl($('web-url').value.trim());
+      if (!webUrl) {
+        errEl.textContent = 'URL web inválida.';
+        btn.disabled = false;
+        return;
+      }
+      btn.querySelector('.btn-text').textContent = 'Creando proyecto...';
+      fd.append('web_url', webUrl);
     }
 
     const project = await api('/api/projects', { method: 'POST', body: fd });
@@ -210,6 +271,7 @@ async function handleUpload() {
     $('project-name').value = '';
     $('project-description').value = '';
     $('youtube-url').value = '';
+    $('web-url').value = '';
     document.querySelectorAll('input[name="model-choice"]').forEach(r => {
       r.checked = r.value === 'gemini-3-flash-preview';
     });

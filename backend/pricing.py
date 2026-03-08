@@ -42,22 +42,26 @@ def calculate_cost(model_name: str, usage: Any) -> float:
     
     # Extraer tokens (maneja tanto objetos como diccionarios)
     if hasattr(usage, 'prompt_token_count'):
-        prompt_tokens = usage.prompt_token_count
+        prompt_tokens = usage.prompt_token_count or 0
+        tool_use_prompt_tokens = getattr(usage, 'tool_use_prompt_token_count', 0) or 0
         # Incluimos candidates y thoughts en el output
         output_tokens = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
     else:
         prompt_tokens = usage.get('prompt_token_count', 0)
+        tool_use_prompt_tokens = usage.get('tool_use_prompt_token_count', 0)
         output_tokens = usage.get('candidates_token_count', 0) + usage.get('thoughts_token_count', 0)
+
+    total_input_tokens = prompt_tokens + tool_use_prompt_tokens
     
     # Determinar tier de precios
     # El tier depende de si el PROMPT es > 200k
-    is_large = prompt_tokens > 200000
+    is_large = total_input_tokens > 200000
     
     model_pricing = PRICING.get(model_name, PRICING["default"])
     
     input_rate = model_pricing["input_large"] if is_large else model_pricing["input_small"]
     output_rate = model_pricing["output_large"] if is_large else model_pricing["output_small"]
     
-    cost = (prompt_tokens / 1000000) * input_rate + (output_tokens / 1000000) * output_rate
+    cost = (total_input_tokens / 1000000) * input_rate + (output_tokens / 1000000) * output_rate
     
     return round(cost, 6)

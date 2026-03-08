@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from main import app
 from backend.auth import get_current_user_id
+from backend.url_extraction import WebExtractionError
 
 
 @pytest.fixture
@@ -144,6 +145,61 @@ class TestGetProject:
             assert r.status_code == 404
         finally:
             app.dependency_overrides.pop(get_current_user_id, None)
+
+
+class TestCreateProject:
+    """POST /api/projects - supports PDF, YouTube and web URLs."""
+
+    def test_401_without_auth(self, client):
+        r = client.post("/api/projects", data={"name": "Test", "web_url": "https://example.com"})
+        assert r.status_code == 401
+
+    def test_creates_web_project_with_normalized_url(self, auth_client):
+        mock_project = {"id": "web-1", "source_type": "web", "source_url": "https://example.com/article"}
+        with patch("main._normalize_web_source_url", return_value="https://example.com/article"):
+            with patch("main.supabase_create_project", return_value=mock_project) as mock_create:
+                r = auth_client.post(
+                    "/api/projects",
+                    headers={"Authorization": "Bearer fake-token"},
+                    data={
+                        "name": "Artículo",
+                        "description": "Texto completo",
+                        "web_url": "https://example.com/article#intro",
+                    },
+                )
+
+        assert r.status_code == 200
+        assert r.json()["source_type"] == "web"
+        mock_create.assert_called_once()
+        _, kwargs = mock_create.call_args
+        assert kwargs["source_type"] == "web"
+        assert kwargs["source_url"] == "https://example.com/article"
+        assert kwargs["pdf_content"] is None
+
+    def test_rejects_invalid_web_url(self, auth_client):
+        with patch("main._normalize_web_source_url", side_effect=WebExtractionError("URL web inválida")):
+            r = auth_client.post(
+                "/api/projects",
+                headers={"Authorization": "Bearer fake-token"},
+                data={"name": "Artículo", "web_url": "nota-url"},
+            )
+
+        assert r.status_code == 400
+        assert r.json()["detail"] == "URL web inválida"
+
+    def test_rejects_multiple_sources(self, auth_client):
+        r = auth_client.post(
+            "/api/projects",
+            headers={"Authorization": "Bearer fake-token"},
+            data={
+                "name": "Proyecto mixto",
+                "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "web_url": "https://example.com/article",
+            },
+        )
+
+        assert r.status_code == 400
+        assert "solo una fuente" in r.json()["detail"].lower()
 
     def test_200_with_project(self, client):
         app.dependency_overrides[get_current_user_id] = _override_user("user-123")

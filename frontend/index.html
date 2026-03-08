@@ -101,7 +101,7 @@
           con profundidad total
         </h1>
         <p class="hero-subtitle">
-          Sube un PDF o pega un video de YouTube. Nuestra IA lo segmenta,<br />
+          Sube un PDF, pega un video de YouTube o añade una URL pública. Nuestra IA lo segmenta,<br />
           explica exhaustivamente, lo recorre con anotaciones expertas y mapea recursos externos.
         </p>
       </div>
@@ -124,6 +124,9 @@
           </button>
           <button type="button" class="source-tab" data-source="youtube" id="tab-youtube">
             <span class="tab-icon">📺</span> Video de YouTube
+          </button>
+          <button type="button" class="source-tab" data-source="web" id="tab-web">
+            <span class="tab-icon">🔗</span> URL web
           </button>
         </div>
 
@@ -164,6 +167,18 @@
           </div>
         </div>
 
+        <!-- Web URL Section -->
+        <div class="source-panel hidden" id="panel-web">
+          <div class="youtube-input-section">
+            <div class="form-group">
+              <label for="web-url" class="form-label">URL pública del texto</label>
+              <input type="url" id="web-url" class="form-input" placeholder="https://www.error500.net/p/..." />
+              <p class="input-hint">Pega un enlace público a una página con contenido textual. Si no se puede extraer bien, se abortará sin procesarlo.</p>
+              <p class="input-error hidden" id="web-url-error"></p>
+            </div>
+          </div>
+        </div>
+
         <div class="form-fields">
           <div class="form-group">
             <label for="project-name" class="form-label">Nombre del proyecto</label>
@@ -172,10 +187,10 @@
           <div class="form-group">
             <label for="project-description" class="form-label">
               Descripción para el Segmentador (opcional)
-              <span class="label-hint">Si no especificas nada, se procesará TODO el documento/video completo</span>
+              <span class="label-hint">Si no especificas nada, se procesará TODO el documento, vídeo o URL completa</span>
             </label>
             <textarea id="project-description" class="form-input form-textarea" rows="3"
-              placeholder="Ej: Capítulos 1, 2 y 6 del libro completo / Minutos 10-30 del video / Dejar vacío para todo el contenido"></textarea>
+              placeholder="Ej: Capítulos 1, 2 y 6 del libro completo / Minutos 10-30 del vídeo / Solo el artículo completo / Dejar vacío para todo el contenido"></textarea>
           </div>
         </div>
 
@@ -256,7 +271,7 @@
       <div class="empty-state hidden" id="projects-empty">
         <p class="empty-icon">⬡</p>
         <p class="empty-title">Aún no hay proyectos</p>
-        <p class="empty-sub">Sube tu primer PDF para comenzar</p>
+        <p class="empty-sub">Sube tu primer PDF, vídeo o URL para comenzar</p>
         <button class="btn-primary" id="btn-new-project-2">Crear proyecto</button>
       </div>
     </div>
@@ -326,7 +341,7 @@
             <button type="button" class="shared-cta-close" id="shared-cta-close" aria-label="Cerrar">✕</button>
             <span class="shared-cta-mark">⬡</span>
             <h4 class="shared-cta-title">Crea tus propios análisis</h4>
-            <p class="shared-cta-sub">Sube un PDF o video, genera explicaciones como esta y guárdalas en la nube.</p>
+            <p class="shared-cta-sub">Sube un PDF, vídeo o URL pública, genera explicaciones como esta y guárdalas en la nube.</p>
             <a href="#" class="btn-primary btn-sm btn-block" id="shared-cta-link">Regístrate gratis</a>
           </div>
         </div>
