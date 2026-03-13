@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background (maskable safe zone: inner circle r=180) -->
+  <rect width="512" height="512" rx="80" fill="#0d1117"/>
+  <!-- Outer hex glow -->
+  <polygon points="256,72 390,150 390,306 256,384 122,306 122,150" fill="#7c3aed" opacity="0.12"/>
+  <!-- Hex border -->
+  <polygon points="256,84 380,152 380,288 256,356 132,288 132,152" fill="none" stroke="#7c3aed" stroke-width="5" opacity="0.5"/>
+  <!-- Inner hex filled -->
+  <polygon points="256,128 332,172 332,260 256,304 180,260 180,172" fill="#7c3aed" opacity="0.2"/>
+  <!-- Inner hex border -->
+  <polygon points="256,140 322,178 322,254 256,292 190,254 190,178" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.4"/>
+  <!-- E letterform -->
+  <text x="256" y="288" font-family="Georgia, serif" font-size="170" font-weight="700" text-anchor="middle" fill="#f0ece3">E</text>
+  <!-- Subtle tagline dots -->
+  <circle cx="218" cy="388" r="5" fill="#7c3aed" opacity="0.5"/>
+  <circle cx="256" cy="392" r="7" fill="#7c3aed" opacity="0.7"/>
+  <circle cx="294" cy="388" r="5" fill="#7c3aed" opacity="0.5"/>
+</svg>

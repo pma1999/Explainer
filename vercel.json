@@ -7,11 +7,35 @@
     {"source": "/api/(.*)", "destination": "https://criminal-leoline-pma00-1cbf79ad.koyeb.app/api/$1"}
   ],
   "headers": [
-    {"source": "/(.*)", "headers": [
-      {"key": "X-Content-Type-Options", "value": "nosniff"},
-      {"key": "X-Frame-Options", "value": "DENY"},
-      {"key": "X-XSS-Protection", "value": "1; mode=block"},
-      {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"}
-    ]}
+    {
+      "source": "/sw.js",
+      "headers": [
+        {"key": "Cache-Control", "value": "no-cache, no-store, must-revalidate"},
+        {"key": "Service-Worker-Allowed", "value": "/"},
+        {"key": "Content-Type", "value": "application/javascript"}
+      ]
+    },
+    {
+      "source": "/manifest.json",
+      "headers": [
+        {"key": "Cache-Control", "value": "public, max-age=86400"},
+        {"key": "Content-Type", "value": "application/manifest+json"}
+      ]
+    },
+    {
+      "source": "/icons/(.*)",
+      "headers": [
+        {"key": "Cache-Control", "value": "public, max-age=2592000, immutable"}
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {"key": "X-Content-Type-Options", "value": "nosniff"},
+        {"key": "X-Frame-Options", "value": "DENY"},
+        {"key": "X-XSS-Protection", "value": "1; mode=block"},
+        {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"}
+      ]
+    }
   ]
 }

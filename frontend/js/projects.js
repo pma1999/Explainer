@@ -14,7 +14,12 @@ import {
   getCachedProjectAsync,
   getFirstIncompletePart,
   rehydrateProjectToServer,
+  pinProjectOffline,
+  unpinProjectOffline,
+  getOfflinePins,
+  isProjectPinned,
 } from './storage.js';
+import { isOffline } from './pwa.js';
 import {
   renderProjectView,
   selectPart,
@@ -39,10 +44,17 @@ function showProjectsLoading(isLoading) {
   }
 }
 
-function renderProjectsList(projects) {
+async function renderProjectsList(projects, pinnedIds) {
   const grid = $('projects-grid');
   const empty = $('projects-empty');
   const count = $('projects-count');
+
+  // Load pinned IDs if not provided
+  const pins = pinnedIds instanceof Set
+    ? pinnedIds
+    : new Set(await getOfflinePins().catch(() => []));
+
+  const offline = isOffline();
 
   count.textContent = projects.length === 0
     ? ''
@@ -73,11 +85,16 @@ function renderProjectsList(projects) {
     return 0;
   };
 
-  grid.innerHTML = projects.map(p => `
-    <div class="project-card" data-id="${p.id}">
+  grid.innerHTML = projects.map(p => {
+    const isPinned = pins.has(p.id);
+    const pinTitle = isPinned ? 'Quitar acceso offline' : 'Guardar para uso offline';
+    const pinAriaLabel = isPinned ? 'Disponible offline — haz clic para desactivar' : 'Activar acceso offline';
+    return `
+    <div class="project-card" data-id="${p.id}" data-pinned="${isPinned}">
       <div class="card-meta">
         <span class="card-date">${formatDate(p.created_at)}</span>
         <span class="card-status-badge status-${p.status}">${statusLabel(p.status)}</span>
+        ${isPinned && offline ? `<span class="offline-badge" title="Disponible sin conexión">Offline</span>` : ''}
       </div>
       <div class="card-name">${escHtml(p.name)}</div>
       <div class="card-desc">${escHtml(p.description)}</div>
@@ -85,13 +102,74 @@ function renderProjectsList(projects) {
       <div class="card-footer-info">
         ${numPartes(p) > 0 ? `<span class="card-parts">${numPartes(p)} partes</span>` : ''}
         ${p.usage && p.usage.total_cost > 0 ? `<span class="card-cost">$${p.usage.total_cost.toFixed(2)}</span>` : ''}
+        <button
+          class="offline-pin-btn${isPinned ? ' pinned' : ''}"
+          data-project-id="${p.id}"
+          title="${pinTitle}"
+          aria-label="${pinAriaLabel}"
+          aria-pressed="${isPinned}"
+          type="button"
+        >${isPinned ? '✓ Offline' : '☁'}</button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
+  // Card click → navigate (but NOT when clicking the pin button)
   grid.querySelectorAll('.project-card').forEach(card => {
-    card.addEventListener('click', () => {
-      if (window.pushRoute) window.pushRoute({ view: 'project', projectId: card.dataset.id });
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.offline-pin-btn')) return;
+      const projectId = card.dataset.id;
+      if (offline && !pins.has(projectId)) {
+        toast('Este proyecto no está disponible offline. Conéctate para abrirlo.', 'error');
+        return;
+      }
+      if (window.pushRoute) window.pushRoute({ view: 'project', projectId });
+    });
+  });
+
+  // Pin button click handler
+  grid.querySelectorAll('.offline-pin-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const projectId = btn.dataset.projectId;
+      const wasPinned = btn.classList.contains('pinned');
+      try {
+        if (wasPinned) {
+          await unpinProjectOffline(projectId);
+          pins.delete(projectId);
+          toast('Proyecto eliminado del acceso offline', 'success');
+        } else {
+          await pinProjectOffline(projectId);
+          pins.add(projectId);
+          toast('Proyecto disponible offline ✓', 'success');
+        }
+        // Update the single button in place without full re-render
+        const isPinnedNow = pins.has(projectId);
+        btn.classList.toggle('pinned', isPinnedNow);
+        btn.title = isPinnedNow ? 'Quitar acceso offline' : 'Guardar para uso offline';
+        btn.setAttribute('aria-label', isPinnedNow ? 'Disponible offline — haz clic para desactivar' : 'Activar acceso offline');
+        btn.setAttribute('aria-pressed', String(isPinnedNow));
+        btn.textContent = isPinnedNow ? '✓ Offline' : '☁';
+
+        // Also update the offline badge in the card meta
+        const card = btn.closest('.project-card');
+        if (card) card.dataset.pinned = String(isPinnedNow);
+        const meta = card?.querySelector('.card-meta');
+        if (meta) {
+          const existingBadge = meta.querySelector('.offline-badge');
+          if (existingBadge) existingBadge.remove();
+          if (isPinnedNow && offline) {
+            const badge = document.createElement('span');
+            badge.className = 'offline-badge';
+            badge.title = 'Disponible sin conexión';
+            badge.textContent = 'Offline';
+            meta.appendChild(badge);
+          }
+        }
+      } catch (err) {
+        toast('Error al actualizar el acceso offline', 'error');
+      }
     });
   });
 
@@ -106,10 +184,13 @@ export async function loadProjectsView() {
 
   const userId = state.user?.id;
   let cached = { projects: [] };
+  // Pre-load pins so they're available for initial render
+  const pins = new Set(await getOfflinePins().catch(() => []));
+
   try {
     cached = await loadBackupAsync(userId);
     if (cached.projects.length > 0) {
-      renderProjectsList(cached.projects);
+      await renderProjectsList(cached.projects, pins);
       showProjectsLoading(false);
     }
   } catch (_) {}
@@ -120,11 +201,11 @@ export async function loadProjectsView() {
 
   try {
     const merged = await ensureProjectsFetched({ onQuotaExceeded });
-    renderProjectsList(merged);
+    await renderProjectsList(merged, pins);
   } catch (err) {
     if (cached.projects.length > 0) {
-      renderProjectsList(cached.projects);
-      toast('Servidor no disponible. Mostrando copia local de tus proyectos.', 'error');
+      await renderProjectsList(cached.projects, pins);
+      toast('Sin conexión — mostrando proyectos guardados localmente', 'error');
     } else {
       toast('Error cargando proyectos: ' + err.message, 'error');
     }

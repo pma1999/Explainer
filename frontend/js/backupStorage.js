@@ -7,8 +7,9 @@
    ============================================================ */
 
 const DB_NAME = 'explainer';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'projects_backup';
+const PINS_STORE = 'offline_pins';
 
 function getBackupKey(userId) {
   return userId ? `explainer.projects.backup.v1.${userId}` : null;
@@ -56,6 +57,9 @@ function openDB() {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(PINS_STORE)) {
+        db.createObjectStore(PINS_STORE, { keyPath: 'projectId' });
       }
     };
   });
@@ -183,5 +187,98 @@ export async function saveBackup(userId, payload, opts = {}) {
     return { ok: true };
   } catch (_) {
     return saveToLocalStorage(key, value, opts);
+  }
+}
+
+/* ============================================================
+   Offline Pinning — mark projects as "available offline"
+   Uses the 'offline_pins' IndexedDB store (DB_VERSION 2+)
+   ============================================================ */
+
+/**
+ * Mark a project as pinned for offline access.
+ * @param {string} projectId
+ * @returns {Promise<void>}
+ */
+export async function pinProjectOffline(projectId) {
+  if (!projectId) return;
+  const db = await openDB();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PINS_STORE, 'readwrite');
+      tx.objectStore(PINS_STORE).put({ projectId, pinnedAt: new Date().toISOString() });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Remove the offline pin from a project.
+ * @param {string} projectId
+ * @returns {Promise<void>}
+ */
+export async function unpinProjectOffline(projectId) {
+  if (!projectId) return;
+  const db = await openDB();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(PINS_STORE, 'readwrite');
+      tx.objectStore(PINS_STORE).delete(projectId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Get all pinned project IDs.
+ * @returns {Promise<string[]>}
+ */
+export async function getOfflinePins() {
+  try {
+    const db = await openDB();
+    try {
+      const records = await new Promise((resolve, reject) => {
+        const tx = db.transaction(PINS_STORE, 'readonly');
+        const req = tx.objectStore(PINS_STORE).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+      return records.map((r) => r.projectId);
+    } finally {
+      db.close();
+    }
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Check whether a specific project is pinned offline.
+ * @param {string} projectId
+ * @returns {Promise<boolean>}
+ */
+export async function isProjectPinned(projectId) {
+  if (!projectId) return false;
+  try {
+    const db = await openDB();
+    try {
+      const record = await new Promise((resolve, reject) => {
+        const tx = db.transaction(PINS_STORE, 'readonly');
+        const req = tx.objectStore(PINS_STORE).get(projectId);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return !!record;
+    } finally {
+      db.close();
+    }
+  } catch (_) {
+    return false;
   }
 }
