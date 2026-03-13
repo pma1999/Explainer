@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/generate-config.cjs",
+    "build": "node scripts/generate-config.cjs && node scripts/generate-icons.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:backend": "python -m pytest tests/backend -v",
@@ -11,6 +11,7 @@
     "test:all": "node scripts/run-all-tests.js"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "jsdom": "^25.0.1",
     "playwright": "^1.49.0",
     "vitest": "^2.1.6"

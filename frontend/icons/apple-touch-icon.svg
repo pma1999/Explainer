@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <!-- Background (iOS rounds corners automatically) -->
+  <rect width="180" height="180" fill="#0d1117"/>
+  <!-- Hex background glow -->
+  <polygon points="90,22 136,48 136,100 90,126 44,100 44,48" fill="#7c3aed" opacity="0.15"/>
+  <!-- Hex border -->
+  <polygon points="90,28 130,52 130,96 90,120 50,96 50,52" fill="none" stroke="#7c3aed" stroke-width="2.5" opacity="0.6"/>
+  <!-- Inner hex -->
+  <polygon points="90,46 116,61 116,91 90,106 64,91 64,61" fill="#7c3aed" opacity="0.25"/>
+  <!-- E letterform -->
+  <text x="90" y="99" font-family="Georgia, serif" font-size="60" font-weight="700" text-anchor="middle" fill="#f0ece3">E</text>
+  <!-- Dot -->
+  <circle cx="90" cy="148" r="4" fill="#7c3aed" opacity="0.7"/>
+</svg>

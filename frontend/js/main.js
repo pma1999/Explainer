@@ -21,6 +21,7 @@ import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
 import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners } from './projectView.js';
+import { initPWA } from './pwa.js';
 
 function saveViewState() {
   if (!state.user?.id) return;
@@ -536,6 +537,8 @@ function bootstrap() {
 }
 
 import { setSaveViewStateCallback } from './projectView.js';
+
+initPWA();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {

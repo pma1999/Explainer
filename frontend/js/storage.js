@@ -9,7 +9,17 @@ import {
   API_KEY_CACHE_TTL_MS,
 } from './state.js';
 import { api } from './api.js';
-import { loadBackup, saveBackup } from './backupStorage.js';
+import {
+  loadBackup,
+  saveBackup,
+  pinProjectOffline,
+  unpinProjectOffline,
+  getOfflinePins,
+  isProjectPinned,
+} from './backupStorage.js';
+
+// Re-export offline pin helpers for use across the app
+export { pinProjectOffline, unpinProjectOffline, getOfflinePins, isProjectPinned };
 
 export function getLocalBackupKey(userId) {
   return userId ? `explainer.projects.backup.v1.${userId}` : null;
