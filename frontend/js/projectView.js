@@ -774,6 +774,20 @@ export function selectPart(partId) {
   saveViewState();
 }
 
+
+function updateReformatButton(project) {
+  const btn = $('btn-reformat-markdown');
+  if (!btn) return;
+  const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
+  const hasExplainer = Object.values(project.partes_contenido || {}).some((p) => p && p.explainer && !p.explainer.error);
+  btn.disabled = isProcessing || !hasExplainer;
+  btn.title = isProcessing
+    ? 'Disponible cuando termine el procesamiento del proyecto'
+    : hasExplainer
+      ? 'Aplicar nuevo formateo markdown a todas las explicaciones del proyecto'
+      : 'Este proyecto no tiene explicaciones generadas todavía';
+}
+
 export function renderProjectView(project) {
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
@@ -785,6 +799,7 @@ export function renderProjectView(project) {
   }
   updateMobileHeader();
   applySharedViewVisibility();
+  updateReformatButton(project);
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
 
@@ -820,6 +835,7 @@ export function syncProcessingUIWithState() {
   }
   renderSidebarNav(project);
   updateUsageUI(project.usage);
+  updateReformatButton(project);
 }
 
 export function updateReadingToolbar() {

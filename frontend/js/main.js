@@ -416,6 +416,43 @@ function initPartActionsOverflow() {
   });
 }
 
+
+function initReformatMarkdown() {
+  const btn = $('btn-reformat-markdown');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    if (!state.currentProjectId || !state.currentProject) return;
+    const hasExplainer = Object.values(state.currentProject.partes_contenido || {}).some((p) => p && p.explainer && !p.explainer.error);
+    if (!hasExplainer) {
+      toast('Este proyecto aún no tiene explicaciones para reformatear.', 'warning');
+      return;
+    }
+
+    const confirmText = 'Se va a reformatear TODO el contenido explicativo del proyecto para mejorar legibilidad sin cambiar contenido. ¿Continuar?';
+    if (!confirm(confirmText)) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '✨ Reformateando...';
+
+    try {
+      const result = await api(`/api/projects/${state.currentProjectId}/reformat-markdown`, { method: 'POST' });
+      if (result?.project) {
+        state.currentProject = result.project;
+        renderProjectView(result.project);
+        if (state.currentPartId) selectPart(state.currentPartId);
+      }
+      toast(`Markdown actualizado en ${result?.formatted_parts || 0} secciones.`, 'success');
+    } catch (err) {
+      toast('Error al reformatear: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
+
 function initDescriptionExpand() {
   const btn = $('btn-description-expand');
   const wrap = document.querySelector('.part-description-wrap');
@@ -519,6 +556,7 @@ function bootstrap() {
   initToggleComplete();
   initPartActionsOverflow();
   initDescriptionExpand();
+  initReformatMarkdown();
 
   function handleSharedCtaClick(e) {
     e.preventDefault();
