@@ -5,13 +5,14 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated, AsyncGenerator
+from typing import Annotated, Any, AsyncGenerator
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 
 ALLOWED_MODELS = {"gemini-3-flash-preview", "gemini-3.1-pro-preview"}
+MARKDOWN_FORMATTER_MODEL_NAME = "gemini-3.1-flash-lite-preview"
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -567,26 +568,43 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
         def _update_usage(usage_meta, phase: str = "unknown"):
             if not usage_meta:
                 return
-            p = getattr(usage_meta, "prompt_token_count", 0) or 0
-            tp = getattr(usage_meta, "tool_use_prompt_token_count", 0) or 0
-            c = getattr(usage_meta, "candidates_token_count", 0) or 0
-            t = getattr(usage_meta, "thoughts_token_count", 0) or 0
-            tt = getattr(usage_meta, "total_token_count", 0) or 0
-            cumulative_usage["prompt_tokens"] += p + tp
-            cumulative_usage["tool_use_prompt_tokens"] += tp
-            cumulative_usage["candidates_tokens"] += c
-            cumulative_usage["thoughts_tokens"] += t
-            cumulative_usage["total_tokens"] += tt
-            cost = calculate_cost(model_name, usage_meta)
-            cumulative_usage["total_cost"] += cost
+
+            base_usage_meta = getattr(usage_meta, "base_usage_metadata", None)
+            formatter_usage_meta = getattr(usage_meta, "formatter_usage_metadata", None)
+            formatter_model_name = getattr(usage_meta, "formatter_model", MARKDOWN_FORMATTER_MODEL_NAME)
+
+            token_before = cumulative_usage["total_tokens"]
+            cost_before = cumulative_usage["total_cost"]
+
+            def _add_usage(meta: Any, meta_model_name: str):
+                p = getattr(meta, "prompt_token_count", 0) or 0
+                tp = getattr(meta, "tool_use_prompt_token_count", 0) or 0
+                c = getattr(meta, "candidates_token_count", 0) or 0
+                t = getattr(meta, "thoughts_token_count", 0) or 0
+                tt = getattr(meta, "total_token_count", 0) or 0
+                cumulative_usage["prompt_tokens"] += p + tp
+                cumulative_usage["tool_use_prompt_tokens"] += tp
+                cumulative_usage["candidates_tokens"] += c
+                cumulative_usage["thoughts_tokens"] += t
+                cumulative_usage["total_tokens"] += tt
+                cumulative_usage["total_cost"] += calculate_cost(meta_model_name, meta)
+
+            if base_usage_meta is not None or formatter_usage_meta is not None:
+                if base_usage_meta is not None:
+                    _add_usage(base_usage_meta, model_name)
+                if formatter_usage_meta is not None:
+                    _add_usage(formatter_usage_meta, formatter_model_name)
+            else:
+                _add_usage(usage_meta, model_name)
+
             update_project(project_id, user_id, {"usage": cumulative_usage})
 
             logger.debug(
                 f"[Process] Uso de tokens actualizado - fase: {phase}",
                 extra={
                     "phase": phase,
-                    "tokens_this_call": tt,
-                    "cost_this_call": round(cost, 6),
+                    "tokens_this_call": cumulative_usage["total_tokens"] - token_before,
+                    "cost_this_call": round(cumulative_usage["total_cost"] - cost_before, 6),
                     "cumulative_total": cumulative_usage["total_tokens"],
                     "cumulative_cost": round(cumulative_usage["total_cost"], 6),
                 }
