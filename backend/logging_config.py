@@ -118,17 +118,19 @@ def setup_logging() -> None:
     # Detectar si estamos en producción (Koyeb)
     is_production = os.environ.get("ENVIRONMENT") == "production"
 
+    # Nivel configurable; por defecto INFO para evitar ruido de debug poco útil.
+    level_name = (os.environ.get("LOG_LEVEL") or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
     # Configurar el handler
     handler = logging.StreamHandler(sys.stdout)
 
     if is_production:
         # En producción usar JSON
         handler.setFormatter(JSONFormatter())
-        level = logging.INFO
     else:
         # En desarrollo usar formato legible con colores
         handler.setFormatter(ColoredFormatter())
-        level = logging.DEBUG
 
     # Configurar el logger raíz
     root_logger = logging.getLogger()
@@ -140,13 +142,14 @@ def setup_logging() -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("google").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
 
     # Logger propio
     logger = logging.getLogger("backend.logging_config")
     if is_production:
-        logger.info("Logging configurado en modo PRODUCCIÓN (JSON)")
+        logger.info("Logging configurado en modo PRODUCCIÓN (JSON), level=%s", level_name)
     else:
-        logger.debug("Logging configurado en modo DESARROLLO (colores)")
+        logger.info("Logging configurado en modo DESARROLLO (colores), level=%s", level_name)
 
 
 def set_context(
