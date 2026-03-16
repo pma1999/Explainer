@@ -298,8 +298,14 @@ async def api_get_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
 ):
+    logger.info(
+        "[Reformat] Solicitud de reformateo markdown recibida",
+        extra={"project_id": project_id, "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id},
+    )
+
     project = get_project(project_id, user_id)
     if not project:
+        logger.warning("[Reformat] Proyecto no encontrado", extra={"project_id": project_id})
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return project
 
@@ -364,8 +370,14 @@ async def api_update_progress(
     if not isinstance(completed, bool):
         completed = True
 
+    logger.info(
+        "[Reformat] Solicitud de reformateo markdown recibida",
+        extra={"project_id": project_id, "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id},
+    )
+
     project = get_project(project_id, user_id)
     if not project:
+        logger.warning("[Reformat] Proyecto no encontrado", extra={"project_id": project_id})
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     partes = project.get("segmentation") or {}
