@@ -1297,6 +1297,34 @@ body {
   border-color: var(--gold);
 }
 
+.btn-reformat-project {
+  color: #ffdca3;
+  border-color: rgba(255, 196, 102, 0.6);
+  background:
+    linear-gradient(120deg, rgba(255, 174, 66, 0.18), rgba(130, 89, 24, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(255, 227, 176, 0.2), 0 8px 24px rgba(255, 174, 66, 0.12);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-reformat-project::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 20%, rgba(255, 237, 199, 0.2) 50%, transparent 80%);
+  transform: translateX(-120%);
+  transition: transform 0.45s ease;
+}
+
+.btn-reformat-project:hover::after {
+  transform: translateX(120%);
+}
+
+.btn-reformat-project:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ─────────────────────────────────────────────
    MAIN CONTENT
 ───────────────────────────────────────────── */

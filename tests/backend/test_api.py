@@ -1,6 +1,7 @@
 """FastAPI TestClient tests for API endpoints."""
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from main import app
@@ -220,3 +221,54 @@ class TestCreateProject:
             assert r.json()["share_token"] == "tok-xyz"
         finally:
             app.dependency_overrides.pop(get_current_user_id, None)
+
+
+class TestReformatProjectMarkdown:
+    """POST /api/projects/{project_id}/reformat-markdown - retrofit markdown formatting."""
+
+    def test_404_when_project_not_found(self, auth_client):
+        with patch("main.get_project", return_value=None):
+            r = auth_client.post("/api/projects/missing/reformat-markdown", headers={"Authorization": "Bearer fake-token"})
+        assert r.status_code == 404
+
+    def test_400_when_no_api_key(self, auth_client):
+        mock_project = {"id": "p1", "partes_contenido": {"1": {"explainer": {"desarrollo": []}}}}
+        with patch("main.get_project", return_value=mock_project):
+            with patch("main.has_user_api_key", return_value=False):
+                r = auth_client.post("/api/projects/p1/reformat-markdown", headers={"Authorization": "Bearer fake-token"})
+        assert r.status_code == 400
+
+    def test_200_reformats_explainer_content(self, auth_client):
+        base_project = {
+            "id": "p1",
+            "usage": {"total_tokens": 100, "total_cost": 0.02},
+            "partes_contenido": {
+                "1": {"explainer": {"desarrollo": [{"subsecciones": [{"explicacion_detallada": "A"}]}]}},
+                "2": {"explainer": {"error": "fail"}},
+            },
+        }
+
+        def _fake_reformat(_api_key, payload):
+            payload["desarrollo"][0]["subsecciones"][0]["explicacion_detallada"] = "- A"
+            usage = SimpleNamespace(
+                prompt_token_count=3,
+                candidates_token_count=2,
+                thoughts_token_count=1,
+                total_token_count=6,
+            )
+            return payload, usage
+
+        with patch("main.get_project", return_value=base_project):
+            with patch("main.has_user_api_key", return_value=True):
+                with patch("main.get_user_api_key", return_value="AIzaFakeKey"):
+                    with patch("main.reformat_explainer_payload_markdown", side_effect=_fake_reformat):
+                        with patch("main.update_project", side_effect=lambda _p, _u, updates: {**base_project, **updates}):
+                            r = auth_client.post("/api/projects/p1/reformat-markdown", headers={"Authorization": "Bearer fake-token"})
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["formatted_parts"] == 1
+        assert body["project"]["partes_contenido"]["1"]["explainer"]["desarrollo"][0]["subsecciones"][0]["explicacion_detallada"] == "- A"
+        assert body["project"]["usage"]["total_tokens"] == 106
+        assert body["project"]["usage"]["total_cost"] == pytest.approx(0.020005, abs=1e-9)
