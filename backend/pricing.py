@@ -18,6 +18,12 @@ PRICING = {
         "output_small": 3.00,
         "output_large": 3.00,
     },
+    "gemini-3.1-flash-lite-preview": {
+        "input_small": 0.25,
+        "input_large": 0.25,
+        "output_small": 1.50,
+        "output_large": 1.50,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

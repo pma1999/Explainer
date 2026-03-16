@@ -270,6 +270,20 @@ def test_calculate_cost_includes_tool_use_prompt_tokens():
     assert cost == 0.011
 
 
+
+
+def test_calculate_cost_flash_lite_preview_pricing():
+    usage = {
+        "prompt_token_count": 1_000,
+        "tool_use_prompt_token_count": 0,
+        "candidates_token_count": 2_000,
+        "thoughts_token_count": 0,
+    }
+    # Input: 1000 * $0.25 / 1M = 0.00025
+    # Output: 2000 * $1.50 / 1M = 0.003
+    # Total: 0.00325
+    cost = calculate_cost("gemini-3.1-flash-lite-preview", usage)
+    assert cost == 0.00325
 def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkeypatch):
     project = {
         "id": "proj-web-1",
