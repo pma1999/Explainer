@@ -1,8 +1,11 @@
 """Agente Explainer — explicación exhaustiva de cada parte."""
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import re
 import time
+from types import SimpleNamespace
 from typing import Any
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
@@ -11,6 +14,148 @@ from google import genai
 from google.genai import types
 
 logger = get_logger("backend.agents.explainer")
+
+MARKDOWN_FORMATTER_MODEL = "gemini-3.1-flash-lite-preview"
+FORMATTER_SYSTEM_INSTRUCTION = """<system_instruction>
+Eres un formateador experto de Markdown con una regla absoluta: preservar el contenido exactamente.
+
+TAREA:
+- Recibirás el texto de una subsección.
+- Debes devolver únicamente una versión mejor formateada en Markdown para facilitar la lectura.
+
+REGLAS INNEGOCIABLES:
+1) Conserva ABSOLUTAMENTE TODO el contenido original.
+2) No puedes resumir, acortar, omitir, parafrasear, reordenar ni reinterpretar.
+3) No puedes cambiar ninguna palabra del contenido original.
+4) Solo puedes añadir estructura Markdown (saltos de línea, listas, encabezados, bloques de cita, énfasis visual).
+5) La salida debe ser solo Markdown limpio (sin JSON, sin comentarios, sin explicación de lo que hiciste).
+</system_instruction>"""
+
+
+def _markdown_normalized_tokens(text: str) -> list[str]:
+    normalized_lines: list[str] = []
+    for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = re.sub(r"^\s{0,3}(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+|>\s+)", "", line)
+        normalized_lines.append(line)
+
+    normalized = "\n".join(normalized_lines)
+    normalized = re.sub(r"(\*\*|__|~~|`|\*)", "", normalized)
+    return re.findall(r"\S+", normalized)
+
+
+def _preserves_verbatim_content(original: str, formatted: str) -> bool:
+    return _markdown_normalized_tokens(original) == _markdown_normalized_tokens(formatted)
+
+
+def _combine_usage_metadata(usage_items: list[Any]) -> Any:
+    valid = [u for u in usage_items if u]
+    if not valid:
+        return None
+
+    def _sum(field: str) -> int:
+        return int(sum(getattr(u, field, 0) or 0 for u in valid))
+
+    return SimpleNamespace(
+        prompt_token_count=_sum("prompt_token_count"),
+        candidates_token_count=_sum("candidates_token_count"),
+        thoughts_token_count=_sum("thoughts_token_count"),
+        total_token_count=_sum("total_token_count"),
+    )
+
+
+def _format_subsection_markdown(api_key: str, text: str) -> tuple[str, Any]:
+    if not isinstance(text, str) or not text.strip():
+        return text, None
+
+    client = genai.Client(api_key=api_key)
+    response = generate_content_with_retry(
+        client=client,
+        model=MARKDOWN_FORMATTER_MODEL,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text=(
+                            "Formatea este contenido a Markdown legible y atractivo, sin cambiar ni perder "
+                            "absolutamente nada del texto:\n\n"
+                            f"{text}"
+                        )
+                    )
+                ],
+            )
+        ],
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="LOW"),
+            response_mime_type="text/plain",
+            system_instruction=[types.Part.from_text(text=FORMATTER_SYSTEM_INSTRUCTION)],
+        ),
+        max_retries=4,
+        operation_context={"agent": "explainer_markdown_formatter"},
+    )
+
+    formatted = (response.text or "").strip()
+    if not formatted:
+        logger.warning("Formatter devolvió contenido vacío; se mantiene texto original")
+        return text, response.usage_metadata
+    if not _preserves_verbatim_content(text, formatted):
+        logger.warning("Formatter alteró contenido; se mantiene texto original")
+        return text, response.usage_metadata
+
+    return formatted, response.usage_metadata
+
+
+def _post_format_explainer_markdown(api_key: str, result: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
+    usage_items: list[Any] = []
+    desarrollo = result.get("desarrollo")
+    if not isinstance(desarrollo, list) or not desarrollo:
+        return result, usage_items
+
+    targets: list[tuple[int, int, dict[str, Any]]] = []
+    for section_idx, section in enumerate(desarrollo):
+        subsecciones = section.get("subsecciones") if isinstance(section, dict) else None
+        if not isinstance(subsecciones, list):
+            continue
+        for subsection_idx, sub in enumerate(subsecciones):
+            if isinstance(sub, dict):
+                targets.append((section_idx, subsection_idx, sub))
+
+    if not targets:
+        return result, usage_items
+
+    max_workers = min(8, len(targets))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_format_subsection_markdown, api_key, sub.get("explicacion_detallada", "")): (section_idx, subsection_idx, sub)
+            for section_idx, subsection_idx, sub in targets
+        }
+
+        for future in concurrent.futures.as_completed(futures):
+            section_idx, subsection_idx, sub = futures[future]
+            try:
+                formatted_text, usage = future.result()
+                sub["explicacion_detallada"] = formatted_text
+                if usage:
+                    usage_items.append(usage)
+            except Exception as exc:
+                logger.warning(
+                    "Falló el post-formateo markdown de subsección",
+                    extra={
+                        "section_idx": section_idx + 1,
+                        "subsection_idx": subsection_idx + 1,
+                        "error": str(exc)[:200],
+                    },
+                )
+
+    return result, usage_items
+
+
+def reformat_explainer_payload_markdown(api_key: str, explainer_payload: dict[str, Any]) -> tuple[dict[str, Any], Any]:
+    """Public helper to retrofit markdown formatting for already-generated explainer payloads."""
+    formatted_payload, usage_items = _post_format_explainer_markdown(api_key, explainer_payload)
+    return formatted_payload, _combine_usage_metadata(usage_items)
+
+
 
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
@@ -349,7 +494,21 @@ def run_explainer(
             }
         )
 
-        return result, response.usage_metadata
+        formatting_start = time.time()
+        result, formatter_usage_items = _post_format_explainer_markdown(api_key, result)
+        formatting_duration = (time.time() - formatting_start) * 1000
+        combined_usage = _combine_usage_metadata([response.usage_metadata, *formatter_usage_items])
+
+        logger.info(
+            "Post-formateo markdown de explainer completado",
+            extra={
+                "formatter_calls": len(formatter_usage_items),
+                "formatting_duration_ms": int(formatting_duration),
+                "formatter_model": MARKDOWN_FORMATTER_MODEL,
+            },
+        )
+
+        return result, combined_usage
 
     except json.JSONDecodeError as e:
         logger.error(
