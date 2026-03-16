@@ -498,11 +498,6 @@ def run_explainer(
         result, formatter_usage_items = _post_format_explainer_markdown(api_key, result)
         formatting_duration = (time.time() - formatting_start) * 1000
         combined_usage = _combine_usage_metadata([response.usage_metadata, *formatter_usage_items])
-        formatter_usage = _combine_usage_metadata(formatter_usage_items)
-        if combined_usage is not None:
-            setattr(combined_usage, "base_usage_metadata", response.usage_metadata)
-            setattr(combined_usage, "formatter_usage_metadata", formatter_usage)
-            setattr(combined_usage, "formatter_model", MARKDOWN_FORMATTER_MODEL)
 
         logger.info(
             "Post-formateo markdown de explainer completado",
