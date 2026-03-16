@@ -64,10 +64,3 @@ def test_combine_usage_metadata_sums_counts():
     assert merged.candidates_token_count == 14
     assert merged.thoughts_token_count == 4
     assert merged.total_token_count == 35
-
-
-def test_deterministic_markdown_fallback_preserves_verbatim_content():
-    original = "Primera idea importante. Segunda idea importante: con detalle final."
-    formatted = explainer._deterministic_markdown_fallback(original)
-    assert explainer._preserves_verbatim_content(original, formatted) is True
-    assert "\n\n" in formatted

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
 import re
 import time
 from types import SimpleNamespace
@@ -31,32 +30,6 @@ REGLAS INNEGOCIABLES:
 4) Solo puedes añadir estructura Markdown (saltos de línea, listas, encabezados, bloques de cita, énfasis visual).
 5) La salida debe ser solo Markdown limpio (sin JSON, sin comentarios, sin explicación de lo que hiciste).
 </system_instruction>"""
-
-REFORMAT_LOG_CONTENT = os.environ.get("REFORMAT_LOG_CONTENT", "1") == "1"
-REFORMAT_LOG_PREVIEW_CHARS = int(os.environ.get("REFORMAT_LOG_PREVIEW_CHARS", "1200"))
-
-
-def _content_preview(text: str, limit: int = REFORMAT_LOG_PREVIEW_CHARS) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[:limit] + "... [truncated]"
-
-
-def _deterministic_markdown_fallback(text: str) -> str:
-    """Always return a more readable markdown layout without changing lexical content."""
-    if not isinstance(text, str) or not text.strip():
-        return text
-
-    chunks: list[str] = []
-    for paragraph in text.split("\n\n"):
-        p = paragraph.strip()
-        if not p:
-            continue
-        p = re.sub(r"([.!?;:])\s+", r"\1\n\n", p)
-        chunks.append(p)
-
-    return "\n\n".join(chunks) if chunks else text
 
 
 def _markdown_normalized_tokens(text: str) -> list[str]:
@@ -118,32 +91,16 @@ def _format_subsection_markdown(api_key: str, text: str) -> tuple[str, Any]:
             system_instruction=[types.Part.from_text(text=FORMATTER_SYSTEM_INSTRUCTION)],
         ),
         max_retries=4,
-        operation_context={"agent": "explainer_markdown_formatter", "quiet": True},
+        operation_context={"agent": "explainer_markdown_formatter"},
     )
 
     formatted = (response.text or "").strip()
-    used_fallback = False
-
-    if not formatted or not _preserves_verbatim_content(text, formatted):
-        used_fallback = True
-        fallback = _deterministic_markdown_fallback(text)
-        if _preserves_verbatim_content(text, fallback):
-            formatted = fallback
-            logger.warning("Formatter alteró/vació contenido; aplicado fallback determinista")
-        else:
-            formatted = text
-            logger.error("Fallback determinista no preservó contenido; se mantiene texto original")
-
-    if REFORMAT_LOG_CONTENT:
-        logger.info(
-            "Formatter markdown subsección procesada",
-            extra={
-                "formatter_model": MARKDOWN_FORMATTER_MODEL,
-                "used_fallback": used_fallback,
-                "original_preview": _content_preview(text),
-                "formatted_preview": _content_preview(formatted),
-            },
-        )
+    if not formatted:
+        logger.warning("Formatter devolvió contenido vacío; se mantiene texto original")
+        return text, response.usage_metadata
+    if not _preserves_verbatim_content(text, formatted):
+        logger.warning("Formatter alteró contenido; se mantiene texto original")
+        return text, response.usage_metadata
 
     return formatted, response.usage_metadata
 
@@ -195,21 +152,8 @@ def _post_format_explainer_markdown(api_key: str, result: dict[str, Any]) -> tup
 
 def reformat_explainer_payload_markdown(api_key: str, explainer_payload: dict[str, Any]) -> tuple[dict[str, Any], Any]:
     """Public helper to retrofit markdown formatting for already-generated explainer payloads."""
-    start_time = time.time()
     formatted_payload, usage_items = _post_format_explainer_markdown(api_key, explainer_payload)
-    combined_usage = _combine_usage_metadata(usage_items)
-
-    logger.info(
-        "Reformateo markdown de payload explainer completado",
-        extra={
-            "formatter_calls": len(usage_items),
-            "formatter_model": MARKDOWN_FORMATTER_MODEL,
-            "duration_ms": int((time.time() - start_time) * 1000),
-            "total_tokens": getattr(combined_usage, "total_token_count", 0) if combined_usage else 0,
-        },
-    )
-
-    return formatted_payload, combined_usage
+    return formatted_payload, _combine_usage_metadata(usage_items)
 
 
 
@@ -554,11 +498,6 @@ def run_explainer(
         result, formatter_usage_items = _post_format_explainer_markdown(api_key, result)
         formatting_duration = (time.time() - formatting_start) * 1000
         combined_usage = _combine_usage_metadata([response.usage_metadata, *formatter_usage_items])
-        formatter_usage = _combine_usage_metadata(formatter_usage_items)
-        if combined_usage is not None:
-            setattr(combined_usage, "base_usage_metadata", response.usage_metadata)
-            setattr(combined_usage, "formatter_usage_metadata", formatter_usage)
-            setattr(combined_usage, "formatter_model", MARKDOWN_FORMATTER_MODEL)
 
         logger.info(
             "Post-formateo markdown de explainer completado",
