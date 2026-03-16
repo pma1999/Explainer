@@ -264,10 +264,6 @@ class GeminiRetryHandler:
         Raises:
             GeminiError: Si se agotan los reintentos o el error no es retryable
         """
-        # Safety net: formatter fan-out should never flood INFO logs.
-        if "explainer_markdown_formatter" in operation_name:
-            verbose = False
-
         log = logger.info if verbose else logger.debug
 
         start_time = time.time()
@@ -564,8 +560,6 @@ def generate_content_with_retry(
     operation_name = "generate_content"
     log_context = dict(operation_context or {})
     quiet = bool(log_context.pop("quiet", False))
-    if log_context.get("agent") == "explainer_markdown_formatter":
-        quiet = True
 
     if log_context:
         ctx_parts = [f"{k}={v}" for k, v in log_context.items()]

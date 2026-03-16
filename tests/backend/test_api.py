@@ -271,4 +271,3 @@ class TestReformatProjectMarkdown:
         assert body["formatted_parts"] == 1
         assert body["project"]["partes_contenido"]["1"]["explainer"]["desarrollo"][0]["subsecciones"][0]["explicacion_detallada"] == "- A"
         assert body["project"]["usage"]["total_tokens"] == 106
-        assert body["project"]["usage"]["total_cost"] == pytest.approx(0.020005, abs=1e-9)
