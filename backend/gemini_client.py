@@ -250,6 +250,7 @@ class GeminiRetryHandler:
         self,
         operation: Callable[[], Any],
         operation_name: str = "gemini_operation",
+        verbose: bool = True,
     ) -> Any:
         """Ejecuta una operación con retry automático.
 
@@ -263,8 +264,14 @@ class GeminiRetryHandler:
         Raises:
             GeminiError: Si se agotan los reintentos o el error no es retryable
         """
+        # Safety net: formatter fan-out should never flood INFO logs.
+        if "explainer_markdown_formatter" in operation_name:
+            verbose = False
+
+        log = logger.info if verbose else logger.debug
+
         start_time = time.time()
-        logger.info(
+        log(
             f"[{operation_name}] Iniciando operación",
             extra={"operation": operation_name, "max_retries": self.max_retries}
         )
@@ -285,7 +292,7 @@ class GeminiRetryHandler:
         for attempt in range(self.max_retries + 1):
             attempt_start = time.time()
             try:
-                logger.info(
+                log(
                     f"[{operation_name}] Intento {attempt + 1}/{self.max_retries + 1}",
                     extra={
                         "operation": operation_name,
@@ -312,7 +319,7 @@ class GeminiRetryHandler:
                 total_duration = (time.time() - start_time) * 1000
 
                 if attempt > 0:
-                    logger.info(
+                    log(
                         f"[{operation_name}] Éxito después de {attempt} reintentos",
                         extra={
                             "operation": operation_name,
@@ -322,7 +329,7 @@ class GeminiRetryHandler:
                         }
                     )
                 else:
-                    logger.info(
+                    log(
                         f"[{operation_name}] Operación completada exitosamente",
                         extra={
                             "operation": operation_name,
@@ -555,17 +562,23 @@ def generate_content_with_retry(
         Respuesta de la API
     """
     operation_name = "generate_content"
-    if operation_context:
-        ctx_parts = [f"{k}={v}" for k, v in operation_context.items()]
+    log_context = dict(operation_context or {})
+    quiet = bool(log_context.pop("quiet", False))
+    if log_context.get("agent") == "explainer_markdown_formatter":
+        quiet = True
+
+    if log_context:
+        ctx_parts = [f"{k}={v}" for k, v in log_context.items()]
         operation_name = f"generate_content[{','.join(ctx_parts)}]"
 
-    logger.info(
+    prep_log = logger.debug if quiet else logger.info
+    prep_log(
         f"[{operation_name}] Preparando generación de contenido",
         extra={
             "operation": "generate_content",
             "model": model,
             "max_retries": max_retries,
-            **(operation_context or {}),
+            **log_context,
         }
     )
 
@@ -578,7 +591,7 @@ def generate_content_with_retry(
             config=config,
         )
 
-    return handler.execute_with_retry(operation, operation_name=operation_name)
+    return handler.execute_with_retry(operation, operation_name=operation_name, verbose=not quiet)
 
 
 def upload_file_with_retry(
