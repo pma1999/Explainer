@@ -25,6 +25,7 @@ from google import genai
 from google.genai import types
 
 from backend.logging_config import get_logger
+from backend.pricing import calculate_cost
 
 logger = get_logger("backend.agents.formatter")
 
@@ -59,14 +60,15 @@ async def _format_text(
     client: genai.Client,
     text: str,
     context: str = "",
-) -> str:
+) -> tuple[str, Any]:
     """Format a single text block as Markdown using the fast model.
 
-    Always returns a non-empty string.  On any exception the original *text*
-    is returned unchanged (fail-safe guarantee).
+    Returns ``(formatted_text, usage_metadata)``.  On any exception or empty
+    response the original *text* is returned with ``None`` as usage_metadata
+    (fail-safe guarantee).
     """
     if not text or not text.strip():
-        return text
+        return text, None
 
     try:
         user_message = text
@@ -83,26 +85,27 @@ async def _format_text(
         )
 
         if response and response.text and response.text.strip():
-            return response.text.strip()
+            usage_meta = getattr(response, "usage_metadata", None)
+            return response.text.strip(), usage_meta
 
         logger.warning(
             "Formatter returned empty response, keeping original text",
             extra={"context_preview": context[:80]},
         )
-        return text
+        return text, None
 
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             f"Formatter API call failed, keeping original text: {exc}",
             extra={"context_preview": context[:80], "error": str(exc)[:200]},
         )
-        return text
+        return text, None
 
 
 async def format_explainer_content(
     api_key: str,
     explainer_data: dict[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Format all prose text fields in an explainer result dict in parallel.
 
     The explainer schema is:
@@ -118,9 +121,18 @@ async def format_explainer_content(
             seccion_temario_relacionada (str — NOT formatted, used as heading)
             descripcion_conexion        (str — formatted)
 
-    Returns a deep-copy of *explainer_data* with all prose fields replaced by
-    their Markdown-formatted equivalents.  On partial failure individual fields
-    fall back to their originals.
+    Returns ``(formatted_dict, usage_summary)`` where *formatted_dict* is a
+    deep-copy of *explainer_data* with all prose fields replaced by their
+    Markdown-formatted equivalents, and *usage_summary* is::
+
+        {
+            "input_tokens":  int,
+            "output_tokens": int,
+            "total_tokens":  int,
+            "cost":          float,   # USD, rounded to 6 decimal places
+        }
+
+    On partial failure individual fields fall back to their originals.
     """
     start_time = time.time()
 
@@ -160,16 +172,26 @@ async def format_explainer_content(
             cx.get("seccion_temario_relacionada", ""),
         )
 
+    _empty_usage: dict[str, Any] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost": 0.0,
+    }
+
     if not tasks:
-        return result
+        return result, _empty_usage
 
     paths, coros = zip(*tasks)
 
     # Run ALL formatting requests in a single parallel batch.
-    formatted_values = await asyncio.gather(*coros, return_exceptions=True)
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
 
     success_count = 0
-    for path, value in zip(paths, formatted_values):
+    total_input = 0
+    total_output = 0
+
+    for path, value in zip(paths, gathered):
         if isinstance(value, Exception):
             logger.warning(
                 f"Formatter task failed for path {path}, keeping original: {value}",
@@ -177,11 +199,19 @@ async def format_explainer_content(
             )
             continue
 
+        # Unpack (formatted_text, usage_metadata) returned by _format_text.
+        formatted_text, usage_meta = value
+
+        # Accumulate token counts for cost reporting.
+        if usage_meta is not None:
+            total_input  += getattr(usage_meta, "prompt_token_count",     0) or 0
+            total_output += getattr(usage_meta, "candidates_token_count", 0) or 0
+
         # Navigate the path and set the leaf value.
         target: Any = result
         for key in path[:-1]:
             target = target[key]
-        target[path[-1]] = value
+        target[path[-1]] = formatted_text
         success_count += 1
 
     elapsed_ms = int((time.time() - start_time) * 1000)
@@ -196,4 +226,15 @@ async def format_explainer_content(
         },
     )
 
-    return result
+    fmt_cost = calculate_cost(
+        FORMATTER_MODEL,
+        {"prompt_token_count": total_input, "candidates_token_count": total_output},
+    )
+    usage_summary: dict[str, Any] = {
+        "input_tokens":  total_input,
+        "output_tokens": total_output,
+        "total_tokens":  total_input + total_output,
+        "cost":          fmt_cost,
+    }
+
+    return result, usage_summary

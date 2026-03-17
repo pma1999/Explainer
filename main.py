@@ -491,13 +491,21 @@ async def _format_and_finalize_part(
     The `part_completed` SSE event is only sent once formatting is done.
     """
     fmt_start = time.time()
+    fmt_usage: dict = {}
     try:
         if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict):
-            formatted = await format_explainer_content(api_key, explainer_data)
+            formatted, fmt_usage = await format_explainer_content(api_key, explainer_data)
             partes_contenido[str(part_id)]["explainer"] = formatted
+            partes_contenido[str(part_id)]["formatter_usage"] = fmt_usage
             logger.info(
-                f"[Format] Parte {part_id} formateada en {int((time.time() - fmt_start) * 1000)}ms",
-                extra={"part_id": part_id, "elapsed_ms": int((time.time() - fmt_start) * 1000)},
+                f"[Format] Parte {part_id} formateada en {int((time.time() - fmt_start) * 1000)}ms "
+                f"(tokens: {fmt_usage.get('total_tokens', 0)}, coste: ${fmt_usage.get('cost', 0.0):.6f})",
+                extra={
+                    "part_id": part_id,
+                    "elapsed_ms": int((time.time() - fmt_start) * 1000),
+                    "formatter_tokens": fmt_usage.get("total_tokens", 0),
+                    "formatter_cost": fmt_usage.get("cost", 0.0),
+                },
             )
     except Exception as exc:
         logger.warning(
@@ -1046,6 +1054,33 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             )
             await asyncio.gather(*formatter_tasks, return_exceptions=True)
 
+        # Aggregate formatter costs from partes_contenido (all tasks finished → no race).
+        total_fmt_input = total_fmt_output = 0
+        total_fmt_cost = 0.0
+        for pdata in partes_contenido.values():
+            fu = pdata.get("formatter_usage") or {}
+            total_fmt_input  += fu.get("input_tokens", 0)
+            total_fmt_output += fu.get("output_tokens", 0)
+            total_fmt_cost   += fu.get("cost", 0.0)
+
+        if total_fmt_cost > 0:
+            cumulative_usage["formatter_tokens"] = total_fmt_input + total_fmt_output
+            cumulative_usage["formatter_cost"]   = round(total_fmt_cost, 6)
+            cumulative_usage["total_cost"]       = round(
+                cumulative_usage["total_cost"] + total_fmt_cost, 6
+            )
+            update_project(project_id, user_id, {"usage": cumulative_usage})
+            await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+            logger.info(
+                f"[Process] Coste del formatter: ${total_fmt_cost:.6f} "
+                f"({total_fmt_input + total_fmt_output} tokens)",
+                extra={
+                    "formatter_tokens": total_fmt_input + total_fmt_output,
+                    "formatter_cost": round(total_fmt_cost, 6),
+                    "cumulative_cost": round(cumulative_usage["total_cost"], 6),
+                },
+            )
+
         # Marcar proyecto como completado
         total_duration = (time.time() - process_start_time) * 1000
         logger.info(
@@ -1190,10 +1225,10 @@ async def api_reformat_project(
             and isinstance(explainer, dict)
             and "error" not in explainer
         ):
-            formatted = await format_explainer_content(api_key, explainer)
-            return pid, {**part_data, "explainer": formatted, "formatter_version": 1}
+            formatted, fmt_usage = await format_explainer_content(api_key, explainer)
+            return pid, {**part_data, "explainer": formatted, "formatter_usage": fmt_usage, "formatter_version": 1}
         # No explainer or explainer errored — just mark version so we skip next time.
-        return pid, {**part_data, "formatter_version": 1}
+        return pid, {**part_data, "formatter_usage": {}, "formatter_version": 1}
 
     # Only process parts that are completed, have explainer data, and haven't
     # been formatted yet.
@@ -1223,6 +1258,8 @@ async def api_reformat_project(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     reformatted = 0
+    total_fmt_input = total_fmt_output = 0
+    total_fmt_cost = 0.0
     for r in results:
         if isinstance(r, Exception):
             logger.warning(
@@ -1232,23 +1269,42 @@ async def api_reformat_project(
             continue
         pid, updated_part = r
         partes_contenido[pid] = updated_part
+        fu = updated_part.get("formatter_usage") or {}
+        total_fmt_input  += fu.get("input_tokens", 0)
+        total_fmt_output += fu.get("output_tokens", 0)
+        total_fmt_cost   += fu.get("cost", 0.0)
         reformatted += 1
 
     if reformatted > 0:
         update_project(project_id, user_id, {"partes_contenido": partes_contenido})
 
+    # Update project-level usage with formatter costs.
+    if total_fmt_cost > 0:
+        project_usage: dict = dict(project.get("usage") or {})
+        project_usage["formatter_tokens"] = (
+            project_usage.get("formatter_tokens", 0) + total_fmt_input + total_fmt_output
+        )
+        project_usage["formatter_cost"] = round(
+            project_usage.get("formatter_cost", 0.0) + total_fmt_cost, 6
+        )
+        project_usage["total_cost"] = round(
+            project_usage.get("total_cost", 0.0) + total_fmt_cost, 6
+        )
+        update_project(project_id, user_id, {"usage": project_usage})
+
     elapsed_ms = int((time.time() - reformat_start) * 1000)
     logger.info(
         f"[Reformat] Proyecto {project_id}: {reformatted}/{len(tasks)} partes formateadas "
-        f"en {elapsed_ms}ms",
+        f"en {elapsed_ms}ms (coste formatter: ${total_fmt_cost:.6f})",
         extra={
             "project_id": project_id,
             "reformatted": reformatted,
             "total": len(tasks),
             "elapsed_ms": elapsed_ms,
+            "formatter_cost": round(total_fmt_cost, 6),
         },
     )
-    return {"ok": True, "reformatted": reformatted}
+    return {"ok": True, "reformatted": reformatted, "formatter_cost": round(total_fmt_cost, 6)}
 
 
 @app.post("/api/projects/{project_id}/process")

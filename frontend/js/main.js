@@ -482,6 +482,11 @@ function bootstrap() {
     reformatBtn.addEventListener('click', () => handleReformat());
   }
 
+  // When network is restored, re-evaluate the reformat banner (it's hidden while offline).
+  window.addEventListener('explainer:online', () => {
+    if (state.currentProject) updateReformatBanner(state.currentProject);
+  });
+
   $('btn-back-to-projects').addEventListener('click', () => {
     if (state.isSharedView) {
       exitSharedView();

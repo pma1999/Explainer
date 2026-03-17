@@ -5,6 +5,7 @@
 import { state } from './state.js';
 import { $, show, hide, formatDate, statusLabel, formatIconForResource, escHtml, nl2p, toast } from './dom.js';
 import { api } from './api.js';
+import { loadBackupAsync, syncProjectsToBackup } from './storage.js';
 
 /**
  * Renders markdown text to HTML using marked.js.
@@ -454,6 +455,14 @@ export function updateUsageUI(usage) {
 
   if ($('proc-cost-badge')) $('proc-cost-badge').textContent = `$${cost.toFixed(4)}`;
 
+  // Formatter cost row (only visible when formatter has been applied)
+  const fmtCost = usage.formatter_cost || 0;
+  if ($('usage-formatter-cost')) {
+    $('usage-formatter-cost').textContent = `$${fmtCost.toFixed(4)}`;
+  }
+  const fmtRow = $('usage-formatter-row');
+  if (fmtRow) fmtRow.style.display = fmtCost > 0 ? '' : 'none';
+
   const card = $('project-usage-card');
   if (card) {
     card.classList.remove('pulse-highlight');
@@ -808,6 +817,12 @@ export function updateReformatBanner(project) {
     return;
   }
 
+  // The reformat action requires a live API connection — hide while offline.
+  if (!navigator.onLine) {
+    banner.classList.add('hidden');
+    return;
+  }
+
   const partes = project?.partes_contenido || {};
   const needsReformat = Object.values(partes).some(
     p =>
@@ -836,13 +851,23 @@ export async function handleReformat() {
   if (label) label.textContent = 'Reformateando…';
 
   try {
-    await api(`/api/projects/${state.currentProjectId}/reformat`, {
+    const reformatResult = await api(`/api/projects/${state.currentProjectId}/reformat`, {
       method: 'POST',
     });
 
     // Reload project with fresh formatted data
     const fresh = await api(`/api/projects/${state.currentProjectId}`);
     state.currentProject = fresh;
+
+    // Persist formatted content to IndexedDB for offline access
+    try {
+      const backup = await loadBackupAsync(state.user?.id);
+      const updatedProjects = backup.projects.map(p => p.id === fresh.id ? fresh : p);
+      await syncProjectsToBackup(updatedProjects, state.user?.id);
+    } catch (_) { /* non-fatal: cache update failure doesn't break the UI */ }
+
+    // Update usage display with new formatter cost
+    if (fresh.usage) updateUsageUI(fresh.usage);
 
     // Update banner (should disappear now)
     updateReformatBanner(fresh);
@@ -857,7 +882,9 @@ export async function handleReformat() {
       }
     }
 
-    toast('¡Formato mejorado aplicado correctamente!', 'success');
+    const fmtCost = reformatResult?.formatter_cost;
+    const costStr = fmtCost > 0 ? ` (coste: $${fmtCost.toFixed(4)})` : '';
+    toast(`¡Formato mejorado aplicado correctamente!${costStr}`, 'success');
   } catch (err) {
     toast(
       'Error al aplicar el formato: ' + (err?.message || 'Error desconocido'),
