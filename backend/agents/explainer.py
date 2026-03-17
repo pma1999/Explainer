@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
-import os
 import re
 import time
-import unicodedata
 from types import SimpleNamespace
 from typing import Any
 from backend.gemini_client import gemini_retry, generate_content_with_retry
@@ -33,77 +31,20 @@ REGLAS INNEGOCIABLES:
 5) La salida debe ser solo Markdown limpio (sin JSON, sin comentarios, sin explicación de lo que hiciste).
 </system_instruction>"""
 
-REFORMAT_LOG_CONTENT = os.environ.get("REFORMAT_LOG_CONTENT", "1") == "1"
-REFORMAT_LOG_PREVIEW_CHARS = int(os.environ.get("REFORMAT_LOG_PREVIEW_CHARS", "1200"))
-
-
-def _content_preview(text: str, limit: int = REFORMAT_LOG_PREVIEW_CHARS) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    if len(normalized) <= limit:
-        return normalized
-    return normalized[:limit] + "... [truncated]"
-
-
-def _deterministic_markdown_fallback(text: str) -> str:
-    """Always return a more readable markdown layout without changing lexical content."""
-    if not isinstance(text, str) or not text.strip():
-        return text
-
-    chunks: list[str] = []
-    for paragraph in text.split("\n\n"):
-        p = paragraph.strip()
-        if not p:
-            continue
-        p = re.sub(r"([.!?;:])\s+", r"\1\n\n", p)
-        chunks.append(p)
-
-    return "\n\n".join(chunks) if chunks else text
-
-
-def _canonicalize_for_preservation(text: str) -> str:
-    normalized = unicodedata.normalize("NFKC", (text or "").replace("\r\n", "\n").replace("\r", "\n"))
-    # Remove common markdown line markers.
-    lines: list[str] = []
-    for line in normalized.split("\n"):
-        line = re.sub(r"^\s{0,3}(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+|>\s+)", "", line)
-        lines.append(line)
-    normalized = "\n".join(lines)
-
-    # Remove common inline markdown markers and markdown escaping backslashes.
-    normalized = re.sub(r"(\*\*|__|~~|`|\*)", "", normalized)
-    normalized = re.sub(r"\\([\\`*_{}\[\]()#+\-.!])", r"\1", normalized)
-
-    # Normalize whitespace for lexical comparison.
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
-
 
 def _markdown_normalized_tokens(text: str) -> list[str]:
-    return re.findall(r"\S+", _canonicalize_for_preservation(text))
+    normalized_lines: list[str] = []
+    for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = re.sub(r"^\s{0,3}(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+|>\s+)", "", line)
+        normalized_lines.append(line)
+
+    normalized = "\n".join(normalized_lines)
+    normalized = re.sub(r"(\*\*|__|~~|`|\*)", "", normalized)
+    return re.findall(r"\S+", normalized)
 
 
 def _preserves_verbatim_content(original: str, formatted: str) -> bool:
     return _markdown_normalized_tokens(original) == _markdown_normalized_tokens(formatted)
-
-
-def _preservation_diagnostics(original: str, formatted: str) -> dict[str, Any]:
-    original_tokens = _markdown_normalized_tokens(original)
-    formatted_tokens = _markdown_normalized_tokens(formatted)
-    mismatch_index = -1
-    for idx, (a, b) in enumerate(zip(original_tokens, formatted_tokens)):
-        if a != b:
-            mismatch_index = idx
-            break
-    if mismatch_index == -1 and len(original_tokens) != len(formatted_tokens):
-        mismatch_index = min(len(original_tokens), len(formatted_tokens))
-
-    return {
-        "original_tokens": len(original_tokens),
-        "formatted_tokens": len(formatted_tokens),
-        "mismatch_index": mismatch_index,
-        "original_token_at_mismatch": original_tokens[mismatch_index] if 0 <= mismatch_index < len(original_tokens) else None,
-        "formatted_token_at_mismatch": formatted_tokens[mismatch_index] if 0 <= mismatch_index < len(formatted_tokens) else None,
-    }
 
 
 def _combine_usage_metadata(usage_items: list[Any]) -> Any:
@@ -127,78 +68,41 @@ def _format_subsection_markdown(api_key: str, text: str) -> tuple[str, Any]:
         return text, None
 
     client = genai.Client(api_key=api_key)
-
-    def _call_formatter(prompt_text: str, pass_name: str) -> tuple[str, Any]:
-        response = generate_content_with_retry(
-            client=client,
-            model=MARKDOWN_FORMATTER_MODEL,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=prompt_text)],
-                )
-            ],
-            config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(thinking_level="LOW"),
-                response_mime_type="text/plain",
-                system_instruction=[types.Part.from_text(text=FORMATTER_SYSTEM_INSTRUCTION)],
-            ),
-            max_retries=4,
-            operation_context={"agent": "explainer_markdown_formatter", "pass": pass_name},
-        )
-        return (response.text or "").strip(), response.usage_metadata
-
-    prompt = (
-        "Formatea este contenido a Markdown legible y atractivo, sin cambiar ni perder "
-        "absolutamente nada del texto:\n\n"
-        f"{text}"
+    response = generate_content_with_retry(
+        client=client,
+        model=MARKDOWN_FORMATTER_MODEL,
+        contents=[
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text=(
+                            "Formatea este contenido a Markdown legible y atractivo, sin cambiar ni perder "
+                            "absolutamente nada del texto:\n\n"
+                            f"{text}"
+                        )
+                    )
+                ],
+            )
+        ],
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="LOW"),
+            response_mime_type="text/plain",
+            system_instruction=[types.Part.from_text(text=FORMATTER_SYSTEM_INSTRUCTION)],
+        ),
+        max_retries=4,
+        operation_context={"agent": "explainer_markdown_formatter"},
     )
-    formatted, usage = _call_formatter(prompt, "primary")
-    used_fallback = False
-    retried = False
-    diagnostics: dict[str, Any] | None = None
 
-    if not formatted or not _preserves_verbatim_content(text, formatted):
-        retried = True
-        diagnostics = _preservation_diagnostics(text, formatted)
-        repair_prompt = (
-            "Tu salida anterior NO preservó el contenido exacto. Reintenta OBLIGATORIAMENTE sin cambiar "
-            "ninguna palabra, solo estructura markdown.\n\n"
-            "=== CONTENIDO ORIGINAL (fuente de verdad) ===\n"
-            f"{text}\n\n"
-            "=== TU SALIDA ANTERIOR (incorrecta) ===\n"
-            f"{formatted}"
-        )
-        repaired, usage_retry = _call_formatter(repair_prompt, "repair")
-        if usage and usage_retry:
-            usage = _combine_usage_metadata([usage, usage_retry])
-        elif usage_retry:
-            usage = usage_retry
-        formatted = repaired
+    formatted = (response.text or "").strip()
+    if not formatted:
+        logger.warning("Formatter devolvió contenido vacío; se mantiene texto original")
+        return text, response.usage_metadata
+    if not _preserves_verbatim_content(text, formatted):
+        logger.warning("Formatter alteró contenido; se mantiene texto original")
+        return text, response.usage_metadata
 
-    if not formatted or not _preserves_verbatim_content(text, formatted):
-        used_fallback = True
-        diagnostics = _preservation_diagnostics(text, formatted)
-        fallback = _deterministic_markdown_fallback(text)
-        if _preserves_verbatim_content(text, fallback):
-            formatted = fallback
-            logger.info("Formatter alteró/vació contenido; aplicado fallback determinista con preservación exacta")
-        else:
-            formatted = text
-            logger.error("Fallback determinista no preservó contenido; se mantiene texto original")
-
-    if used_fallback or REFORMAT_LOG_CONTENT:
-        payload = {
-            "model": MARKDOWN_FORMATTER_MODEL,
-            "retried": retried,
-            "fallback": used_fallback,
-            "diagnostics": diagnostics,
-            "original_preview": _content_preview(text),
-            "formatted_preview": _content_preview(formatted),
-        }
-        logger.info("Formatter markdown subsección procesada %s", json.dumps(payload, ensure_ascii=False))
-
-    return formatted, usage
+    return formatted, response.usage_metadata
 
 
 def _post_format_explainer_markdown(api_key: str, result: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
@@ -248,21 +152,8 @@ def _post_format_explainer_markdown(api_key: str, result: dict[str, Any]) -> tup
 
 def reformat_explainer_payload_markdown(api_key: str, explainer_payload: dict[str, Any]) -> tuple[dict[str, Any], Any]:
     """Public helper to retrofit markdown formatting for already-generated explainer payloads."""
-    start_time = time.time()
     formatted_payload, usage_items = _post_format_explainer_markdown(api_key, explainer_payload)
-    combined_usage = _combine_usage_metadata(usage_items)
-
-    logger.info(
-        "Reformateo markdown de payload explainer completado",
-        extra={
-            "formatter_calls": len(usage_items),
-            "formatter_model": MARKDOWN_FORMATTER_MODEL,
-            "duration_ms": int((time.time() - start_time) * 1000),
-            "total_tokens": getattr(combined_usage, "total_token_count", 0) if combined_usage else 0,
-        },
-    )
-
-    return formatted_payload, combined_usage
+    return formatted_payload, _combine_usage_metadata(usage_items)
 
 
 
@@ -607,11 +498,6 @@ def run_explainer(
         result, formatter_usage_items = _post_format_explainer_markdown(api_key, result)
         formatting_duration = (time.time() - formatting_start) * 1000
         combined_usage = _combine_usage_metadata([response.usage_metadata, *formatter_usage_items])
-        formatter_usage = _combine_usage_metadata(formatter_usage_items)
-        if combined_usage is not None:
-            setattr(combined_usage, "base_usage_metadata", response.usage_metadata)
-            setattr(combined_usage, "formatter_usage_metadata", formatter_usage)
-            setattr(combined_usage, "formatter_model", MARKDOWN_FORMATTER_MODEL)
 
         logger.info(
             "Post-formateo markdown de explainer completado",

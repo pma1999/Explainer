@@ -1158,14 +1158,8 @@ async def api_reformat_project_markdown(
     project_id: str,
 ):
     """Retrofit markdown formatting for explainer subsections in already-generated projects."""
-    logger.info(
-        "[Reformat] Solicitud de reformateo markdown recibida",
-        extra={"project_id": project_id, "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id},
-    )
-
     project = get_project(project_id, user_id)
     if not project:
-        logger.warning("[Reformat] Proyecto no encontrado", extra={"project_id": project_id})
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     if not has_user_api_key(user_id):
@@ -1194,7 +1188,6 @@ async def api_reformat_project_markdown(
             return part_key, formatted_payload, usage_meta
 
     tasks: list[asyncio.Task] = []
-    start_time = time.time()
     for part_key, part_data in partes_contenido.items():
         if not isinstance(part_data, dict):
             continue
@@ -1204,29 +1197,13 @@ async def api_reformat_project_markdown(
         tasks.append(asyncio.create_task(_format_part(part_key, explainer_payload)))
 
     if not tasks:
-        logger.warning("[Reformat] Proyecto sin explicaciones válidas para reformatear", extra={"project_id": project_id})
         raise HTTPException(status_code=400, detail="No hay explicaciones válidas para reformatear")
-
-    logger.info(
-        "[Reformat] Iniciando reformateo markdown de partes",
-        extra={"project_id": project_id, "parts_to_format": len(tasks), "concurrency": 4},
-    )
 
     for task in asyncio.as_completed(tasks):
         part_key, formatted_payload, usage_meta = await task
         partes_contenido[part_key]["explainer"] = formatted_payload
         formatted_parts += 1
         _accumulate_usage(formatter_usage, "gemini-3.1-flash-lite-preview", usage_meta)
-        logger.info(
-            "[Reformat] Parte reformateada",
-            extra={
-                "project_id": project_id,
-                "part_id": part_key,
-                "formatted_parts": formatted_parts,
-                "partial_tokens": formatter_usage.get("total_tokens", 0),
-                "partial_cost": round(float(formatter_usage.get("total_cost", 0.0)), 6),
-            },
-        )
 
     existing_usage = project.get("usage") or _empty_usage_snapshot()
     updated_usage = {
@@ -1242,17 +1219,6 @@ async def api_reformat_project_markdown(
     ]:
         updated_usage[usage_key] = int(updated_usage.get(usage_key, 0) or 0) + int(formatter_usage.get(usage_key, 0) or 0)
     updated_usage["total_cost"] = float(updated_usage.get("total_cost", 0.0) or 0.0) + float(formatter_usage.get("total_cost", 0.0) or 0.0)
-
-    logger.info(
-        "[Reformat] Reformateo markdown completado",
-        extra={
-            "project_id": project_id,
-            "formatted_parts": formatted_parts,
-            "usage_added_tokens": formatter_usage.get("total_tokens", 0),
-            "usage_added_cost": round(float(formatter_usage.get("total_cost", 0.0)), 6),
-            "duration_ms": int((time.time() - start_time) * 1000),
-        },
-    )
 
     updated = update_project(
         project_id,
