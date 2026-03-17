@@ -10,7 +10,7 @@
    Para forzar actualización: cambia CACHE_VERSION
    ============================================================ */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const STATIC_CACHE = `explainer-static-${CACHE_VERSION}`;
 const FONTS_CACHE = `explainer-fonts-${CACHE_VERSION}`;
 const CDN_CACHE = `explainer-cdn-${CACHE_VERSION}`;
@@ -110,7 +110,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 6. Same-origin static assets — cache-first
+  // 6. Navegación HTML — network-first (evita shell obsoleto en PWAs instaladas)
+  if (request.mode === 'navigate' || request.destination === 'document') {
+    event.respondWith(networkFirstWithCache(request, STATIC_CACHE));
+    return;
+  }
+
+  // 7. JS/CSS del mismo origen — network-first con fallback cache
+  //    para que nuevas funcionalidades no queden bloqueadas por caché vieja.
+  if (
+    url.origin === self.location.origin &&
+    (request.destination === 'script' ||
+      request.destination === 'style' ||
+      url.pathname.endsWith('.js') ||
+      url.pathname.endsWith('.css'))
+  ) {
+    event.respondWith(networkFirstWithCache(request, STATIC_CACHE));
+    return;
+  }
+
+  // 8. Resto de assets del mismo origen — cache-first
   if (url.origin === self.location.origin) {
     event.respondWith(cacheFirst(request));
     return;
