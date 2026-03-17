@@ -6,6 +6,7 @@ cryptography library conflict present in this environment.
 
 Coverage:
 - _format_text: success, empty input, API failure (fail-safe)
+  Now returns (text, usage_metadata | None) tuple.
 - format_explainer_content:
     - formats every prose field
     - does NOT touch heading/title fields
@@ -13,6 +14,7 @@ Coverage:
     - all tasks run in a single asyncio.gather (parallel)
     - partial failure: failed fields keep original text
     - edge cases: empty dict, missing optional fields, None values
+    - returns (dict, usage_summary) tuple with cost/token fields
 """
 
 from __future__ import annotations
@@ -70,9 +72,13 @@ from backend.agents.formatter import _format_text, format_explainer_content  # n
 # ---------------------------------------------------------------------------
 
 def _make_response(text: str) -> MagicMock:
-    """Fake Gemini response object with .text attribute."""
+    """Fake Gemini response object with .text and .usage_metadata attributes."""
     resp = MagicMock()
     resp.text = text
+    usage = MagicMock()
+    usage.prompt_token_count = 10
+    usage.candidates_token_count = 5
+    resp.usage_metadata = usage
     return resp
 
 
@@ -137,7 +143,10 @@ def _make_explainer_data(
 
 
 class TestFormatText:
-    """Unit tests for the internal _format_text coroutine."""
+    """Unit tests for the internal _format_text coroutine.
+
+    _format_text now returns (text, usage_metadata | None).
+    """
 
     @pytest.mark.asyncio
     async def test_success_returns_formatted_text(self):
@@ -147,9 +156,10 @@ class TestFormatText:
             return_value=_make_response("**Texto** formateado.")
         )
 
-        result = await _format_text(client, "Texto sin formato.", "Contexto")
+        text, usage = await _format_text(client, "Texto sin formato.", "Contexto")
 
-        assert result == "**Texto** formateado."
+        assert text == "**Texto** formateado."
+        assert usage is not None
         client.aio.models.generate_content.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -158,22 +168,25 @@ class TestFormatText:
         client = _make_client()
         client.aio.models.generate_content = AsyncMock()
 
-        result_empty = await _format_text(client, "")
-        result_whitespace = await _format_text(client, "   ")
+        text_empty, usage_empty = await _format_text(client, "")
+        text_ws, usage_ws = await _format_text(client, "   ")
 
-        assert result_empty == ""
-        assert result_whitespace == "   "
+        assert text_empty == ""
+        assert usage_empty is None
+        assert text_ws == "   "
+        assert usage_ws is None
         client.aio.models.generate_content.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_none_input_returns_none(self):
-        """None input returns None without calling the API."""
+        """None input returns (None, None) without calling the API."""
         client = _make_client()
         client.aio.models.generate_content = AsyncMock()
 
-        result = await _format_text(client, None)
+        text, usage = await _format_text(client, None)
 
-        assert result is None
+        assert text is None
+        assert usage is None
         client.aio.models.generate_content.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -185,9 +198,10 @@ class TestFormatText:
         )
 
         original = "Texto original sin formato."
-        result = await _format_text(client, original, "ctx")
+        text, usage = await _format_text(client, original, "ctx")
 
-        assert result == original
+        assert text == original
+        assert usage is None
 
     @pytest.mark.asyncio
     async def test_empty_api_response_returns_original_text(self):
@@ -198,9 +212,10 @@ class TestFormatText:
         )
 
         original = "Texto original."
-        result = await _format_text(client, original)
+        text, usage = await _format_text(client, original)
 
-        assert result == original
+        assert text == original
+        assert usage is None
 
     @pytest.mark.asyncio
     async def test_context_included_in_prompt(self):
@@ -214,7 +229,7 @@ class TestFormatText:
         client = _make_client()
         client.aio.models.generate_content = mock_generate
 
-        await _format_text(client, "Texto original.", "Mi contexto")
+        text, _ = await _format_text(client, "Texto original.", "Mi contexto")
 
         assert len(captured_contents) == 1
         assert "Mi contexto" in captured_contents[0]
@@ -227,7 +242,11 @@ class TestFormatText:
 
 
 class TestFormatExplainerContent:
-    """Integration-style tests for the public format_explainer_content function."""
+    """Integration-style tests for the public format_explainer_content function.
+
+    format_explainer_content now returns (dict, usage_summary) where
+    usage_summary has keys: input_tokens, output_tokens, total_tokens, cost.
+    """
 
     @pytest.mark.asyncio
     async def test_all_prose_fields_are_formatted(self):
@@ -238,11 +257,11 @@ class TestFormatExplainerContent:
         async def fake_format(client, text, context=""):
             nonlocal call_count
             call_count += 1
-            return text + " [FMT]"
+            return text + " [FMT]", None  # (text, usage_meta)
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, usage_summary = await format_explainer_content("fake-api-key", data)
 
         # 1 intro + 1 conclusion + 2 sec×intro + 2×3 subs + 2 cx = 12
         n_sections, n_subs, n_cx = 2, 3, 2
@@ -259,17 +278,35 @@ class TestFormatExplainerContent:
             assert cx["descripcion_conexion"].endswith(" [FMT]")
 
     @pytest.mark.asyncio
+    async def test_returns_usage_summary(self):
+        """format_explainer_content returns a usage_summary dict with cost fields."""
+        data = _make_explainer_data(n_sections=1, n_subsections=1, with_conexiones=False)
+
+        async def fake_format(client, text, context=""):
+            return text + " [FMT]", None
+
+        with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
+            with patch.object(_formatter_module, "genai"):
+                _, usage_summary = await format_explainer_content("fake-api-key", data)
+
+        assert "input_tokens" in usage_summary
+        assert "output_tokens" in usage_summary
+        assert "total_tokens" in usage_summary
+        assert "cost" in usage_summary
+        assert isinstance(usage_summary["cost"], float)
+
+    @pytest.mark.asyncio
     async def test_title_fields_are_not_modified(self):
         """Heading/title fields must never be sent through the formatter."""
         data = _make_explainer_data()
         original = copy.deepcopy(data)
 
         async def fake_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         for i, sec in enumerate(result["desarrollo"]):
             assert sec["titulo_seccion"] == original["desarrollo"][i]["titulo_seccion"]
@@ -286,11 +323,11 @@ class TestFormatExplainerContent:
         original_intro = data["introduccion"]
 
         async def fake_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         assert data["introduccion"] == original_intro
         assert result["introduccion"] != original_intro
@@ -308,11 +345,11 @@ class TestFormatExplainerContent:
             call_count += 1
             if call_count == 1:  # Fail first call (introduccion)
                 raise RuntimeError("Simulated API failure")
-            return text + " [OK]"
+            return text + " [OK]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=flaky_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         # First field (introduccion) failed → original preserved
         assert result["introduccion"] == original_intro
@@ -323,13 +360,15 @@ class TestFormatExplainerContent:
     async def test_empty_explainer_dict_returns_empty_copy(self):
         """An empty dict returns an empty dict without errors."""
         async def fake_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", {})
+                result, usage_summary = await format_explainer_content("fake-api-key", {})
 
         assert result == {}
+        assert usage_summary["total_tokens"] == 0
+        assert usage_summary["cost"] == 0.0
 
     @pytest.mark.asyncio
     async def test_missing_optional_fields_no_crash(self):
@@ -342,11 +381,11 @@ class TestFormatExplainerContent:
         }
 
         async def fake_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         assert result["introduccion"].endswith(" [FMT]")
         assert result["conclusion"].endswith(" [FMT]")
@@ -358,11 +397,11 @@ class TestFormatExplainerContent:
         data = _make_explainer_data(n_sections=3, n_subsections=4)
 
         async def fake_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         assert set(result.keys()) == set(data.keys())
         assert len(result["desarrollo"]) == len(data["desarrollo"])
@@ -385,7 +424,7 @@ class TestFormatExplainerContent:
             return await original_gather(*coros, **kwargs)
 
         async def fast_format(client, text, context=""):
-            return text + " [FMT]"
+            return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fast_format):
             with patch.object(_formatter_module, "genai"):
@@ -405,11 +444,11 @@ class TestFormatExplainerContent:
         original = copy.deepcopy(data)
 
         async def identity_format(client, text, context=""):
-            return text  # no change
+            return text, None  # no change
 
         with patch.object(_formatter_module, "_format_text", side_effect=identity_format):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, _ = await format_explainer_content("fake-api-key", data)
 
         assert result["introduccion"] == original["introduccion"]
         assert result["conclusion"] == original["conclusion"]
@@ -429,8 +468,42 @@ class TestFormatExplainerContent:
 
         with patch.object(_formatter_module, "_format_text", side_effect=always_fail):
             with patch.object(_formatter_module, "genai"):
-                result = await format_explainer_content("fake-api-key", data)
+                result, usage_summary = await format_explainer_content("fake-api-key", data)
 
         # All prose fields fall back to originals
         assert result["introduccion"] == original["introduccion"]
         assert result["conclusion"] == original["conclusion"]
+        # Usage summary reflects zero successful calls
+        assert usage_summary["total_tokens"] == 0
+        assert usage_summary["cost"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_usage_summary_aggregates_tokens(self):
+        """Token counts from individual _format_text calls are aggregated in usage_summary."""
+        data = _make_explainer_data(n_sections=1, n_subsections=1, with_conexiones=False)
+
+        def _make_usage(prompt: int, candidates: int) -> MagicMock:
+            u = MagicMock()
+            u.prompt_token_count = prompt
+            u.candidates_token_count = candidates
+            return u
+
+        call_num = 0
+
+        async def fake_format_with_usage(client, text, context=""):
+            nonlocal call_num
+            call_num += 1
+            # Return distinct token counts per call so we can verify aggregation
+            return text + " [FMT]", _make_usage(10 * call_num, 5 * call_num)
+
+        with patch.object(_formatter_module, "_format_text", side_effect=fake_format_with_usage):
+            with patch.object(_formatter_module, "genai"):
+                _, usage_summary = await format_explainer_content("fake-api-key", data)
+
+        # n_sections=1, n_subsections=1: 1 intro + 1 conclusion + 1 sec_intro + 1 sub = 4 calls
+        assert call_num == 4
+        # total_input = 10+20+30+40 = 100, total_output = 5+10+15+20 = 50
+        assert usage_summary["input_tokens"] == 100
+        assert usage_summary["output_tokens"] == 50
+        assert usage_summary["total_tokens"] == 150
+        assert usage_summary["cost"] > 0.0
