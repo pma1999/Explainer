@@ -6,6 +6,20 @@ import { state } from './state.js';
 import { $, show, hide, formatDate, statusLabel, formatIconForResource, escHtml, nl2p, toast } from './dom.js';
 import { api } from './api.js';
 
+/**
+ * Renders markdown text to HTML using marked.js.
+ * Falls back to nl2p() if marked is not yet loaded (e.g. CDN failure).
+ * Fully backward-compatible: plain text without markdown syntax renders
+ * correctly via marked.parse just as it did through nl2p.
+ */
+function renderMd(text) {
+  if (!text) return '';
+  if (typeof window.marked !== 'undefined') {
+    return window.marked.parse(String(text));
+  }
+  return nl2p(String(text));
+}
+
 let _saveViewState = null;
 export function setSaveViewStateCallback(fn) {
   _saveViewState = fn;
@@ -514,20 +528,20 @@ export function renderSidebarNav(project) {
 function renderExplainer(data) {
   let html = '';
   if (data.introduccion) {
-    html += `<div class="explainer-intro">${nl2p(data.introduccion)}</div>`;
+    html += `<div class="explainer-intro">${renderMd(data.introduccion)}</div>`;
   }
   if (data.desarrollo && data.desarrollo.length > 0) {
     data.desarrollo.forEach(section => {
       html += `<div class="explainer-section">`;
       html += `<h3 class="explainer-section-title">${escHtml(section.titulo_seccion)}</h3>`;
       if (section.explicacion_introductoria) {
-        html += `<p class="explainer-section-intro">${escHtml(section.explicacion_introductoria)}</p>`;
+        html += `<div class="explainer-section-intro">${renderMd(section.explicacion_introductoria)}</div>`;
       }
       if (section.subsecciones && section.subsecciones.length > 0) {
         section.subsecciones.forEach(sub => {
           html += `<div class="explainer-subsection">`;
           html += `<h4 class="explainer-subsection-title">${escHtml(sub.titulo_subseccion)}</h4>`;
-          html += `<div class="explainer-text">${nl2p(sub.explicacion_detallada)}</div>`;
+          html += `<div class="explainer-text">${renderMd(sub.explicacion_detallada)}</div>`;
           html += `</div>`;
         });
       }
@@ -538,7 +552,7 @@ function renderExplainer(data) {
     html += `
       <div class="explainer-conclusion">
         <div class="explainer-conclusion-label">Conclusión</div>
-        ${nl2p(data.conclusion)}
+        ${renderMd(data.conclusion)}
       </div>`;
   }
   if (data.conexiones_contextuales && data.conexiones_contextuales.length > 0) {
@@ -546,7 +560,7 @@ function renderExplainer(data) {
     data.conexiones_contextuales.forEach(cx => {
       html += `<div class="explainer-subsection">
         <h4 class="explainer-subsection-title">${escHtml(cx.seccion_temario_relacionada)}</h4>
-        <div class="explainer-text"><p>${escHtml(cx.descripcion_conexion)}</p></div>
+        <div class="explainer-text">${renderMd(cx.descripcion_conexion)}</div>
       </div>`;
     });
     html += `</div>`;
@@ -774,6 +788,86 @@ export function selectPart(partId) {
   saveViewState();
 }
 
+/**
+ * Shows or hides the reformat banner based on whether the project has
+ * any completed parts that haven't gone through the formatting pass yet.
+ * The banner is hidden for shared views (read-only).
+ */
+export function updateReformatBanner(project) {
+  const banner = $('reformat-banner');
+  if (!banner) return;
+
+  // Never show in shared / read-only view
+  if (state.isSharedView) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  if (project?.status !== 'completed') {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  const partes = project?.partes_contenido || {};
+  const needsReformat = Object.values(partes).some(
+    p =>
+      p.status === 'completed' &&
+      p.explainer &&
+      !p.formatter_version
+  );
+
+  banner.classList.toggle('hidden', !needsReformat);
+}
+
+/**
+ * Handles click on the "Mejorar formato" button.
+ * Calls POST /api/projects/{id}/reformat, waits for completion, then
+ * reloads project data and re-renders the active tab.
+ */
+export async function handleReformat() {
+  const btn = $('btn-reformat');
+  const label = $('btn-reformat-label');
+  if (!btn || !state.currentProjectId) return;
+
+  // Prevent double-click
+  if (btn.disabled) return;
+
+  btn.disabled = true;
+  if (label) label.textContent = 'Reformateando…';
+
+  try {
+    await api(`/api/projects/${state.currentProjectId}/reformat`, {
+      method: 'POST',
+    });
+
+    // Reload project with fresh formatted data
+    const fresh = await api(`/api/projects/${state.currentProjectId}`);
+    state.currentProject = fresh;
+
+    // Update banner (should disappear now)
+    updateReformatBanner(fresh);
+
+    // Re-render the active tab for the currently visible section
+    if (state.currentPartId) {
+      const contenido = fresh.partes_contenido?.[String(state.currentPartId)];
+      if (contenido) {
+        renderTab('explicacion', contenido);
+        renderTab('recorrido', contenido);
+        renderTab('recursos', contenido);
+      }
+    }
+
+    toast('¡Formato mejorado aplicado correctamente!', 'success');
+  } catch (err) {
+    toast(
+      'Error al aplicar el formato: ' + (err?.message || 'Error desconocido'),
+      'error'
+    );
+    btn.disabled = false;
+    if (label) label.textContent = 'Mejorar formato';
+  }
+}
+
 export function renderProjectView(project) {
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
@@ -785,6 +879,7 @@ export function renderProjectView(project) {
   }
   updateMobileHeader();
   applySharedViewVisibility();
+  updateReformatBanner(project);
 
   const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(project.status);
 

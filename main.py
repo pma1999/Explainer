@@ -49,6 +49,7 @@ from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
+from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
@@ -475,6 +476,41 @@ def _build_web_segmentation_rejection_message(evaluation: dict[str, object]) -> 
     return message
 
 
+async def _format_and_finalize_part(
+    project_id: str,
+    user_id: str,
+    api_key: str,
+    part_id: int,
+    explainer_data: dict,
+    partes_contenido: dict,
+) -> None:
+    """Background task: format explainer content then persist and notify.
+
+    Fires independently of other sections so that the main processing loop can
+    start the next section's agents without waiting for formatting to finish.
+    The `part_completed` SSE event is only sent once formatting is done.
+    """
+    fmt_start = time.time()
+    try:
+        if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict):
+            formatted = await format_explainer_content(api_key, explainer_data)
+            partes_contenido[str(part_id)]["explainer"] = formatted
+            logger.info(
+                f"[Format] Parte {part_id} formateada en {int((time.time() - fmt_start) * 1000)}ms",
+                extra={"part_id": part_id, "elapsed_ms": int((time.time() - fmt_start) * 1000)},
+            )
+    except Exception as exc:
+        logger.warning(
+            f"[Format] Error inesperado al formatear parte {part_id}, se conserva el original: {exc}",
+            extra={"part_id": part_id, "error": str(exc)[:300]},
+        )
+    finally:
+        partes_contenido[str(part_id)]["formatter_version"] = 1
+        partes_contenido[str(part_id)]["status"] = "completed"
+        update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+        await send_event(project_id, {"type": "part_completed", "part_id": part_id})
+
+
 async def _process_project(project_id: str, user_id: str, model_name: str = "gemini-3-flash-preview") -> None:
     process_start_time = time.time()
     pdf_temp_path = None
@@ -814,6 +850,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
 
         # Procesar cada parte
         logger.info(f"[Process] Comenzando procesamiento de {num_partes} partes")
+        formatter_tasks: list[asyncio.Task] = []
 
         for parte in segmentation["partes"]:
             part_id = parte["numero"]
@@ -971,21 +1008,43 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     partes_contenido[str(part_id)][agent_name] = result
                 await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": agent_name})
 
-            part_duration = (time.time() - part_start) * 1000
+            agents_elapsed_ms = int((time.time() - part_start) * 1000)
             logger.info(
-                f"[Process] Parte {part_id} completada en {int(part_duration)}ms (agentes: {int(agents_duration)}ms)",
+                f"[Process] Agentes de parte {part_id} completados en {agents_elapsed_ms}ms "
+                f"(agentes: {int(agents_duration)}ms) — iniciando formatter en background",
                 extra={
                     "part_id": part_id,
-                    "part_duration_ms": int(part_duration),
+                    "agents_elapsed_ms": agents_elapsed_ms,
                     "agents_duration_ms": int(agents_duration),
                     "cumulative_tokens": cumulative_usage["total_tokens"],
                     "cumulative_cost": round(cumulative_usage["total_cost"], 6),
                 }
             )
 
-            partes_contenido[str(part_id)]["status"] = "completed"
-            update_project(project_id, user_id, {"partes_contenido": partes_contenido})
-            await send_event(project_id, {"type": "part_completed", "part_id": part_id})
+            # Fire the formatter as a background task so the next section's agents
+            # can start immediately without waiting for this formatting pass.
+            # The formatter task itself sets status=completed, saves to Supabase,
+            # and sends the part_completed SSE event when it finishes.
+            formatter_task = asyncio.create_task(
+                _format_and_finalize_part(
+                    project_id,
+                    user_id,
+                    api_key,
+                    part_id,
+                    explainer_data,
+                    partes_contenido,
+                )
+            )
+            formatter_tasks.append(formatter_task)
+
+        # Esperar a que todos los formatters terminen antes de marcar el proyecto como completado.
+        # Los formatter_tasks ya se están ejecutando en paralelo con los agentes de secciones
+        # posteriores; aquí solo esperamos a que los últimos en terminar concluyan.
+        if formatter_tasks:
+            logger.info(
+                f"[Process] Esperando a {len(formatter_tasks)} formatter task(s) pendientes…"
+            )
+            await asyncio.gather(*formatter_tasks, return_exceptions=True)
 
         # Marcar proyecto como completado
         total_duration = (time.time() - process_start_time) * 1000
@@ -1092,6 +1151,104 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     logger.warning(f"[Process] No se pudo eliminar archivo temporal {temp_path}: {e}")
         await sse_manager.end_stream(project_id)
         logger.debug(f"[Process] Stream SSE cerrado para proyecto: {project_id}")
+
+
+@app.post("/api/projects/{project_id}/reformat")
+async def api_reformat_project(
+    project_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> dict:
+    """Apply the markdown formatting pass to all unformatted completed parts.
+
+    This endpoint is idempotent: parts that already have `formatter_version`
+    set are skipped.  All eligible parts are formatted in a single parallel
+    batch (asyncio.gather), so total latency is roughly equal to the time
+    needed to format the largest single section.
+    """
+    project = get_project(project_id, user_id, include_internal=True)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    if project["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail="El proyecto debe estar completado para poder reformatear.",
+        )
+
+    api_key = get_user_api_key(user_id)
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay API key de Gemini configurada. Configúrala en Ajustes.",
+        )
+
+    partes_contenido: dict = dict(project.get("partes_contenido") or {})
+
+    async def _fmt_part(pid: str, part_data: dict) -> tuple[str, dict]:
+        explainer = part_data.get("explainer")
+        if (
+            explainer
+            and isinstance(explainer, dict)
+            and "error" not in explainer
+        ):
+            formatted = await format_explainer_content(api_key, explainer)
+            return pid, {**part_data, "explainer": formatted, "formatter_version": 1}
+        # No explainer or explainer errored — just mark version so we skip next time.
+        return pid, {**part_data, "formatter_version": 1}
+
+    # Only process parts that are completed, have explainer data, and haven't
+    # been formatted yet.
+    tasks = [
+        _fmt_part(pid, dict(pdata))
+        for pid, pdata in partes_contenido.items()
+        if (
+            pdata.get("status") == "completed"
+            and pdata.get("explainer")
+            and not pdata.get("formatter_version")
+        )
+    ]
+
+    if not tasks:
+        logger.info(
+            f"[Reformat] Proyecto {project_id}: sin partes pendientes de formateo.",
+            extra={"project_id": project_id},
+        )
+        return {"ok": True, "reformatted": 0}
+
+    logger.info(
+        f"[Reformat] Proyecto {project_id}: reformateando {len(tasks)} parte(s) en paralelo…",
+        extra={"project_id": project_id, "total_parts": len(tasks)},
+    )
+    reformat_start = time.time()
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    reformatted = 0
+    for r in results:
+        if isinstance(r, Exception):
+            logger.warning(
+                f"[Reformat] Error en una parte: {r}",
+                extra={"error": str(r)[:300]},
+            )
+            continue
+        pid, updated_part = r
+        partes_contenido[pid] = updated_part
+        reformatted += 1
+
+    if reformatted > 0:
+        update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+
+    elapsed_ms = int((time.time() - reformat_start) * 1000)
+    logger.info(
+        f"[Reformat] Proyecto {project_id}: {reformatted}/{len(tasks)} partes formateadas "
+        f"en {elapsed_ms}ms",
+        extra={
+            "project_id": project_id,
+            "reformatted": reformatted,
+            "total": len(tasks),
+            "elapsed_ms": elapsed_ms,
+        },
+    )
+    return {"ok": True, "reformatted": reformatted}
 
 
 @app.post("/api/projects/{project_id}/process")
