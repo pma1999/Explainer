@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner } from './projectView.js';
 import { initPWA } from './pwa.js';
 
 function saveViewState() {
@@ -476,6 +476,11 @@ function bootstrap() {
     if (file) importProjectsBackup(file);
     e.target.value = '';
   });
+
+  const reformatBtn = $('btn-reformat');
+  if (reformatBtn) {
+    reformatBtn.addEventListener('click', () => handleReformat());
+  }
 
   $('btn-back-to-projects').addEventListener('click', () => {
     if (state.isSharedView) {

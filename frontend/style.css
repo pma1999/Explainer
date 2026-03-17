@@ -1528,6 +1528,117 @@ body {
   display: none;
 }
 
+/* Reformat Banner */
+.reformat-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  margin: 0 0 0 0;
+  background: color-mix(in srgb, var(--accent, #7c6fcd) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent, #7c6fcd) 20%, transparent);
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.reformat-banner.hidden {
+  display: none;
+}
+
+.reformat-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.reformat-banner-icon {
+  flex-shrink: 0;
+  color: var(--accent, #7c6fcd);
+  opacity: 0.85;
+}
+
+.reformat-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.reformat-banner-text strong {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-primary, #e2e8f0);
+  white-space: nowrap;
+}
+
+.reformat-banner-text span {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reformat-banner-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent, #7c6fcd) 40%, transparent);
+  background: color-mix(in srgb, var(--accent, #7c6fcd) 12%, transparent);
+  color: var(--accent, #7c6fcd);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.reformat-banner-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent, #7c6fcd) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #7c6fcd) 60%, transparent);
+}
+
+.reformat-banner-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Also style rendered markdown inside explainer panels */
+.explainer-text p,
+.explainer-section-intro p,
+.explainer-intro p,
+.explainer-conclusion p {
+  margin-bottom: 0.65em;
+}
+
+.explainer-text ul,
+.explainer-text ol,
+.explainer-section-intro ul,
+.explainer-section-intro ol {
+  margin: 0.5em 0 0.65em 1.3em;
+}
+
+.explainer-text li,
+.explainer-section-intro li {
+  margin-bottom: 0.25em;
+}
+
+.explainer-text strong,
+.explainer-section-intro strong {
+  font-weight: 600;
+}
+
+.explainer-text code,
+.explainer-section-intro code {
+  font-family: monospace;
+  font-size: 0.88em;
+  background: rgba(255,255,255,0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 /* Reading Toolbar */
 .reading-toolbar {
   display: flex;
