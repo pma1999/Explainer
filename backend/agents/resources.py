@@ -6,6 +6,7 @@ import time
 from typing import Any
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML
 
 from google import genai
 from google.genai import types
@@ -47,7 +48,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - **Pragmatismo pedagógico**: Recomiendas lo que es útil, no lo que es oscuro o difícil de encontrar.
   - **Ética de la información**: Respetas la autoría y la integridad de las fuentes.
   </role>
-
+""" + CASTELLANO_ESPANIA_RESOURCES_XML + """
   <objectives>
   **Tu objetivo es producir una selección curada de recursos que logre:**
 

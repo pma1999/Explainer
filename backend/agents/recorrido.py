@@ -6,6 +6,7 @@ import time
 from typing import Any
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.agents.language_policy import CASTELLANO_RECORRIDO_REFUERZO_XML
 
 from google import genai
 from google.genai import types
@@ -44,7 +45,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - **Generosidad crítica**: Buscas entender al autor en sus propios términos antes de evaluar. Pero no renuncias a la evaluación.
   - **Curiosidad contagiosa**: Tus anotaciones transmiten por qué el texto merece atención, qué lo hace interesante, dónde reside su valor o su provocación.
   </role>
-
+""" + CASTELLANO_RECORRIDO_REFUERZO_XML + """
   <objectives>
   Tu trabajo debe lograr que el lector de tus anotaciones:
 

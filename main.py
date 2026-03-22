@@ -5,7 +5,8 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated, AsyncGenerator
+from dataclasses import dataclass
+from typing import Annotated, AsyncGenerator, Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -45,7 +46,13 @@ from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
-from backend.agents.segmentador import run_segmentador
+from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
+from backend.segmentation_tema_coverage import (
+    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
+    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
+    build_tema_coverage_retry_suffix,
+    validate_tema_partition,
+)
 from backend.agents.explainer import run_explainer
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
@@ -389,37 +396,301 @@ def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
     return "\n".join(toc_lines)
 
 
-def _build_pdf_agent_prompt(table_of_contents: str, identificacion: str, part_id: int, num_partes: int) -> str:
+def _build_youtube_table_of_contents(segmentation: dict, num_partes: int) -> str:
+    toc_lines = ["TABLA DE CONTENIDOS DEL MATERIAL (fuente audiovisual):"]
+    for p in segmentation["partes"]:
+        toc_lines.append(f"  Parte {p['numero']}/{num_partes}: \"{p['titulo']}\"")
+    return "\n".join(toc_lines)
+
+
+def _optional_int(parte: dict, key: str) -> int | None:
+    v = parte.get(key)
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _strip_str(value: object | None) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+@dataclass(frozen=True, slots=True)
+class PartHandoffContext:
+    """Structured segmentador output passed to downstream agents for coverage and continuity."""
+
+    titulo: str
+    resumen_alcance: str
+    temas_cubiertos: tuple[str, ...]
+    intent_usuario: str | None
+    continuidad_previa: str | None
+    vision_global_division: str | None
+
+
+def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
+    raw = parte.get("temas_cubiertos")
+    if not isinstance(raw, list):
+        return ()
+    out: list[str] = []
+    for item in raw:
+        s = str(item).strip()
+        if s:
+            out.append(s)
+    return tuple(out)
+
+
+def _part_handoff_base(
+    parte: dict,
+    *,
+    intent_usuario: str | None,
+    continuidad_previa: str | None,
+    vision_global_division: str | None,
+) -> PartHandoffContext:
+    num = parte.get("numero")
+    titulo = str(parte.get("titulo") or "").strip() or (f"Parte {num}" if num is not None else "Parte")
+    resumen = str(parte.get("contenido") or "").strip()
+    return PartHandoffContext(
+        titulo=titulo,
+        resumen_alcance=resumen,
+        temas_cubiertos=_normalized_temas_cubiertos(parte),
+        intent_usuario=intent_usuario,
+        continuidad_previa=continuidad_previa,
+        vision_global_division=vision_global_division,
+    )
+
+
+def _continuity_block_from_previous_part(prev: dict) -> str:
+    """Use segmentador summaries only (no explainer output required)."""
+    lines: list[str] = []
+    t = str(prev.get("titulo") or "").strip()
+    if t:
+        lines.append(f"Módulo anterior en el temario: «{t}».")
+    body = str(prev.get("contenido") or "").strip()
+    if body:
+        lines.append("Alcance que el segmentador asignó a ese módulo (orientación, no sustituye al texto fuente):")
+        lines.append(body)
+    temas = _normalized_temas_cubiertos(prev)
+    if temas:
+        lines.append(
+            "Temas que el segmentador cerró en ese módulo (para enlazar ideas y prerequisitos; no reexpliques ese bloque aquí):"
+        )
+        for i, tema in enumerate(temas, start=1):
+            lines.append(f"  {i}. {tema}")
+    return "\n".join(lines) if lines else ""
+
+
+def _find_parte_by_numero(partes: list[dict], numero: int) -> dict | None:
+    for p in partes:
+        if p.get("numero") == numero:
+            return p
+    return None
+
+
+def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes: int) -> str:
+    blocks: list[str] = []
+    blocks.append("CONTEXTO DEL SEGMENTADOR Y DEL USUARIO")
+    blocks.append(
+        "Lo siguiente resume decisiones ya tomadas sobre este documento. "
+        "La fuente de verdad sigue siendo el archivo adjunto y la identificación textual; "
+        "usa este bloque como contrato de cobertura y hilo conductor."
+    )
+
+    if ctx.intent_usuario:
+        blocks.append("")
+        blocks.append("Preferencias o instrucciones del usuario (aplicar siempre que sean compatibles con el texto fuente):")
+        blocks.append(ctx.intent_usuario)
+
+    if ctx.vision_global_division:
+        blocks.append("")
+        blocks.append("Visión global de la división didáctica (segmentador):")
+        blocks.append(ctx.vision_global_division)
+
+    if ctx.continuidad_previa:
+        blocks.append("")
+        blocks.append(f"Continuidad respecto a la parte {part_id - 1}/{num_partes}:")
+        blocks.append(ctx.continuidad_previa)
+
+    blocks.append("")
+    blocks.append(f"Parte actual — título asignado por el segmentador: «{ctx.titulo}».")
+
+    if ctx.resumen_alcance:
+        blocks.append("")
+        blocks.append("Alcance declarado de esta parte (segmentador):")
+        blocks.append(ctx.resumen_alcance)
+
+    blocks.append("")
+    blocks.append(
+        "CONTRATO DE COBERTURA — cada ítem debe quedar desarrollado en el cuerpo de la explicación "
+        "(no basta mencionarlo en listas ni en la introducción):"
+    )
+    if ctx.temas_cubiertos:
+        for i, tema in enumerate(ctx.temas_cubiertos, start=1):
+            blocks.append(f"  {i}. {tema}")
+    else:
+        blocks.append(
+            "  (El segmentador no devolvió lista explícita de temas_cubiertos; "
+            "deriva el inventario exhaustivo del texto adjunto y de la identificación.)"
+        )
+
+    return "\n".join(blocks)
+
+
+def _pdf_scope_instructions(
+    *,
+    mode: Literal["subpdf_buffered", "full_document"],
+    part_id: int,
+    num_partes: int,
+    nucleo_inicio: int | None,
+    nucleo_fin: int | None,
+) -> str:
+    if mode == "subpdf_buffered":
+        if nucleo_inicio is not None and nucleo_fin is not None:
+            return (
+                "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
+                "El archivo recorta el documento original e incluye el NÚCLEO de esta parte "
+                f"(páginas {nucleo_inicio}–{nucleo_fin}, según las marcas «— Página X / N —» de la segmentación) "
+                "más hasta una página de contexto a cada lado (buffer), para no perder párrafos cortados entre módulos.\n\n"
+                "- Páginas NÚCLEO: son el objetivo principal de estudio de esta parte. "
+                "Todo contenido examinable del módulo debe basarse principalmente en este intervalo.\n"
+                "- Páginas solo de CONTEXTO (buffer): úsalas solo para recuperar enunciados partidos en el corte, "
+                "coherencia entre páginas colindantes o referencias inmediatas. "
+                "No las desarrolles como bloques didácticos independientes, no les asignes peso similar al núcleo "
+                "y no inventes exigencias de estudio basadas únicamente en el buffer.\n\n"
+                f"Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo según el contrato de cobertura; "
+                "el temario de otras partes no es objeto de este procesamiento."
+            )
+        return (
+            "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
+            "El archivo es un recorte local del documento con hasta una página de contexto a cada lado del tramo "
+            "principal de esta parte (buffer), para no perder párrafos cortados entre módulos.\n\n"
+            "- NÚCLEO: delimita el bloque principal usando la identificación de la parte y el contrato de cobertura; "
+            "ahí reside el objetivo de estudio.\n"
+            "- CONTEXTO (buffer): solo continuidad en los bordes; no lo desarrolles como temario independiente "
+            "ni bases de estudio aisladas.\n\n"
+            f"Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo; el resto del documento completo "
+            "no es objeto de este procesamiento."
+        )
+    nucleus_hint = ""
+    if nucleo_inicio is not None and nucleo_fin is not None:
+        nucleus_hint = (
+            f" El segmentador sitúa el núcleo de esta parte en las páginas {nucleo_inicio}–{nucleo_fin} "
+            "(marcas visibles en el PDF)."
+        )
+    return (
+        "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
+        "El archivo contiene el documento completo."
+        f"{nucleus_hint}\n\n"
+        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes} según el contrato de cobertura y la identificación. "
+        "No sustituyas el material de otras partes por contenido de este módulo. "
+        "Si necesitas enlaces mínimos con el resto del temario, limítalos al campo conexiones_contextuales o a menciones breves."
+    )
+
+
+def _text_scope_instructions(part_id: int, num_partes: int, bloque_inicio: int, bloque_fin: int) -> str:
+    return (
+        "ALCANCE DEL TEXTO ADJUNTO\n"
+        f"El archivo incluye exactamente los bloques {bloque_inicio}–{bloque_fin} de la segmentación "
+        "(sin páginas de buffer: el corte es preciso). "
+        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes}; "
+        "la tabla de contenidos aporta panorama global, pero no añadas temario fuera de los bloques adjuntos."
+    )
+
+
+def _youtube_scope_instructions(part_id: int, num_partes: int) -> str:
+    return (
+        "ALCANCE DE LA FUENTE ADJUNTA\n"
+        f"Procesa únicamente la Parte {part_id}/{num_partes} según el contrato de cobertura y la identificación. "
+        "La tabla de contenidos sitúa el módulo dentro del conjunto del material."
+    )
+
+
+def _build_pdf_agent_prompt(
+    table_of_contents: str,
+    identificacion: str,
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+    *,
+    pdf_scope_mode: Literal["subpdf_buffered", "full_document"],
+    nucleo_inicio: int | None,
+    nucleo_fin: int | None,
+) -> str:
     toc_with_marker = table_of_contents.replace(
         f"  Parte {part_id}/{num_partes}:",
-        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
+    )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    scope = _pdf_scope_instructions(
+        mode=pdf_scope_mode,
+        part_id=part_id,
+        num_partes=num_partes,
+        nucleo_inicio=nucleo_inicio,
+        nucleo_fin=nucleo_fin,
     )
     return (
         f"{toc_with_marker}\n\n"
         f"---\n\n"
-        f"INSTRUCCIONES PARA ESTA PARTE:\n"
-        f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
-        f"El PDF adjunto contiene las páginas relevantes para esta parte. "
-        f"La tabla de contenidos anterior muestra la estructura completa del documento "
-        f"para que tengas contexto de dónde se sitúa esta parte.\n\n"
-        f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA PARTE (texto del segmentador):\n{identificacion}"
     )
 
 
-def _build_text_agent_prompt(table_of_contents: str, identificacion: str, part_id: int, num_partes: int) -> str:
+def _build_text_agent_prompt(
+    table_of_contents: str,
+    identificacion: str,
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+    *,
+    bloque_inicio: int,
+    bloque_fin: int,
+) -> str:
     toc_with_marker = table_of_contents.replace(
         f"  Parte {part_id}/{num_partes}:",
-        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:"
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
     )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    scope = _text_scope_instructions(part_id, num_partes, bloque_inicio, bloque_fin)
     return (
         f"{toc_with_marker}\n\n"
         f"---\n\n"
-        f"INSTRUCCIONES PARA ESTA PARTE:\n"
-        f"Procesa ÚNICAMENTE la Parte {part_id}/{num_partes}. "
-        f"El archivo de texto adjunto contiene exclusivamente los bloques relevantes de esta parte. "
-        f"La tabla de contenidos anterior muestra la estructura completa del texto para que "
-        f"tengas contexto global sin salirte del tramo adjunto.\n\n"
-        f"IDENTIFICACIÓN DE LA PARTE:\n{identificacion}"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA PARTE (texto del segmentador):\n{identificacion}"
+    )
+
+
+def _build_youtube_agent_prompt(
+    table_of_contents: str,
+    identificacion: str,
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+) -> str:
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
+    )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    scope = _youtube_scope_instructions(part_id, num_partes)
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA PARTE (texto del segmentador):\n{identificacion}"
     )
 
 
@@ -764,22 +1035,99 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
             await send_event(project_id, {"type": "segmenting"})
 
-        # Fase de segmentación
+        # Fase de segmentación (con validación MECE de temas y reintentos)
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
-        segmentation, usage_meta = await asyncio.to_thread(
-            run_segmentador,
-            api_key,
-            file_uri,
-            project["description"],
-            model_name,
-            source_mime_type,
-            source_kind,
-        )
-        seg_duration = (time.time() - seg_start) * 1000
+        segmentation: dict | None = None
+        tema_report = None
+        for seg_attempt in range(MAX_SEGMENTATION_COVERAGE_ATTEMPTS):
+            if seg_attempt == 0:
+                seg_description = project["description"]
+            else:
+                assert segmentation is not None and tema_report is not None
+                retry_suffix = build_tema_coverage_retry_suffix(
+                    attempt=seg_attempt,
+                    segmentation=segmentation,
+                    report=tema_report,
+                )
+                base_eff = project["description"].strip() or DEFAULT_DESCRIPTION
+                seg_description = f"{base_eff}\n\n{retry_suffix}"
 
-        _update_usage(usage_meta, phase="segmentation")
-        await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+            segmentation, usage_meta = await asyncio.to_thread(
+                run_segmentador,
+                api_key,
+                file_uri,
+                seg_description,
+                model_name,
+                source_mime_type,
+                source_kind,
+            )
+            phase = "segmentation" if seg_attempt == 0 else f"segmentation_retry_{seg_attempt}"
+            _update_usage(usage_meta, phase=phase)
+            await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+
+            tema_report = validate_tema_partition(segmentation)
+            if tema_report.is_valid:
+                if tema_report.empty_temas_inventory:
+                    logger.warning(
+                        "[Process] Segmentación sin temas_identificados; se omite validación MECE de temas",
+                        extra={"project_id": project_id, "seg_attempt": seg_attempt},
+                    )
+                if seg_attempt > 0:
+                    logger.info(
+                        "[Process] Segmentación corregida tras reintento MECE de temas",
+                        extra={"project_id": project_id, "seg_attempt": seg_attempt},
+                    )
+                break
+
+            logger.warning(
+                "[Process] Validación MECE de temas fallida; se reintentará el segmentador si quedan intentos",
+                extra={
+                    "project_id": project_id,
+                    "seg_attempt": seg_attempt,
+                    "missing_count": len(tema_report.missing),
+                    "duplicates_count": len(tema_report.duplicates),
+                    "orphans_count": len(tema_report.orphans),
+                    "structural_count": len(tema_report.structural_errors),
+                },
+            )
+        else:
+            assert segmentation is not None and tema_report is not None
+            detail_bits = []
+            if tema_report.missing:
+                detail_bits.append(f"{len(tema_report.missing)} tema(s) sin asignar")
+            if tema_report.duplicates:
+                detail_bits.append(f"{len(tema_report.duplicates)} tema(s) duplicados entre partes")
+            if tema_report.orphans:
+                detail_bits.append(f"{len(tema_report.orphans)} entrada(s) huérfana(s) en temas_cubiertos")
+            if tema_report.structural_errors:
+                detail_bits.append(f"{len(tema_report.structural_errors)} error(es) de forma")
+            detail = "; ".join(detail_bits) if detail_bits else "inconsistencias en temas_cubiertos"
+            logger.error(
+                "[Process] Segmentación abortada tras agotar reintentos MECE",
+                extra={
+                    "project_id": project_id,
+                    "attempts": MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
+                    "detail": detail,
+                },
+            )
+            update_project(
+                project_id,
+                user_id,
+                {
+                    "segmentation": segmentation,
+                    "partes_contenido": {},
+                    "status": "error",
+                    "error_message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
+                },
+            )
+            await send_event(
+                project_id,
+                {"type": "error", "message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE},
+            )
+            return
+
+        seg_duration = (time.time() - seg_start) * 1000
 
         num_partes = len(segmentation.get("partes", []))
         temas_identificados = len(segmentation.get("temas_identificados", []))
@@ -794,6 +1142,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
 
         is_pdf_source = source_type == "pdf"
         is_text_source = source_type == "web"
+        is_youtube_source = source_type == "youtube"
 
         if is_text_source:
             text_source_evaluation = _parse_text_source_evaluation(segmentation)
@@ -855,14 +1204,43 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 f"[Process] Tabla de contenidos textual generada ({num_partes} entradas)",
                 extra={"toc_preview": table_of_contents[:300]}
             )
+        elif is_youtube_source:
+            table_of_contents = _build_youtube_table_of_contents(segmentation, num_partes)
+            logger.info(
+                f"[Process] Tabla de contenidos YouTube generada ({num_partes} entradas)",
+                extra={"toc_preview": table_of_contents[:300]}
+            )
+
+        partes_segmentadas: list[dict] = segmentation["partes"]
+        user_intent = _strip_str(project.get("description"))
+        consideraciones = _strip_str(segmentation.get("consideraciones_estudiante"))
 
         # Procesar cada parte
         logger.info(f"[Process] Comenzando procesamiento de {num_partes} partes")
         formatter_tasks: list[asyncio.Task] = []
 
-        for parte in segmentation["partes"]:
+        for parte in partes_segmentadas:
             part_id = parte["numero"]
             identificacion = parte["identificacion"]
+
+            try:
+                part_index = int(part_id)
+            except (TypeError, ValueError):
+                part_index = -1
+
+            continuidad_previa: str | None = None
+            if part_index > 1:
+                prev_parte = _find_parte_by_numero(partes_segmentadas, part_index - 1)
+                if prev_parte:
+                    continuidad_previa = _strip_str(_continuity_block_from_previous_part(prev_parte))
+
+            vision_global_division = consideraciones if part_index == 1 else None
+            handoff = _part_handoff_base(
+                parte,
+                intent_usuario=user_intent,
+                continuidad_previa=continuidad_previa,
+                vision_global_division=vision_global_division,
+            )
 
             # Establecer contexto para esta parte
             with LogContext(project_id=project_id, user_id=user_id, part_id=part_id):
@@ -889,9 +1267,13 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             agent_prompt = identificacion
             segment_temp_path = None
 
+            nucleo_pi = _optional_int(parte, "pagina_inicio")
+            nucleo_pf = _optional_int(parte, "pagina_fin")
+
             if is_pdf_source and numbered_pdf_path:
                 pagina_inicio = parte.get("pagina_inicio")
                 pagina_fin = parte.get("pagina_fin")
+                subpdf_buffered_ok = False
 
                 if pagina_inicio and pagina_fin:
                     try:
@@ -914,6 +1296,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                         seg_upload_duration = (time.time() - seg_upload_start) * 1000
                         agent_file_uri = segment_uploaded.uri
                         agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
+                        subpdf_buffered_ok = True
 
                         logger.info(
                             f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
@@ -934,7 +1317,19 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                         f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
                     )
 
-                agent_prompt = _build_pdf_agent_prompt(table_of_contents, identificacion, part_id, num_partes)
+                pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = (
+                    "subpdf_buffered" if subpdf_buffered_ok else "full_document"
+                )
+                agent_prompt = _build_pdf_agent_prompt(
+                    table_of_contents,
+                    identificacion,
+                    part_id,
+                    num_partes,
+                    handoff,
+                    pdf_scope_mode=pdf_scope_mode,
+                    nucleo_inicio=nucleo_pi,
+                    nucleo_fin=nucleo_pf,
+                )
             elif is_text_source:
                 bloque_inicio = parte.get("bloque_inicio")
                 bloque_fin = parte.get("bloque_fin")
@@ -972,7 +1367,23 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     }
                 )
 
-                agent_prompt = _build_text_agent_prompt(table_of_contents, identificacion, part_id, num_partes)
+                agent_prompt = _build_text_agent_prompt(
+                    table_of_contents,
+                    identificacion,
+                    part_id,
+                    num_partes,
+                    handoff,
+                    bloque_inicio=int(bloque_inicio),
+                    bloque_fin=int(bloque_fin),
+                )
+            elif is_youtube_source:
+                agent_prompt = _build_youtube_agent_prompt(
+                    table_of_contents,
+                    identificacion,
+                    part_id,
+                    num_partes,
+                    handoff,
+                )
 
             # Ejecutar los tres agentes en paralelo
             agents_start = time.time()

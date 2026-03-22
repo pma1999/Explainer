@@ -26,13 +26,15 @@ from google.genai import types
 
 from backend.logging_config import get_logger
 from backend.pricing import calculate_cost
+from backend.agents.language_policy import FORMATTER_CASTELLANO_RULE
 
 logger = get_logger("backend.agents.formatter")
 
 # Fast, low-latency model used exclusively for the formatting pass.
 FORMATTER_MODEL = "gemini-3.1-flash-lite-preview"
 
-FORMATTER_SYSTEM_PROMPT = """\
+FORMATTER_SYSTEM_PROMPT = (
+"""\
 Eres un experto en formateo de textos académicos y técnicos en Markdown.
 
 Tu única tarea es aplicar formato Markdown al texto que recibes para hacerlo \
@@ -52,8 +54,10 @@ exactamente la misma información que el original.
    - Párrafos separados por línea en blanco para ideas distintas.
    - > cita  cuando el texto cite textualmente a otro autor o fuente.
 4. Devuelve ÚNICAMENTE el texto formateado en Markdown. No añadas comentarios, \
-explicaciones, encabezados extra ni ningún texto que no estuviera en el original.\
+explicaciones, encabezados extra ni ningún texto que no estuviera en el original.
 """
++ FORMATTER_CASTELLANO_RULE
+)
 
 
 async def _format_text(
