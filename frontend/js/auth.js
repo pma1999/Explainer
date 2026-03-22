@@ -30,6 +30,14 @@ export async function refreshApiKeyStatus() {
   updateApiKeyUI();
 }
 
+function syncPreferOfflineSwitchUI() {
+  const el = $('prefer-offline-switch');
+  if (!el) return;
+  const on = getPreferOffline();
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+  el.classList.toggle('is-on', on);
+}
+
 export function initSettings() {
   $('btn-settings').addEventListener('click', showSettings);
   $('btn-settings-projects').addEventListener('click', showSettings);
@@ -112,14 +120,6 @@ export function initSettings() {
   });
 
   syncPreferOfflineSwitchUI();
-}
-
-function syncPreferOfflineSwitchUI() {
-  const el = $('prefer-offline-switch');
-  if (!el) return;
-  const on = getPreferOffline();
-  el.setAttribute('aria-checked', on ? 'true' : 'false');
-  el.classList.toggle('is-on', on);
 }
 
 export function showSettings() {
