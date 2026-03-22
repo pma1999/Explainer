@@ -4,8 +4,98 @@
 
 import { toast } from './dom.js';
 
+const PREFER_OFFLINE_STORAGE_KEY = 'explainer.preferOffline';
+
 let deferredInstallPrompt = null;
 let swRegistration = null;
+
+// ─── Prefer offline (user-controlled “ahorrar datos”) ───────
+
+export function getPreferOffline() {
+  try {
+    return localStorage.getItem(PREFER_OFFLINE_STORAGE_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+export function setPreferOffline(value) {
+  const v = Boolean(value);
+  try {
+    localStorage.setItem(PREFER_OFFLINE_STORAGE_KEY, v ? '1' : '0');
+  } catch (_) {}
+  updateOnlineState();
+  syncPreferOfflineToServiceWorker();
+  window.dispatchEvent(
+    new CustomEvent('explainer:prefer-offline-changed', { detail: { preferOffline: v } })
+  );
+}
+
+export function syncPreferOfflineToServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const msg = { type: 'SET_PREFER_OFFLINE', value: getPreferOffline() };
+  const reg = swRegistration;
+  if (reg?.active) reg.active.postMessage(msg);
+  if (reg?.waiting) reg.waiting.postMessage(msg);
+  navigator.serviceWorker.ready
+    .then((r) => {
+      if (r.active) r.active.postMessage(msg);
+    })
+    .catch(() => {});
+}
+
+/** True when there is no usable “online” path for app behavior (browser offline or user chose offline mode). */
+export function isOffline() {
+  return !navigator.onLine || getPreferOffline();
+}
+
+// ─── Connectivity (for safe SW activation) ───────────────────
+
+async function checkConnectivityOk() {
+  if (!navigator.onLine) return false;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const url = new URL('/manifest.json', window.location.origin).href;
+    const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    return res.ok;
+  } catch (_) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function scheduleServiceWorkerUpdateChecks() {
+  const run = () => {
+    if (swRegistration) swRegistration.update().then(() => maybeApplyWaitingServiceWorker());
+  };
+  window.addEventListener('focus', run);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) run();
+  });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) run();
+  });
+}
+
+/** If a waiting worker exists, auto-activate when online and not in prefer-offline; else show manual toast. */
+function maybeApplyWaitingServiceWorker() {
+  if (!swRegistration?.waiting) return;
+  if (getPreferOffline()) {
+    showUpdateToast();
+    return;
+  }
+  checkConnectivityOk().then((ok) => {
+    if (!swRegistration?.waiting) return;
+    if (ok) {
+      toast('Actualizando a la última versión…', 'info');
+      swRegistration.waiting.postMessage('SKIP_WAITING');
+    } else {
+      showUpdateToast();
+    }
+  });
+}
 
 // ─── Service Worker Registration ────────────────────────────
 
@@ -17,7 +107,9 @@ export async function registerServiceWorker() {
       scope: '/',
     });
 
-    // Detect SW update available
+    await swRegistration.update();
+    if (swRegistration.waiting) maybeApplyWaitingServiceWorker();
+
     swRegistration.addEventListener('updatefound', () => {
       const newWorker = swRegistration.installing;
       if (!newWorker) return;
@@ -27,13 +119,11 @@ export async function registerServiceWorker() {
           newWorker.state === 'installed' &&
           navigator.serviceWorker.controller
         ) {
-          // New version available — show actionable toast
-          showUpdateToast();
+          maybeApplyWaitingServiceWorker();
         }
       });
     });
 
-    // Reload page when new SW takes control (after user clicks update)
     let refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!refreshing) {
@@ -41,13 +131,16 @@ export async function registerServiceWorker() {
         window.location.reload();
       }
     });
+
+    await navigator.serviceWorker.ready;
+    syncPreferOfflineToServiceWorker();
+    scheduleServiceWorkerUpdateChecks();
   } catch (err) {
     console.warn('[PWA] Service worker registration failed:', err);
   }
 }
 
 function showUpdateToast() {
-  // Custom toast with action button
   const container = document.getElementById('toast-container');
   if (!container) return;
 
@@ -69,7 +162,6 @@ function showUpdateToast() {
   });
 
   container.appendChild(div);
-  // Don't auto-dismiss update toasts
 }
 
 // ─── Install Prompt ─────────────────────────────────────────
@@ -87,7 +179,6 @@ export function listenInstallPrompt() {
     toast('¡Explainer instalado correctamente!', 'success');
   });
 
-  // Wire up install buttons (there may be multiple in different views)
   document.addEventListener('click', async (e) => {
     if (e.target.closest('#btn-install-pwa, .btn-install-pwa')) {
       await triggerInstall();
@@ -120,43 +211,45 @@ function hideInstallButton() {
 // ─── Online / Offline Detection ─────────────────────────────
 
 export function listenOnlineOffline() {
-  // Set initial state
   updateOnlineState();
 
   window.addEventListener('online', () => {
     updateOnlineState();
-    toast('Conexión restaurada', 'success');
-    // Dispatch custom event so other modules can react
+    if (!getPreferOffline()) {
+      toast('Conexión restaurada', 'success');
+    }
     window.dispatchEvent(new CustomEvent('explainer:online'));
   });
 
   window.addEventListener('offline', () => {
     updateOnlineState();
-    // Dispatch custom event so other modules can react
     window.dispatchEvent(new CustomEvent('explainer:offline'));
   });
 }
 
-function updateOnlineState() {
-  const isOnline = navigator.onLine;
-  const banner = document.getElementById('offline-banner');
-  if (banner) {
-    banner.classList.toggle('hidden', isOnline);
-  }
-  // Add body class for CSS hooks
-  document.body.classList.toggle('is-offline', !isOnline);
-  document.body.classList.toggle('is-online', isOnline);
-}
+export function updateOnlineState() {
+  const effectiveOffline = isOffline();
+  const preferOnly = navigator.onLine && getPreferOffline();
 
-/** Returns true when the browser reports no network connection. */
-export function isOffline() {
-  return !navigator.onLine;
+  const banner = document.getElementById('offline-banner');
+  const textEl = document.getElementById('offline-banner-text');
+  if (banner) {
+    banner.classList.toggle('hidden', !effectiveOffline);
+    if (textEl) {
+      textEl.textContent = preferOnly
+        ? 'Modo offline activado — solo proyectos guardados localmente; sin sincronización en segundo plano'
+        : 'Sin conexión — mostrando proyectos disponibles offline';
+    }
+  }
+
+  document.body.classList.toggle('is-offline', effectiveOffline);
+  document.body.classList.toggle('is-online', !effectiveOffline);
+  document.body.classList.toggle('is-prefer-offline', preferOnly);
 }
 
 // ─── Init ───────────────────────────────────────────────────
 
 export function initPWA() {
-  // Register SW after page load so it doesn't compete with initial network requests
   if (document.readyState === 'complete') {
     registerServiceWorker();
   } else {

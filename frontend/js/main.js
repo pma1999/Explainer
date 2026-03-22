@@ -487,6 +487,10 @@ function bootstrap() {
     if (state.currentProject) updateReformatBanner(state.currentProject);
   });
 
+  window.addEventListener('explainer:prefer-offline-changed', () => {
+    if (state.currentProject) updateReformatBanner(state.currentProject);
+  });
+
   $('btn-back-to-projects').addEventListener('click', () => {
     if (state.isSharedView) {
       exitSharedView();

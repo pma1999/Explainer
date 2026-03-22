@@ -222,6 +222,53 @@ export async function openProjectView(projectId) {
   showProjectLoadingState();
   showView('view-project');
 
+  if (isOffline()) {
+    const pinned = await isProjectPinned(projectId).catch(() => false);
+    if (!pinned) {
+      toast('Este proyecto no está disponible offline. Desactiva el modo offline o conéctate.', 'error');
+      if (window.pushRoute) window.pushRoute({ view: 'projects' });
+      return;
+    }
+    const cachedProject = await getCachedProjectAsync(projectId);
+    if (!cachedProject) {
+      toast('No hay copia local de este proyecto.', 'error');
+      if (window.pushRoute) window.pushRoute({ view: 'projects' });
+      return;
+    }
+    state.currentProject = cachedProject;
+    renderProjectView(cachedProject);
+
+    if (!state.currentPartId && cachedProject.status === 'completed') {
+      const firstIncomplete = getFirstIncompletePart(cachedProject);
+      if (firstIncomplete && window.pushRoute) {
+        window.pushRoute({
+          view: 'project',
+          projectId,
+          partId: firstIncomplete,
+          tab: 'explicacion',
+        });
+      }
+    }
+
+    const isProcessing = ['pending', 'uploading', 'segmenting', 'processing'].includes(cachedProject.status);
+    if (isProcessing) {
+      if (state.sseProjectId === projectId && state.processingSSE) {
+        if (state.processingSSE.readyState === EventSource.CLOSED) {
+          startSSE(projectId, { forceReconnect: true });
+        }
+        syncProcessingUIWithState();
+      } else {
+        closeSSEIfDifferent(projectId);
+        startSSE(projectId);
+      }
+    } else if (state.processingSSE && state.sseProjectId === projectId) {
+      state.processingSSE.close();
+      state.processingSSE = null;
+      state.sseProjectId = null;
+    }
+    return;
+  }
+
   try {
     const project = await api(`/api/projects/${projectId}`);
     state.currentProject = project;
@@ -270,7 +317,9 @@ export async function openProjectView(projectId) {
       renderProjectView(cachedProject);
       toast('Proyecto recuperado desde copia local. Intentando sincronizar en segundo plano…', 'success');
 
-      rehydrateProjectToServer(cachedProject).catch(() => { });
+      if (!isOffline()) {
+        rehydrateProjectToServer(cachedProject).catch(() => {});
+      }
       return;
     }
 
@@ -312,6 +361,53 @@ export async function restoreProjectView(projectId, partId, activeTab) {
   }
   showView('view-project');
 
+  if (isOffline()) {
+    const pinned = await isProjectPinned(projectId).catch(() => false);
+    if (!pinned) {
+      toast('Este proyecto no está disponible offline. Desactiva el modo offline o conéctate.', 'error');
+      showView('view-projects');
+      loadProjectsView();
+      if (window.replaceRoute) window.replaceRoute({ view: 'projects' });
+      return;
+    }
+    let localCached = null;
+    try {
+      localCached = await getCachedProjectAsync(projectId);
+    } catch (_) {}
+    if (!localCached) {
+      toast('No hay copia local de este proyecto.', 'error');
+      showView('view-projects');
+      loadProjectsView();
+      if (window.replaceRoute) window.replaceRoute({ view: 'projects' });
+      return;
+    }
+    state.currentProject = localCached;
+    state.currentPartId =
+      partId && localCached.segmentation?.partes?.some((p) => p.numero === partId)
+        ? partId
+        : null;
+    state.activeTab = resolvedTab;
+    renderProjectView(localCached);
+    if (state.currentPartId) {
+      selectPart(state.currentPartId);
+      activateTab(state.activeTab);
+    } else if (partId) {
+      if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
+    } else if (localCached.status === 'completed') {
+      const firstIncomplete = getFirstIncompletePart(localCached);
+      if (firstIncomplete && window.pushRoute) {
+        window.pushRoute({
+          view: 'project',
+          projectId,
+          partId: firstIncomplete,
+          tab: 'explicacion',
+        });
+      }
+    }
+    setupSSEForProject(projectId, localCached);
+    return;
+  }
+
   let cached = null;
   if (partId) {
     try {
@@ -331,18 +427,20 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     selectPart(partId);
     activateTab(resolvedTab);
 
-    api(`/api/projects/${projectId}`)
-      .then(async (project) => {
-        state.currentProject = project;
-        const local = (await loadBackupAsync(state.user?.id)).projects;
-        const refreshed = mergeProjects([project], local);
-        await syncProjectsToBackup(refreshed, state.user?.id);
-        renderProjectView(project);
-        selectPart(partId);
-        activateTab(resolvedTab);
-        setupSSEForProject(projectId, project);
-      })
-      .catch(() => {});
+    if (!isOffline()) {
+      api(`/api/projects/${projectId}`)
+        .then(async (project) => {
+          state.currentProject = project;
+          const local = (await loadBackupAsync(state.user?.id)).projects;
+          const refreshed = mergeProjects([project], local);
+          await syncProjectsToBackup(refreshed, state.user?.id);
+          renderProjectView(project);
+          selectPart(partId);
+          activateTab(resolvedTab);
+          setupSSEForProject(projectId, project);
+        })
+        .catch(() => {});
+    }
     return;
   }
 

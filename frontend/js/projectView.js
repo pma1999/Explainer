@@ -6,6 +6,7 @@ import { state } from './state.js';
 import { $, show, hide, formatDate, statusLabel, formatIconForResource, escHtml, nl2p, toast } from './dom.js';
 import { api } from './api.js';
 import { loadBackupAsync, syncProjectsToBackup } from './storage.js';
+import { isOffline } from './pwa.js';
 
 /**
  * Renders markdown text to HTML using marked.js.
@@ -818,7 +819,7 @@ export function updateReformatBanner(project) {
   }
 
   // The reformat action requires a live API connection — hide while offline.
-  if (!navigator.onLine) {
+  if (isOffline()) {
     banner.classList.add('hidden');
     return;
   }

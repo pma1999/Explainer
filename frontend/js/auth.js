@@ -5,7 +5,8 @@
 import { state, supabaseClient } from './state.js';
 import { $, show, hide, showView, toast } from './dom.js';
 import { api } from './api.js';
-import { getCachedApiKeyStatus, setCachedApiKeyStatus } from './storage.js';
+import { getCachedApiKeyStatus, setCachedApiKeyStatus, invalidateProjectsCache } from './storage.js';
+import { getPreferOffline, setPreferOffline } from './pwa.js';
 
 export async function refreshApiKeyStatus() {
   const userId = state.user?.id;
@@ -85,6 +86,16 @@ export function initSettings() {
     }
   });
 
+  const preferOfflineSwitch = $('prefer-offline-switch');
+  if (preferOfflineSwitch) {
+    preferOfflineSwitch.addEventListener('click', () => {
+      const next = !getPreferOffline();
+      setPreferOffline(next);
+      invalidateProjectsCache();
+      syncPreferOfflineSwitchUI();
+    });
+  }
+
   $('btn-delete-api-key').addEventListener('click', async () => {
     if (!confirm('¿Eliminar tu API key guardada?')) return;
 
@@ -99,11 +110,22 @@ export function initSettings() {
       $('api-key-error').textContent = err.message;
     }
   });
+
+  syncPreferOfflineSwitchUI();
+}
+
+function syncPreferOfflineSwitchUI() {
+  const el = $('prefer-offline-switch');
+  if (!el) return;
+  const on = getPreferOffline();
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+  el.classList.toggle('is-on', on);
 }
 
 export function showSettings() {
   $('settings-email').textContent = state.user?.email || '—';
   updateApiKeyUI();
+  syncPreferOfflineSwitchUI();
   show($('modal-settings'));
 }
 

@@ -2,9 +2,10 @@
    EXPLAINER — Service Worker
    ============================================================
    Estrategias de caché:
-   - App Shell (HTML/CSS/JS/assets): Cache-first con red como fallback
+   - Same-origin (por defecto): Network-first + actualizar caché (prioriza versión nueva)
+   - Modo offline voluntario (mensaje SET_PREFER_OFFLINE): Cache-first same-origin
    - Google Fonts: Stale-while-revalidate
-   - CDN de Supabase: Network-first con caché como fallback
+   - CDN jsdelivr: Network-first con caché como fallback
    - Llamadas /api/*: Pass-through (sin caché — la app usa IndexedDB)
    ============================================================
    Para forzar actualización: cambia CACHE_VERSION
@@ -14,6 +15,9 @@ const CACHE_VERSION = 'v1';
 const STATIC_CACHE = `explainer-static-${CACHE_VERSION}`;
 const FONTS_CACHE = `explainer-fonts-${CACHE_VERSION}`;
 const CDN_CACHE = `explainer-cdn-${CACHE_VERSION}`;
+
+/** Set via postMessage from the app when the user enables "modo offline / ahorrar datos". */
+let preferOfflineMode = false;
 
 const STATIC_ASSETS = [
   '/',
@@ -110,9 +114,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 6. Same-origin static assets — cache-first
+  // 6. Same-origin static assets — network-first (default) or cache-first (prefer offline)
   if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirst(request));
+    if (preferOfflineMode) {
+      event.respondWith(cacheFirst(request));
+    } else {
+      event.respondWith(networkFirstWithCache(request, STATIC_CACHE));
+    }
     return;
   }
 });
@@ -197,9 +205,13 @@ function refreshCache(request, cacheName) {
     .catch(() => null);
 }
 
-// ─── Message: skipWaiting on demand ─────────────────────────
+// ─── Messages from clients ──────────────────────────────────
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
+    return;
+  }
+  if (event.data && event.data.type === 'SET_PREFER_OFFLINE') {
+    preferOfflineMode = Boolean(event.data.value);
   }
 });

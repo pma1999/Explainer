@@ -12,6 +12,7 @@ import {
 } from './state.js';
 import { $, show, hide, toast } from './dom.js';
 import { api, API_BASE_URL, getAccessToken } from './api.js';
+import { isOffline } from './pwa.js';
 import { loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
 import {
   renderProjectView,
@@ -49,7 +50,9 @@ export function closeSSEIfDifferent(projectId) {
 
 export function startProjectsListPolling(renderProjectsList) {
   stopPolling();
+  if (isOffline()) return;
   state.pollProjectsInterval = setInterval(async () => {
+    if (isOffline()) return;
     const view = document.querySelector('.view.active');
     if (!view || view.id !== 'view-projects') return;
     try {
@@ -70,6 +73,8 @@ export function startProjectsListPolling(renderProjectsList) {
 }
 
 export function startSSE(projectId, opts = {}) {
+  if (isOffline()) return;
+
   if (state.processingSSE && state.sseProjectId === projectId && !opts.forceReconnect) {
     syncProcessingUIWithState();
     return;
@@ -250,6 +255,7 @@ export function startSSE(projectId, opts = {}) {
   function startCurrentProjectPolling(pid) {
     if (state.pollCurrentProjectInterval) return;
     state.pollCurrentProjectInterval = setInterval(async () => {
+      if (isOffline()) return;
       if (state.currentProjectId !== pid || !state.currentProject) return;
       const status = state.currentProject.status;
       if (!['pending', 'uploading', 'segmenting', 'processing'].includes(status)) {
@@ -296,12 +302,33 @@ export function startSSE(projectId, opts = {}) {
 }
 
 export function initVisibilityHandling() {
+  window.addEventListener('explainer:prefer-offline-changed', (e) => {
+    if (e.detail?.preferOffline) {
+      stopPolling();
+      if (state.processingSSE) {
+        state.processingSSE.close();
+        state.processingSSE = null;
+        state.sseProjectId = null;
+      }
+      return;
+    }
+    const proj = state.currentProject;
+    if (
+      state.currentProjectId &&
+      proj &&
+      ['pending', 'uploading', 'segmenting', 'processing'].includes(proj.status)
+    ) {
+      startSSE(state.currentProjectId, { forceReconnect: true });
+    }
+  });
+
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       state.ssePausedByVisibility = true;
     } else {
       const wasPaused = state.ssePausedByVisibility;
       state.ssePausedByVisibility = false;
+      if (isOffline()) return;
       if (wasPaused && state.sseProjectId && state.currentProjectId === state.sseProjectId) {
         const idle = Date.now() - state.sseLastEventAt > 5000;
         const closed = !state.processingSSE || state.processingSSE.readyState === EventSource.CLOSED;

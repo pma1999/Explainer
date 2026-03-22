@@ -17,6 +17,7 @@ import {
   getOfflinePins,
   isProjectPinned,
 } from './backupStorage.js';
+import { isOffline } from './pwa.js';
 
 // Re-export offline pin helpers for use across the app
 export { pinProjectOffline, unpinProjectOffline, getOfflinePins, isProjectPinned };
@@ -180,6 +181,10 @@ export function ensureProjectsFetched(opts = {}) {
   if (!projectsFetchPromise) {
     projectsFetchPromise = (async () => {
       try {
+        if (isOffline()) {
+          const local = await loadBackupAsync(userId);
+          return local.projects;
+        }
         const [serverProjects, local] = await Promise.all([
           api('/api/projects'),
           loadBackupAsync(userId),

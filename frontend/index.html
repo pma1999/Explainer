@@ -30,7 +30,7 @@
   <!-- ===== OFFLINE BANNER ===== -->
   <div id="offline-banner" class="offline-banner hidden" role="alert" aria-live="polite">
     <svg class="offline-banner-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-    <span>Sin conexión — mostrando proyectos disponibles offline</span>
+    <span id="offline-banner-text">Sin conexión — mostrando proyectos disponibles offline</span>
   </div>
 
   <!-- ===== AUTH VIEW (login / register) ===== -->
@@ -787,6 +787,29 @@
         </div>
 
         <!-- API Key -->
+        <div class="settings-section">
+          <h4 class="settings-section-title">Conexión y datos</h4>
+          <p class="settings-description">
+            Activa el modo offline para usar solo copias locales y reducir consumo de datos. La app prioriza la última versión cuando estás en línea y este modo está desactivado.
+          </p>
+          <div class="settings-item settings-item-row">
+            <div class="settings-toggle-labels">
+              <span class="settings-label" id="prefer-offline-label">Modo offline / ahorrar datos</span>
+              <span class="settings-description settings-toggle-hint">No sincroniza la lista ni abre análisis en vivo hasta que lo desactives.</span>
+            </div>
+            <button
+              type="button"
+              class="settings-switch"
+              id="prefer-offline-switch"
+              role="switch"
+              aria-checked="false"
+              aria-labelledby="prefer-offline-label"
+            >
+              <span class="settings-switch-thumb" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de Gemini</h4>
           <p class="settings-description">
