@@ -6,7 +6,7 @@ explicacion_detallada, each section's explicacion_introductoria, and each
 conexion's descripcion_conexion) to gemini-3.1-flash-lite-preview in a single
 parallel batch for markdown formatting. Each call uses JSON mode with a single
 ``markdown`` field so only the body is persisted (no metatext or duplicate titles),
-and ``thinking_level=HIGH`` so planning stays in the model's internal reasoning.
+and ``thinking_level="low"`` for lighter internal reasoning (lower latency/cost than ``high``).
 
 KEY RULES:
 - Content is NEVER modified — only markdown formatting is added.
@@ -70,6 +70,14 @@ def _extract_formatted_markdown(raw: str) -> str | None:
         return None
     stripped = md.strip()
     return stripped if stripped else None
+
+
+def _usage_int_field(meta: Any, field: str) -> int:
+    """Return a non-negative int from SDK usage_metadata, or 0 if missing / mock / wrong type."""
+    v = getattr(meta, field, None)
+    if isinstance(v, int) and not isinstance(v, bool):
+        return max(0, v)
+    return 0
 
 
 FORMATTER_SYSTEM_PROMPT = (
@@ -208,7 +216,7 @@ async def _format_text(
             config=types.GenerateContentConfig(
                 system_instruction=FORMATTER_SYSTEM_PROMPT,
                 temperature=0.1,
-                thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+                thinking_config=types.ThinkingConfig(thinking_level="low"),
                 response_mime_type="application/json",
                 response_schema=FORMATTER_RESPONSE_SCHEMA,
             ),
@@ -315,6 +323,7 @@ async def format_explainer_content(
     _empty_usage: dict[str, Any] = {
         "input_tokens": 0,
         "output_tokens": 0,
+        "thoughts_tokens": 0,
         "total_tokens": 0,
         "cost": 0.0,
     }
@@ -329,7 +338,8 @@ async def format_explainer_content(
 
     success_count = 0
     total_input = 0
-    total_output = 0
+    total_candidates = 0
+    total_thoughts = 0
 
     for path, value in zip(paths, gathered):
         if isinstance(value, Exception):
@@ -342,10 +352,11 @@ async def format_explainer_content(
         # Unpack (formatted_text, usage_metadata) returned by _format_text.
         formatted_text, usage_meta = value
 
-        # Accumulate token counts for cost reporting.
+        # Accumulate token counts for cost reporting (thinking billed as output per Google pricing).
         if usage_meta is not None:
-            total_input  += getattr(usage_meta, "prompt_token_count",     0) or 0
-            total_output += getattr(usage_meta, "candidates_token_count", 0) or 0
+            total_input += _usage_int_field(usage_meta, "prompt_token_count")
+            total_candidates += _usage_int_field(usage_meta, "candidates_token_count")
+            total_thoughts += _usage_int_field(usage_meta, "thoughts_token_count")
 
         # Navigate the path and set the leaf value.
         target: Any = result
@@ -368,13 +379,20 @@ async def format_explainer_content(
 
     fmt_cost = calculate_cost(
         FORMATTER_MODEL,
-        {"prompt_token_count": total_input, "candidates_token_count": total_output},
+        {
+            "prompt_token_count": total_input,
+            "candidates_token_count": total_candidates,
+            "thoughts_token_count": total_thoughts,
+        },
     )
+    # output_tokens = all generation billed at output rate (candidates + internal thinking).
+    billed_output = total_candidates + total_thoughts
     usage_summary: dict[str, Any] = {
-        "input_tokens":  total_input,
-        "output_tokens": total_output,
-        "total_tokens":  total_input + total_output,
-        "cost":          fmt_cost,
+        "input_tokens": total_input,
+        "output_tokens": billed_output,
+        "thoughts_tokens": total_thoughts,
+        "total_tokens": total_input + billed_output,
+        "cost": fmt_cost,
     }
 
     return result, usage_summary
