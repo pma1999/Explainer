@@ -4,7 +4,9 @@ After the explainer agent generates its structured JSON output, this module
 sends every text field (introduccion, conclusion, each subsection's
 explicacion_detallada, each section's explicacion_introductoria, and each
 conexion's descripcion_conexion) to gemini-3.1-flash-lite-preview in a single
-parallel batch for markdown formatting.
+parallel batch for markdown formatting. Each call uses JSON mode with a single
+``markdown`` field so only the body is persisted (no metatext or duplicate titles),
+and ``thinking_level=HIGH`` so planning stays in the model's internal reasoning.
 
 KEY RULES:
 - Content is NEVER modified — only markdown formatting is added.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import time
 from typing import Any
 
@@ -32,6 +35,42 @@ logger = get_logger("backend.agents.formatter")
 
 # Fast, low-latency model used exclusively for the formatting pass.
 FORMATTER_MODEL = "gemini-3.1-flash-lite-preview"
+
+# JSON field name for the formatted Markdown body (forced via response_schema).
+FORMATTER_MARKDOWN_FIELD = "markdown"
+
+FORMATTER_RESPONSE_SCHEMA = types.Schema(
+    type=types.Type.OBJECT,
+    required=[FORMATTER_MARKDOWN_FIELD],
+    properties={
+        FORMATTER_MARKDOWN_FIELD: types.Schema(
+            type=types.Type.STRING,
+            description=(
+                "Cuerpo del texto ya formateado en Markdown válido. Solo el contenido que debe leer "
+                "el usuario: sin preámbulos, sin listas de 'plan de formato', sin metacomentarios ni "
+                "explicación del proceso. No repitas como título o encabezado el nombre de la "
+                "sección o subsección del contexto (la interfaz ya lo muestra aparte). "
+                "Usa ## o ### solo cuando el texto original ya implique subtítulos internos claros."
+            ),
+        ),
+    },
+)
+
+
+def _extract_formatted_markdown(raw: str) -> str | None:
+    """Parse formatter JSON output; return markdown string or None if invalid or empty."""
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    md = obj.get(FORMATTER_MARKDOWN_FIELD)
+    if not isinstance(md, str):
+        return None
+    stripped = md.strip()
+    return stripped if stripped else None
+
 
 FORMATTER_SYSTEM_PROMPT = (
 """
@@ -56,8 +95,12 @@ FORMATTER_SYSTEM_PROMPT = (
   - **Fidelidad total:** una comparación palabra por palabra con el original no revela omisiones, paráfrasis ni adiciones de contenido.
   - **Coherencia tipográfica:** las mismas categorías de información reciben el mismo tratamiento visual a lo largo de todo el texto.
   - **Proporcionalidad:** el formato aplicado es proporcional a la extensión y complejidad del texto — textos breves reciben formato ligero; textos extensos pueden beneficiarse de más estructura.
-  - **Limpieza:** el output contiene exclusivamente el texto formateado, sin metacomentarios, encabezados añadidos ni explicaciones del proceso.
+  - **Limpieza:** el cuerpo formateado no incluye metacomentarios, listas sobre cómo vas a formatear, encabezados que dupliquen el título del apartado, ni explicaciones del proceso.
   </quality_criteria>
+
+  <context_rule>
+  Si el mensaje de usuario comienza con una línea entre corchetes tipo "[Contexto del apartado: …]", ese contexto es solo orientación (tono, tema). No lo copies, no lo resumas y no lo uses como título: la aplicación ya muestra el título de sección/subsección por separado.
+  </context_rule>
 
   <methodological_principles>
   Herramientas Markdown a tu disposición y cuándo aplicarlas:
@@ -77,7 +120,7 @@ FORMATTER_SYSTEM_PROMPT = (
   </methodological_principles>
 
   <output_format>
-  Devuelve únicamente el texto formateado en Markdown válido. Sin preámbulos, sin comentarios finales, sin bloques de explicación.
+  Tu respuesta debe cumplir el esquema JSON indicado por la API: un único campo con el texto formateado en Markdown válido. Sin preámbulos fuera de ese campo, sin comentarios finales, sin bloques de explicación.
   </output_format>
 </system_instruction>
 
@@ -124,14 +167,16 @@ FORMATTER_SYSTEM_PROMPT = (
 </few_shot_examples>
 
 <task>
-Formatea en Markdown el texto proporcionado. Preserva cada palabra y dato del original. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Devuelve únicamente el resultado formateado.
+Formatea en Markdown el texto proporcionado (el cuerpo tras el contexto, si existe). Preserva cada palabra y dato del original. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Rellena el campo JSON únicamente con ese cuerpo formateado.
 </task>
 
 <thinking_protocol>
-Antes de generar tu respuesta final, razona brevemente en un bloque <thinking>:
+Antes del JSON final, razona con rigor (el modelo usa razonamiento interno; no vuelques ese razonamiento en la salida visible):
 - ¿Qué tipo de texto es (académico, técnico, mixto)? ¿Qué nivel de formato necesita?
 - ¿Hay enumeraciones implícitas, citas, o terminología que requieran tratamiento especial?
 - ¿Dónde están los límites naturales entre ideas para la separación de párrafos?
+
+El valor del campo JSON ``markdown`` debe ser solo el cuerpo formateado para el lector: sin prefacios de planificación, sin bloques ``<thinking>``, sin listas que describan cómo vas a formatear ni metacomentarios.
 </thinking_protocol>
 """
 + FORMATTER_CASTELLANO_RULE
@@ -163,12 +208,25 @@ async def _format_text(
             config=types.GenerateContentConfig(
                 system_instruction=FORMATTER_SYSTEM_PROMPT,
                 temperature=0.1,
+                thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+                response_mime_type="application/json",
+                response_schema=FORMATTER_RESPONSE_SCHEMA,
             ),
         )
 
         if response and response.text and response.text.strip():
             usage_meta = getattr(response, "usage_metadata", None)
-            return response.text.strip(), usage_meta
+            parsed = _extract_formatted_markdown(response.text.strip())
+            if parsed is not None:
+                return parsed, usage_meta
+            logger.warning(
+                "Formatter JSON parse failed or empty markdown field, keeping original text",
+                extra={
+                    "context_preview": context[:80],
+                    "response_preview": response.text[:200] if response.text else "",
+                },
+            )
+            return text, usage_meta
 
         logger.warning(
             "Formatter returned empty response, keeping original text",

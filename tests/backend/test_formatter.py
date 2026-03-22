@@ -5,8 +5,9 @@ google.genai is patched at sys.modules level to avoid the system-level
 cryptography library conflict present in this environment.
 
 Coverage:
-- _format_text: success, empty input, API failure (fail-safe)
-  Now returns (text, usage_metadata | None) tuple.
+- _format_text: success (JSON with markdown field), empty input, API failure,
+  malformed JSON / empty markdown / missing key (fail-safe, usage kept when API responded)
+  Returns (text, usage_metadata | None) tuple.
 - format_explainer_content:
     - formats every prose field
     - does NOT touch heading/title fields
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import sys
 import types as _types_builtin
 from typing import Any
@@ -80,6 +82,11 @@ def _make_response(text: str) -> MagicMock:
     usage.candidates_token_count = 5
     resp.usage_metadata = usage
     return resp
+
+
+def _make_json_formatter_response(markdown: str) -> MagicMock:
+    """Fake formatter API response: JSON object with markdown field (matches production)."""
+    return _make_response(json.dumps({"markdown": markdown}))
 
 
 def _make_client() -> MagicMock:
@@ -150,10 +157,10 @@ class TestFormatText:
 
     @pytest.mark.asyncio
     async def test_success_returns_formatted_text(self):
-        """When the API responds, the formatted text is returned."""
+        """When the API responds with valid JSON, the markdown field is returned."""
         client = _make_client()
         client.aio.models.generate_content = AsyncMock(
-            return_value=_make_response("**Texto** formateado.")
+            return_value=_make_json_formatter_response("**Texto** formateado.")
         )
 
         text, usage = await _format_text(client, "Texto sin formato.", "Contexto")
@@ -190,6 +197,48 @@ class TestFormatText:
         client.aio.models.generate_content.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_malformed_json_returns_original_with_usage(self):
+        """Non-JSON or invalid JSON preserves original text but keeps usage for billing."""
+        client = _make_client()
+        client.aio.models.generate_content = AsyncMock(
+            return_value=_make_response("not json at all")
+        )
+
+        original = "Texto original sin formato."
+        text, usage = await _format_text(client, original, "ctx")
+
+        assert text == original
+        assert usage is not None
+
+    @pytest.mark.asyncio
+    async def test_empty_markdown_field_returns_original(self):
+        """Empty or whitespace-only markdown in JSON falls back to original."""
+        client = _make_client()
+        client.aio.models.generate_content = AsyncMock(
+            return_value=_make_response(json.dumps({"markdown": "   "}))
+        )
+
+        original = "Contenido fuente."
+        text, usage = await _format_text(client, original)
+
+        assert text == original
+        assert usage is not None
+
+    @pytest.mark.asyncio
+    async def test_missing_markdown_key_returns_original(self):
+        """JSON without the markdown key falls back to original."""
+        client = _make_client()
+        client.aio.models.generate_content = AsyncMock(
+            return_value=_make_response(json.dumps({"wrong": "x"}))
+        )
+
+        original = "Solo esto."
+        text, usage = await _format_text(client, original)
+
+        assert text == original
+        assert usage is not None
+
+    @pytest.mark.asyncio
     async def test_api_failure_returns_original_text(self):
         """If the API call raises any exception, the original text is returned unchanged."""
         client = _make_client()
@@ -224,7 +273,7 @@ class TestFormatText:
 
         async def mock_generate(model, contents, config):
             captured_contents.append(contents)
-            return _make_response("formatted")
+            return _make_json_formatter_response("formatted")
 
         client = _make_client()
         client.aio.models.generate_content = mock_generate
