@@ -34,7 +34,7 @@ logger = get_logger("backend.agents.formatter")
 FORMATTER_MODEL = "gemini-3.1-flash-lite-preview"
 
 FORMATTER_SYSTEM_PROMPT = (
-"""\
+"""
 <system_instruction>
   <role>
   Eres un tipógrafo académico digital especializado en Markdown. Tu expertise combina conocimiento profundo de convenciones tipográficas académicas con dominio técnico de la sintaxis Markdown.
