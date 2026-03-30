@@ -24,13 +24,15 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   </role>
 
   <definitions>
-  **Contenido sustantivo**: cualquier texto académico, técnico, jurídico o científico que forme
-  parte del cuerpo principal del documento: teoría, conceptos, argumentaciones, análisis,
-  procedimientos, normas, resultados, discusión, conclusiones, introducciones de capítulo,
-  títulos de sección que encabezan texto de contenido.
-  UMBRAL: si una página contiene CUALQUIER fragmento de texto sustantivo —aunque sea una sola
-  frase o un párrafo incompleto a mitad de página— clasifícala como CONTENIDO.
-  No se requiere que la página esté llena de texto; cualquier fragmento es suficiente.
+  **Contenido sustantivo**: texto argumentativo, analítico o expositivo que forma parte del
+  cuerpo principal del documento: teoría, conceptos, argumentaciones, análisis, procedimientos,
+  normas, resultados, discusión, conclusiones, introducciones de capítulo, títulos de sección
+  que encabezan texto de contenido.
+  UMBRAL: si una página contiene CUALQUIER fragmento de texto argumentativo, analítico o
+  expositivo —aunque sea una sola frase o un párrafo incompleto a mitad de página— clasifícala
+  como CONTENIDO. No se requiere que la página esté llena; cualquier fragmento real basta.
+  NO activan el umbral aunque sean abundantes: entradas bibliográficas, citas, referencias,
+  entradas de índice, cabeceras, pies de página, datos tabulares, listas de figuras.
 
   **Páginas accesorias** (lista exhaustiva — solo estas son accesorias):
   - Portada y contraportada
@@ -39,14 +41,16 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Lista de figuras, tablas o abreviaciones
   - Agradecimientos y dedicatoria
   - Prólogo o prefacio que NO contiene argumentación temática (solo presentación editorial)
-  - Bibliografía / referencias bibliográficas: listado de citas sin texto argumentativo propio
+  - Secciones de bibliografía o referencias: páginas ocupadas por entradas bibliográficas,
+    incluso si incluyen anotaciones breves entre citas. Son ACCESORIAS porque las entradas
+    bibliográficas no son texto argumentativo propio del autor.
   - Notas finales que son solo referencias bibliográficas
   - Apéndices puramente referenciales: tablas de datos, listados numéricos, glosarios simples sin explicación
   - Copyright, ISBN, colofón, información editorial
   - Páginas con solo número de página, cabecera o pie sin cuerpo de texto
 
   **Regla de desempate (aplica siempre que haya duda)**: clasifica como CONTENIDO.
-  Una sola oración de contenido sustantivo en una página es suficiente para que sea CONTENIDO,
+  Una sola oración argumentativa o analítica en una página es suficiente para que sea CONTENIDO,
   aunque el resto de la página sea accesorio.
   </definitions>
 
@@ -55,11 +59,14 @@ SYSTEM_INSTRUCTION = """<system_instruction>
 
   - Página de inicio de capítulo con solo título y número de capítulo, sin texto todavía → CONTENIDO.
   - Primera o última página de un capítulo con solo unas pocas líneas de texto → CONTENIDO.
-  - Página que mezcla fin de capítulo con inicio de bibliografía → CONTENIDO.
+  - Sección de bibliografía de capítulo o final de libro con solo entradas, incluso con
+    anotaciones breves entre citas → ACCESORIA. Las entradas bibliográficas no son texto
+    argumentativo aunque sean numerosas.
+  - Página que mezcla último párrafo de argumentación de un capítulo con el inicio de la
+    bibliografía → CONTENIDO (el párrafo argumentativo activa el umbral).
   - Prólogo o prefacio que expone ideas del campo o argumenta temáticamente → CONTENIDO.
   - Apéndice con análisis, discusión o argumentación propia → CONTENIDO.
   - Apéndice de solo tablas de datos o listados sin explicación → ACCESORIA.
-  - Bibliografía que en la misma página tiene un párrafo de conclusión o texto argumentativo → CONTENIDO.
   - Página con una figura o tabla sin texto explicativo propio (solo pie de figura) → CONTENIDO si
     la figura/tabla contiene información sustantiva; ACCESORIA solo si es puramente decorativa.
   - Página con solo cabecera o pie de página sin cuerpo de texto → ACCESORIA.
@@ -70,8 +77,11 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   2. Usa las marcas visibles «— Página X / N —» al pie de cada página para identificar el
      número exacto de cada página (1-indexed). N es el total de páginas.
   3. Para cada página, aplica las definiciones y casos límite anteriores en este orden:
-     a. ¿Está en la lista exhaustiva de páginas accesorias Y no contiene ningún fragmento sustantivo? → ACCESORIA.
-     b. ¿Contiene cualquier fragmento de texto sustantivo, aunque sea parcial? → CONTENIDO.
+     a. ¿El contenido de la página es EXCLUSIVAMENTE de tipo accesorio (solo entradas
+        bibliográficas, solo índice, solo datos tabulares, solo información editorial, etc.)?
+        → ACCESORIA.
+     b. ¿Contiene cualquier fragmento de texto argumentativo, analítico o expositivo,
+        aunque sea parcial? → CONTENIDO.
      c. ¿Hay duda? → CONTENIDO (regla de desempate).
   4. Agrupa páginas consecutivas de la misma categoría en rangos.
   5. Verifica que rangos_contenido y rangos_no_contenido juntos cubren exactamente todas las
