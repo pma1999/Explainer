@@ -219,7 +219,22 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
   - **conclusion**: síntesis integradora de las ideas clave de la parte
   - **conexiones_contextuales**: cómo se relaciona con otras partes del temario
 
-Solo tras completar estos 7 pasos, genera tu output estructurado en el formato especificado.
+**PASO 8 — VERIFICACIÓN EXPLÍCITA DE COBERTURA DE PÁGINAS:**
+Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este paso obligatoriamente:
+
+1. Copia la lista de páginas de contenido del bloque `<paginas_contenido_verificado>`.
+2. Para cada página de contenido, confirma en qué parte (número) y subparte (número) queda asignada.
+   Construye mentalmente una tabla: página → parte → subparte.
+3. Verifica que ninguna página de contenido queda sin asignación (faltaría en la tabla).
+4. Verifica que ninguna página de contenido aparece en más de una parte (duplicado en la tabla).
+5. Para cada parte, verifica que sus subpartes cubren exactamente el rango [pagina_inicio, pagina_fin]:
+   - La primera subparte empieza en pagina_inicio de la parte.
+   - La última subparte termina en pagina_fin de la parte.
+   - No hay huecos entre subpartes consecutivas (subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio).
+   - No hay solapamientos entre subpartes consecutivas.
+6. Si detectas algún error, corrígelo antes de generar el output.
+
+Solo tras completar estos 8 pasos, genera tu output estructurado en el formato especificado.
 </thinking_protocol>
 </system_instruction>"""
 
