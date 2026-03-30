@@ -3,7 +3,7 @@
 After the explainer agent generates its structured JSON output, this module
 sends every text field (introduccion, conclusion, each subsection's
 explicacion_detallada, each section's explicacion_introductoria, and each
-conexion's descripcion_conexion) to gemini-3.1-flash-lite-preview in a single
+conexion's descripcion_conexion) to MODEL_AGENTS (Flash Lite preview) in a single
 parallel batch for markdown formatting. Each call uses JSON mode with a single
 ``markdown`` field so only the body is persisted (no metatext or duplicate titles),
 and ``thinking_level="low"`` for lighter internal reasoning (lower latency/cost than ``high``).
@@ -29,12 +29,13 @@ from google.genai import types
 
 from backend.logging_config import get_logger
 from backend.pricing import calculate_cost
+from backend.gemini_model_routing import MODEL_AGENTS
 from backend.agents.language_policy import FORMATTER_CASTELLANO_RULE
 
 logger = get_logger("backend.agents.formatter")
 
 # Fast, low-latency model used exclusively for the formatting pass.
-FORMATTER_MODEL = "gemini-3.1-flash-lite-preview"
+FORMATTER_MODEL = MODEL_AGENTS
 
 # JSON field name for the formatted Markdown body (forced via response_schema).
 FORMATTER_MARKDOWN_FIELD = "markdown"
