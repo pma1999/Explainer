@@ -17,30 +17,66 @@ logger = get_logger("backend.agents.page_classifier")
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
   Eres un clasificador de páginas de documentos académicos, técnicos o jurídicos.
-  Tu única función es identificar qué páginas contienen contenido sustantivo que un estudiante
-  debe aprender, y cuáles son páginas accesorias que no forman parte del cuerpo del documento.
+  Tu única función es identificar con precisión máxima qué páginas contienen contenido sustantivo
+  que un estudiante debe aprender, y cuáles son páginas accesorias.
+  Se exige exactitud en ambas direcciones: no puedes perder ninguna página de contenido
+  (aunque el contenido ocupe solo parte de la página), ni incluir páginas que no aporten contenido.
   </role>
 
   <definitions>
-  **Contenido sustantivo**: texto académico, técnico, jurídico o científico que constituye el
-  cuerpo principal del documento. Incluye: teoría, conceptos, argumentaciones, procedimientos,
-  normas, análisis, resultados, discusión. Si una página tiene al menos un párrafo de contenido
-  sustantivo, clasifícala como contenido.
+  **Contenido sustantivo**: cualquier texto académico, técnico, jurídico o científico que forme
+  parte del cuerpo principal del documento: teoría, conceptos, argumentaciones, análisis,
+  procedimientos, normas, resultados, discusión, conclusiones, introducciones de capítulo,
+  títulos de sección que encabezan texto de contenido.
+  UMBRAL: si una página contiene CUALQUIER fragmento de texto sustantivo —aunque sea una sola
+  frase o un párrafo incompleto a mitad de página— clasifícala como CONTENIDO.
+  No se requiere que la página esté llena de texto; cualquier fragmento es suficiente.
 
-  **Páginas accesorias**: no forman parte del contenido que el estudiante debe aprender.
-  Incluye: portada, contraportada, páginas en blanco, tabla de contenidos / índice, lista de
-  figuras o tablas, agradecimientos, dedicatoria, prólogo sin contenido temático,
-  bibliografía, referencias bibliográficas, notas finales, apéndices puramente referenciales,
-  copyright, ISBN, colofón.
+  **Páginas accesorias** (lista exhaustiva — solo estas son accesorias):
+  - Portada y contraportada
+  - Páginas en blanco o con solo ornamentos decorativos
+  - Tabla de contenidos / índice general
+  - Lista de figuras, tablas o abreviaciones
+  - Agradecimientos y dedicatoria
+  - Prólogo o prefacio que NO contiene argumentación temática (solo presentación editorial)
+  - Bibliografía / referencias bibliográficas: listado de citas sin texto argumentativo propio
+  - Notas finales que son solo referencias bibliográficas
+  - Apéndices puramente referenciales: tablas de datos, listados numéricos, glosarios simples sin explicación
+  - Copyright, ISBN, colofón, información editorial
+  - Páginas con solo número de página, cabecera o pie sin cuerpo de texto
+
+  **Regla de desempate (aplica siempre que haya duda)**: clasifica como CONTENIDO.
+  Una sola oración de contenido sustantivo en una página es suficiente para que sea CONTENIDO,
+  aunque el resto de la página sea accesorio.
   </definitions>
 
+  <edge_cases>
+  Estos casos se resuelven siempre así, sin excepción:
+
+  - Página de inicio de capítulo con solo título y número de capítulo, sin texto todavía → CONTENIDO.
+  - Primera o última página de un capítulo con solo unas pocas líneas de texto → CONTENIDO.
+  - Página que mezcla fin de capítulo con inicio de bibliografía → CONTENIDO.
+  - Prólogo o prefacio que expone ideas del campo o argumenta temáticamente → CONTENIDO.
+  - Apéndice con análisis, discusión o argumentación propia → CONTENIDO.
+  - Apéndice de solo tablas de datos o listados sin explicación → ACCESORIA.
+  - Bibliografía que en la misma página tiene un párrafo de conclusión o texto argumentativo → CONTENIDO.
+  - Página con una figura o tabla sin texto explicativo propio (solo pie de figura) → CONTENIDO si
+    la figura/tabla contiene información sustantiva; ACCESORIA solo si es puramente decorativa.
+  - Página con solo cabecera o pie de página sin cuerpo de texto → ACCESORIA.
+  </edge_cases>
+
   <instructions>
-  1. Lee el documento completo.
+  1. Lee el documento completo de principio a fin.
   2. Usa las marcas visibles «— Página X / N —» al pie de cada página para identificar el
-     número de cada página (1-indexed). El valor N es el total de páginas.
-  3. Clasifica cada página como contenido o accesoria según las definiciones anteriores.
+     número exacto de cada página (1-indexed). N es el total de páginas.
+  3. Para cada página, aplica las definiciones y casos límite anteriores en este orden:
+     a. ¿Está en la lista exhaustiva de páginas accesorias Y no contiene ningún fragmento sustantivo? → ACCESORIA.
+     b. ¿Contiene cualquier fragmento de texto sustantivo, aunque sea parcial? → CONTENIDO.
+     c. ¿Hay duda? → CONTENIDO (regla de desempate).
   4. Agrupa páginas consecutivas de la misma categoría en rangos.
-  5. Devuelve el resultado en el JSON estructurado especificado. Sin texto adicional fuera del JSON.
+  5. Verifica que rangos_contenido y rangos_no_contenido juntos cubren exactamente todas las
+     páginas de 1 a total_paginas, sin huecos ni solapamientos.
+  6. Devuelve el resultado en el JSON estructurado especificado. Sin texto adicional fuera del JSON.
   </instructions>
 </system_instruction>"""
 
@@ -120,11 +156,12 @@ def run_page_classifier(
     total_pages: int,
     model: str = MODEL_CLASSIFIER,
     mime_type: str = "application/pdf",
-) -> frozenset[int]:
+) -> tuple[frozenset[int], Any]:
     """Classify PDF pages into content vs. non-content.
 
     Calls the Gemini API with the numbered PDF and returns a frozenset of
-    1-indexed page numbers that contain substantive content.
+    1-indexed page numbers that contain substantive content, plus ``usage_metadata``
+    from the response (for token/cost tracking, same pattern as ``run_segmentador``).
 
     Args:
         total_pages: Expected total page count from pypdf (used for sanity check).
@@ -190,4 +227,4 @@ def run_page_classifier(
         },
     )
 
-    return content_pages
+    return content_pages, response.usage_metadata
