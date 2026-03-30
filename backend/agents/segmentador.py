@@ -205,10 +205,11 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
   - Referencia al elemento siguiente que delimita el fin
 - Verifica que los rangos de página de todas las partes cubran TODAS las páginas con contenido sustantivo del documento
 - Verifica que esta identificación funcione SIN necesidad de leer la sección "Contenido"
+
 **OBLIGATORIO si tu input incluye `<paginas_contenido_verificado>`:**
-- Confirma que parte_1.pagina_inicio ≤ primera_pagina_contenido (la primera parte arranca en esa página o antes).
-- Confirma que parte_N.pagina_fin ≥ ultima_pagina_contenido (la última parte termina en esa página o después).
-- Para cada hueco entre parte_i.pagina_fin y parte_{i+1}.pagina_inicio, verifica que ninguna de esas páginas aparece en el listado de páginas de contenido.
+- Confirma que la primera parte tiene pagina_inicio ≤ el valor indicado en "Primera página de contenido" del bloque `<paginas_contenido_verificado>`.
+- Confirma que la última parte tiene pagina_fin ≥ el valor indicado en "Última página de contenido" del bloque `<paginas_contenido_verificado>`.
+- Para cada hueco entre el pagina_fin de una parte y el pagina_inicio de la siguiente, verifica que ninguna de esas páginas aparece en el listado de páginas de contenido del bloque `<paginas_contenido_verificado>`.
 Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas algún error, corrígelo ahora.
 
 **PASO 7 - SUBDIVISIÓN EN SUBPARTES Y REDACCIÓN DE MARCO PEDAGÓGICO:**
