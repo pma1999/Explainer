@@ -53,7 +53,7 @@ from backend.segmentation_tema_coverage import (
     build_tema_coverage_retry_suffix,
     validate_tema_partition,
 )
-from backend.agents.explainer import run_explainer
+from backend.agents.explainer import run_explainer, run_subpart_explainer
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
@@ -491,6 +491,28 @@ def _find_parte_by_numero(partes: list[dict], numero: int) -> dict | None:
     return None
 
 
+def _assemble_part_explainer(
+    parte: dict,
+    subpart_desarrollos: list[list[dict]],
+) -> dict:
+    """Assemble the final explainer dict for a part.
+
+    - introduccion, conclusion, conexiones_contextuales come from the segmentador
+      (which has global document vision).
+    - desarrollo sections are concatenated from all subpart explainer outputs in order.
+    """
+    desarrollo_merged: list[dict] = []
+    for sp_desarrollo in subpart_desarrollos:
+        desarrollo_merged.extend(sp_desarrollo)
+
+    return {
+        "introduccion": parte.get("introduccion", ""),
+        "desarrollo": desarrollo_merged,
+        "conclusion": parte.get("conclusion", ""),
+        "conexiones_contextuales": parte.get("conexiones_contextuales") or [],
+    }
+
+
 def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes: int) -> str:
     blocks: list[str] = []
     blocks.append("CONTEXTO DEL SEGMENTADOR Y DEL USUARIO")
@@ -691,6 +713,170 @@ def _build_youtube_agent_prompt(
         f"{scope}\n\n"
         f"---\n\n"
         f"IDENTIFICACIÓN PRECISA DE LA PARTE (texto del segmentador):\n{identificacion}"
+    )
+
+
+def _build_subpart_context(
+    subparte: dict,
+    all_subpartes: list[dict],
+    part_id: int,
+    num_partes: int,
+) -> str:
+    """Build the subpart-specific scope block for the explainer prompt."""
+    sp_num = subparte.get("numero_subparte", 1)
+    total_sp = len(all_subpartes)
+    sp_titulo = subparte.get("titulo", f"Subparte {sp_num}")
+    sp_contenido = subparte.get("contenido", "")
+    sp_temas = subparte.get("temas_cubiertos", [])
+
+    lines: list[str] = []
+    lines.append("ALCANCE DE LA SUBPARTE (EXPLAINER)")
+    lines.append(
+        f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}."
+    )
+    lines.append(
+        "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
+        "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
+        "por el segmentador con visión global del documento completo."
+    )
+    lines.append("")
+    lines.append(f"Título de esta subparte: «{sp_titulo}»")
+    if sp_contenido:
+        lines.append(f"Alcance: {sp_contenido}")
+    if sp_temas:
+        lines.append("Temas a desarrollar en esta subparte:")
+        for i, tema in enumerate(sp_temas, 1):
+            lines.append(f"  {i}. {tema}")
+
+    # Context about sibling subparts for continuity
+    if total_sp > 1:
+        lines.append("")
+        lines.append("Contexto de otras subpartes de esta misma parte (NO las expliques, solo para continuidad):")
+        for sp in all_subpartes:
+            sp_n = sp.get("numero_subparte", 0)
+            if sp_n != sp_num:
+                label = "anterior" if sp_n < sp_num else "siguiente"
+                lines.append(f"  - Subparte {sp_n} ({label}): {sp.get('titulo', '?')} — {sp.get('contenido', '')[:120]}")
+
+    return "\n".join(lines)
+
+
+def _build_subpart_pdf_prompt(
+    table_of_contents: str,
+    parte: dict,
+    subparte: dict,
+    all_subpartes: list[dict],
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+    *,
+    pdf_scope_mode: Literal["subpdf_buffered", "full_document"],
+    nucleo_inicio: int | None,
+    nucleo_fin: int | None,
+) -> str:
+    """Build the prompt for a subpart explainer call on a PDF source."""
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
+    )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+
+    # Use subpart page range for scope instructions
+    sp_pi = _optional_int(subparte, "pagina_inicio") or nucleo_inicio
+    sp_pf = _optional_int(subparte, "pagina_fin") or nucleo_fin
+    scope = _pdf_scope_instructions(
+        mode=pdf_scope_mode,
+        part_id=part_id,
+        num_partes=num_partes,
+        nucleo_inicio=sp_pi,
+        nucleo_fin=sp_pf,
+    )
+
+    subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
+
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
+    )
+
+
+def _build_subpart_text_prompt(
+    table_of_contents: str,
+    parte: dict,
+    subparte: dict,
+    all_subpartes: list[dict],
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+    *,
+    bloque_inicio: int,
+    bloque_fin: int,
+) -> str:
+    """Build the prompt for a subpart explainer call on a text/web source."""
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
+    )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+
+    sp_bi = subparte.get("bloque_inicio", bloque_inicio)
+    sp_bf = subparte.get("bloque_fin", bloque_fin)
+    scope = _text_scope_instructions(part_id, num_partes, int(sp_bi), int(sp_bf))
+
+    subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
+
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
+    )
+
+
+def _build_subpart_youtube_prompt(
+    table_of_contents: str,
+    parte: dict,
+    subparte: dict,
+    all_subpartes: list[dict],
+    part_id: int,
+    num_partes: int,
+    handoff: PartHandoffContext,
+) -> str:
+    """Build the prompt for a subpart explainer call on a YouTube source."""
+    toc_with_marker = table_of_contents.replace(
+        f"  Parte {part_id}/{num_partes}:",
+        f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
+    )
+    handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    scope = _youtube_scope_instructions(part_id, num_partes)
+
+    subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
+
+    return (
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
     )
 
 
@@ -1320,6 +1506,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = (
                     "subpdf_buffered" if subpdf_buffered_ok else "full_document"
                 )
+                # Build part-level prompt (for recorrido and resources)
                 agent_prompt = _build_pdf_agent_prompt(
                     table_of_contents,
                     identificacion,
@@ -1330,6 +1517,22 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     nucleo_inicio=nucleo_pi,
                     nucleo_fin=nucleo_pf,
                 )
+
+                # Build subpart-level prompts (for explainer)
+                subpartes = parte.get("subpartes") or []
+                if subpartes:
+                    subpart_prompts = [
+                        _build_subpart_pdf_prompt(
+                            table_of_contents, parte, sp, subpartes,
+                            part_id, num_partes, handoff,
+                            pdf_scope_mode=pdf_scope_mode,
+                            nucleo_inicio=nucleo_pi, nucleo_fin=nucleo_pf,
+                        )
+                        for sp in subpartes
+                    ]
+                else:
+                    subpart_prompts = [agent_prompt]  # fallback: whole part as single subpart
+
             elif is_text_source:
                 bloque_inicio = parte.get("bloque_inicio")
                 bloque_fin = parte.get("bloque_fin")
@@ -1367,6 +1570,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     }
                 )
 
+                # Build part-level prompt (for recorrido and resources)
                 agent_prompt = _build_text_agent_prompt(
                     table_of_contents,
                     identificacion,
@@ -1376,6 +1580,21 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     bloque_inicio=int(bloque_inicio),
                     bloque_fin=int(bloque_fin),
                 )
+
+                # Build subpart-level prompts (for explainer)
+                subpartes = parte.get("subpartes") or []
+                if subpartes:
+                    subpart_prompts = [
+                        _build_subpart_text_prompt(
+                            table_of_contents, parte, sp, subpartes,
+                            part_id, num_partes, handoff,
+                            bloque_inicio=int(bloque_inicio), bloque_fin=int(bloque_fin),
+                        )
+                        for sp in subpartes
+                    ]
+                else:
+                    subpart_prompts = [agent_prompt]
+
             elif is_youtube_source:
                 agent_prompt = _build_youtube_agent_prompt(
                     table_of_contents,
@@ -1385,29 +1604,87 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     handoff,
                 )
 
-            # Ejecutar los tres agentes en paralelo
+                # Build subpart-level prompts (for explainer)
+                subpartes = parte.get("subpartes") or []
+                if subpartes:
+                    subpart_prompts = [
+                        _build_subpart_youtube_prompt(
+                            table_of_contents, parte, sp, subpartes,
+                            part_id, num_partes, handoff,
+                        )
+                        for sp in subpartes
+                    ]
+                else:
+                    subpart_prompts = [agent_prompt]
+
+            num_subparts = len(subpart_prompts)
+            use_subpart_explainer = bool(parte.get("subpartes"))
+
+            logger.info(
+                f"[Process] Parte {part_id}: {num_subparts} subparte(s) — ejecutando agentes en paralelo",
+                extra={"part_id": part_id, "num_subparts": num_subparts}
+            )
+
+            # Execute all subpart explainers + recorrido + resources in parallel
             agents_start = time.time()
+            explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
             results = await asyncio.gather(
-                asyncio.to_thread(run_explainer, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
+                *[asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, model_name, agent_mime_type)
+                  for sp_prompt in subpart_prompts],
                 asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
                 asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
                 return_exceptions=True,
             )
             agents_duration = (time.time() - agents_start) * 1000
 
-            explainer_data, usage_e = results[0] if not isinstance(results[0], Exception) else (results[0], None)
-            recorrido_data, usage_rec = results[1] if not isinstance(results[1], Exception) else (results[1], None)
-            resources_data, usage_res = results[2] if not isinstance(results[2], Exception) else (results[2], None)
+            # Split results: first N are subpart explainers, then recorrido, then resources
+            subpart_results = results[:num_subparts]
+            recorrido_result = results[num_subparts]
+            resources_result = results[num_subparts + 1]
 
-            # Actualizar uso de tokens
-            for u, phase in [(usage_e, "explainer"), (usage_rec, "recorrido"), (usage_res, "resources")]:
-                if u:
-                    _update_usage(u, phase=f"part_{part_id}_{phase}")
+            # Process subpart explainer results
+            subpart_desarrollos: list[list[dict]] = []
+            for i, sp_result in enumerate(subpart_results):
+                if isinstance(sp_result, Exception):
+                    logger.error(
+                        f"[Process] Error en explainer subparte {i+1}/{num_subparts} de parte {part_id}: {str(sp_result)}",
+                        extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
+                    )
+                else:
+                    sp_data, sp_usage = sp_result
+                    if sp_usage:
+                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}")
+                    subpart_desarrollos.append(sp_data.get("desarrollo") or [])
+
+            # Assemble: intro/conclusion/conexiones from segmentador + desarrollos from subpart explainers
+            if use_subpart_explainer:
+                assembled_explainer = _assemble_part_explainer(parte, subpart_desarrollos)
+            else:
+                # Fallback: no subparts — use the full explainer output as-is
+                if subpart_results and not isinstance(subpart_results[0], Exception):
+                    assembled_explainer = subpart_results[0][0]
+                else:
+                    assembled_explainer = {"error": "All explainer calls failed"}
+
+            # Process recorrido and resources results
+            recorrido_data, usage_rec = recorrido_result if not isinstance(recorrido_result, Exception) else (recorrido_result, None)
+            resources_data, usage_res = resources_result if not isinstance(resources_result, Exception) else (resources_result, None)
+
+            if usage_rec:
+                _update_usage(usage_rec, phase=f"part_{part_id}_recorrido")
+            if usage_res:
+                _update_usage(usage_res, phase=f"part_{part_id}_resources")
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
-            # Procesar resultados de cada agente
+            # Store explainer (assembled) and notify
+            if isinstance(assembled_explainer, dict) and "error" in assembled_explainer:
+                partes_contenido[str(part_id)]["explainer"] = assembled_explainer
+            else:
+                partes_contenido[str(part_id)]["explainer"] = assembled_explainer
+            await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": "explainer"})
+
+            # Store recorrido and resources
             for result, agent_name in [
-                (explainer_data, "explainer"),
                 (recorrido_data, "recorrido"),
                 (resources_data, "resources"),
             ]:
@@ -1430,9 +1707,10 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             agents_elapsed_ms = int((time.time() - part_start) * 1000)
             logger.info(
                 f"[Process] Agentes de parte {part_id} completados en {agents_elapsed_ms}ms "
-                f"(agentes: {int(agents_duration)}ms) — iniciando formatter en background",
+                f"({num_subparts} subparte(s), agentes: {int(agents_duration)}ms) — iniciando formatter en background",
                 extra={
                     "part_id": part_id,
+                    "num_subparts": num_subparts,
                     "agents_elapsed_ms": agents_elapsed_ms,
                     "agents_duration_ms": int(agents_duration),
                     "cumulative_tokens": cumulative_usage["total_tokens"],
@@ -1450,7 +1728,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     user_id,
                     api_key,
                     part_id,
-                    explainer_data,
+                    assembled_explainer,
                     partes_contenido,
                 )
             )
