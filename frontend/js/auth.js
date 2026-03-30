@@ -10,12 +10,16 @@ import { getPreferOffline, setPreferOffline } from './pwa.js';
 
 export async function refreshApiKeyStatus() {
   const userId = state.user?.id;
+  if (!userId) return;
+
   const cached = getCachedApiKeyStatus(userId);
   if (cached !== null) {
     state.hasApiKey = cached;
     state.apiKeyStatus = cached ? 'has' : 'none';
-    updateApiKeyUI();
+  } else {
+    state.apiKeyStatus = 'loading';
   }
+  updateApiKeyUI();
 
   try {
     const status = await api('/api/settings/api-key/status');
@@ -23,9 +27,10 @@ export async function refreshApiKeyStatus() {
     state.apiKeyStatus = state.hasApiKey ? 'has' : 'none';
     setCachedApiKeyStatus(userId, state.hasApiKey);
   } catch (_) {
-    state.hasApiKey = false;
-    state.apiKeyStatus = 'none';
-    setCachedApiKeyStatus(userId, false);
+    // Only fall back to 'none' if we had no prior signal — don't cache false on transient errors
+    if (cached === null && state.apiKeyStatus === 'loading') {
+      state.apiKeyStatus = 'none';
+    }
   }
   updateApiKeyUI();
 }
@@ -250,10 +255,16 @@ export function hideSettings() {
 }
 
 export function updateApiKeyUI() {
+  const isLoading = state.apiKeyStatus === 'loading';
+
   if (state.hasApiKey) {
     hide($('api-key-not-set'));
     show($('api-key-set'));
     $('btn-delete-api-key').style.display = 'inline-block';
+  } else if (isLoading) {
+    hide($('api-key-not-set'));
+    hide($('api-key-set'));
+    $('btn-delete-api-key').style.display = 'none';
   } else {
     show($('api-key-not-set'));
     hide($('api-key-set'));

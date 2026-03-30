@@ -162,6 +162,8 @@ async function initApp() {
       refreshApiKeyStatus();
       initLanding();
     } else if (newUserId) {
+      invalidateProjectsCache();
+      ensureProjectsFetched().catch(() => {});
       refreshApiKeyStatus();
     }
   });
@@ -174,7 +176,6 @@ async function initApp() {
 
   await migrateLegacyBackupIfNeeded(state.user?.id);
   ensureProjectsFetched();
-  refreshApiKeyStatus();
 
   const currentRoute = window.parseRoute ? window.parseRoute() : null;
   if (currentRoute && (currentRoute.view === 'projects' || (currentRoute.view === 'project' && currentRoute.projectId))) {
