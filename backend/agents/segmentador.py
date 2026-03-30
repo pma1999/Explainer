@@ -123,6 +123,13 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   <subparts_instructions>
   **SUBDIVISIÓN EN SUBPARTES — OBLIGATORIA PARA CADA PARTE:**
 
+  **ADVERTENCIA CRÍTICA — NO CAMBIES LA GRANULARIDAD DE LAS PARTES:**
+  La existencia de subpartes NO es excusa para crear partes más grandes de lo que harías sin ellas. Las partes deben tener EXACTAMENTE la misma granularidad que tendrían si las subpartes no existieran. Las subpartes son un nivel ADICIONAL de división dentro de cada parte, no un sustituto de partes bien definidas.
+
+  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un libro tiene capítulos temáticamente distintos, cada capítulo (o grupo de capítulos estrechamente relacionados) sigue siendo una parte, no una subparte.
+
+  **Regla práctica:** Primero decide las partes como si las subpartes no existieran (aplica todos los principios de segmentación normales). Después, subdivide cada parte en subpartes.
+
   Después de definir las partes, debes subdividir cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
 
   **Principios de subdivisión:**
@@ -199,7 +206,8 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
 - Verifica que esta identificación funcione SIN necesidad de leer la sección "Contenido"
 
 **PASO 7 - SUBDIVISIÓN EN SUBPARTES Y REDACCIÓN DE MARCO PEDAGÓGICO:**
-- Para cada parte, identifica unidades explicativas independientes (subpartes):
+**IMPORTANTE: Este paso se ejecuta DESPUÉS de haber definido las partes en los pasos 4-6. Las partes ya están decididas; aquí solo las subdivides internamente. NO modifiques las partes decididas anteriormente para hacerlas más grandes.**
+- Para cada parte (ya definida), identifica unidades explicativas independientes (subpartes):
   - ¿Qué subtemas dentro de la parte pueden explicarse de forma aislada?
   - ¿Dónde hay cambios internos de foco, concepto o argumento?
   - Asigna subrangos de páginas contiguos a cada subparte
@@ -464,7 +472,14 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   <subparts_instructions>
   **SUBDIVISIÓN EN SUBPARTES — OBLIGATORIA PARA CADA PARTE:**
 
-  Después de definir las partes, debes subdividir cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
+  **ADVERTENCIA CRÍTICA — NO CAMBIES LA GRANULARIDAD DE LAS PARTES:**
+  La existencia de subpartes NO es excusa para crear partes más grandes de lo que harías sin ellas. Las partes deben tener EXACTAMENTE la misma granularidad que tendrían si las subpartes no existieran. Las subpartes son un nivel ADICIONAL de división dentro de cada parte, no un sustituto de partes bien definidas.
+
+  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un texto tiene secciones temáticamente distintas, cada sección sigue siendo una parte, no una subparte.
+
+  **Regla práctica:** Primero decide las partes como si las subpartes no existieran (aplica todos los principios de segmentación normales). Después, subdivide cada parte en subpartes.
+
+  Después de definir las partes, subdivide cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
 
   **Principios de subdivisión:**
   1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada.
