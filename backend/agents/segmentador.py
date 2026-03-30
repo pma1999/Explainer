@@ -120,6 +120,28 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - **Número de partes**: Determinado exclusivamente por la estructura lógica del contenido. Puede ser 1 parte o muchas partes; la IA decide inteligentemente según MECE.
   </segmentation_heuristics>
 
+  <subparts_instructions>
+  **SUBDIVISIÓN EN SUBPARTES — OBLIGATORIA PARA CADA PARTE:**
+
+  Después de definir las partes, debes subdividir cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
+
+  **Principios de subdivisión:**
+  1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada, sin necesidad de conocer las otras subpartes de la misma parte.
+  2. **MECE interno**: Las subpartes de una parte deben cubrir TODOS los temas de esa parte sin solapamientos ni huecos. Los temas_cubiertos de las subpartes deben sumar exactamente los temas_cubiertos de la parte padre.
+  3. **Rangos contiguos**: Las subpartes deben usar subrangos contiguos dentro del rango de páginas de la parte padre. No puede haber huecos ni solapamientos de páginas entre subpartes.
+  4. **Granularidad adecuada**: Divide cuando haya cambios temáticos claros dentro de la parte. Mínimo 1 subparte si la parte es ya suficientemente focalizada; típicamente 2-4 subpartes por parte.
+  5. **Identificación precisa**: Cada subparte necesita su propia identificación con frases textuales de inicio y fin, igual que las partes.
+
+  **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
+
+  Para cada parte, debes redactar además:
+  - **introduccion**: 1-2 párrafos que contextualicen pedagógicamente la parte. Qué tema aborda, por qué importa, qué aprenderá el estudiante. Aprovecha tu visión global del documento completo para situar la parte en el conjunto.
+  - **conclusion**: 1-2 párrafos de síntesis integradora. Ideas clave de la parte, conexiones principales entre los conceptos desarrollados, cierre pedagógico. De nuevo, aprovecha tu visión global.
+  - **conexiones_contextuales**: Lista de referencias cruzadas con otras partes del temario. Cómo se relaciona esta parte con las demás (prerrequisitos, consecuencias, temas complementarios). Vacío si no aplica.
+
+  Estos tres campos los redactas TÚ porque tienes acceso al documento completo y puedes escribir introducciones, conclusiones y conexiones que sitúen cada parte en el contexto global. El agente explainer solo verá una subparte y no podrá hacer esto.
+  </subparts_instructions>
+
   <thinking_protocol>
 Ante de generar tu propuesta de segmentación, completa este proceso en un bloque <thinking>:
 
@@ -176,7 +198,19 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
 - Verifica que los rangos de página de todas las partes cubran TODAS las páginas con contenido sustantivo del documento
 - Verifica que esta identificación funcione SIN necesidad de leer la sección "Contenido"
 
-Solo tras completar estos 6 pasos, genera tu output estructurado en el formato especificado.
+**PASO 7 - SUBDIVISIÓN EN SUBPARTES Y REDACCIÓN DE MARCO PEDAGÓGICO:**
+- Para cada parte, identifica unidades explicativas independientes (subpartes):
+  - ¿Qué subtemas dentro de la parte pueden explicarse de forma aislada?
+  - ¿Dónde hay cambios internos de foco, concepto o argumento?
+  - Asigna subrangos de páginas contiguos a cada subparte
+  - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte
+  - Cada subparte necesita identificación precisa con frases textuales de inicio y fin
+- Para cada parte, redacta:
+  - **introduccion**: contextualización pedagógica aprovechando tu visión global del documento
+  - **conclusion**: síntesis integradora de las ideas clave de la parte
+  - **conexiones_contextuales**: cómo se relaciona con otras partes del temario
+
+Solo tras completar estos 7 pasos, genera tu output estructurado en el formato especificado.
 </thinking_protocol>
 </system_instruction>"""
 
@@ -264,6 +298,99 @@ RESPONSE_SCHEMA = genai.types.Schema(
                     "extension_estimada": genai.types.Schema(type=genai.types.Type.STRING),
                     "complejidad": genai.types.Schema(type=genai.types.Type.STRING),
                     "expansion_prevista": genai.types.Schema(type=genai.types.Type.STRING),
+                    "subpartes": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        description=(
+                            "División de la parte en unidades explicativas independientes y autocontenidas. "
+                            "Cada subparte será explicada por separado por el agente explainer, por lo que debe "
+                            "poder entenderse y desarrollarse de forma aislada. Las subpartes son MECE dentro "
+                            "de la parte: cubren todos sus temas sin solapamientos ni huecos."
+                        ),
+                        items=genai.types.Schema(
+                            type=genai.types.Type.OBJECT,
+                            required=[
+                                "numero_subparte",
+                                "titulo",
+                                "contenido",
+                                "identificacion",
+                                "pagina_inicio",
+                                "pagina_fin",
+                                "temas_cubiertos",
+                            ],
+                            properties={
+                                "numero_subparte": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Número secuencial dentro de la parte (1, 2, 3...).",
+                                ),
+                                "titulo": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Título descriptivo de la subparte.",
+                                ),
+                                "contenido": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Descripción de qué abarca esta subparte.",
+                                ),
+                                "identificacion": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description=(
+                                        "Identificación autocontenida y precisa de dónde empieza y termina "
+                                        "esta subparte en el texto original, con frases textuales de inicio y fin."
+                                    ),
+                                ),
+                                "pagina_inicio": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Primera página de la subparte (según las marcas visibles del PDF).",
+                                ),
+                                "pagina_fin": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Última página de la subparte (según las marcas visibles del PDF).",
+                                ),
+                                "temas_cubiertos": genai.types.Schema(
+                                    type=genai.types.Type.ARRAY,
+                                    items=genai.types.Schema(type=genai.types.Type.STRING),
+                                    description=(
+                                        "Subconjunto de los temas_cubiertos de la parte que cubre esta subparte. "
+                                        "Cada tema de la parte debe aparecer en exactamente una subparte."
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    "introduccion": genai.types.Schema(
+                        type=genai.types.Type.STRING,
+                        description=(
+                            "Uno o dos párrafos que contextualizan pedagógicamente esta parte: qué tema aborda, "
+                            "por qué importa, y qué aprenderá el estudiante. Redactado con visión global del documento."
+                        ),
+                    ),
+                    "conclusion": genai.types.Schema(
+                        type=genai.types.Type.STRING,
+                        description=(
+                            "Uno o dos párrafos de síntesis integradora: ideas clave de la parte, conexiones "
+                            "principales entre los conceptos desarrollados, y cierre pedagógico."
+                        ),
+                    ),
+                    "conexiones_contextuales": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        description=(
+                            "Referencias cruzadas con otras partes del temario. Cómo se relaciona esta parte "
+                            "con las demás. Vacío si no aplica."
+                        ),
+                        items=genai.types.Schema(
+                            type=genai.types.Type.OBJECT,
+                            required=["seccion_temario_relacionada", "descripcion_conexion"],
+                            properties={
+                                "seccion_temario_relacionada": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Nombre o título de la otra parte/sección del temario relacionada.",
+                                ),
+                                "descripcion_conexion": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Descripción de cómo se conectan ambas partes temáticamente.",
+                                ),
+                            },
+                        ),
+                    ),
                 },
             ),
         ),
@@ -334,6 +461,28 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
 
   </methodological_principles>
 
+  <subparts_instructions>
+  **SUBDIVISIÓN EN SUBPARTES — OBLIGATORIA PARA CADA PARTE:**
+
+  Después de definir las partes, debes subdividir cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
+
+  **Principios de subdivisión:**
+  1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada.
+  2. **MECE interno**: Las subpartes cubren TODOS los temas de la parte sin solapamientos ni huecos.
+  3. **Rangos contiguos**: Subrangos de bloques contiguos dentro del rango de la parte padre.
+  4. **Granularidad adecuada**: Mínimo 1 subparte si la parte es ya muy focalizada; típicamente 2-4 subpartes por parte.
+  5. **Identificación precisa**: Cada subparte necesita identificación con frases textuales de inicio y fin.
+
+  **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
+
+  Para cada parte, redacta:
+  - **introduccion**: 1-2 párrafos de contextualización pedagógica con visión global del documento.
+  - **conclusion**: 1-2 párrafos de síntesis integradora.
+  - **conexiones_contextuales**: Referencias cruzadas con otras partes del temario. Vacío si no aplica.
+
+  Estos campos los redactas TÚ porque tienes acceso al documento completo. El agente explainer solo verá una subparte y no podrá hacer esto.
+  </subparts_instructions>
+
   <output_format>
   Responde **exclusivamente** con un objeto JSON válido (sin texto adicional fuera del JSON) con esta estructura:
 
@@ -359,7 +508,21 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
         "texto_fin": "últimas 8-10 palabras exactas del contenido...",
         "temas_cubiertos": ["string"],
         "complejidad_estimada": "baja | media | alta",
-        "razon_corte": "string — por qué esta parte termina aquí y la siguiente empieza allí"
+        "razon_corte": "string — por qué esta parte termina aquí y la siguiente empieza allí",
+        "introduccion": "string — contextualización pedagógica de la parte",
+        "conclusion": "string — síntesis integradora de la parte",
+        "conexiones_contextuales": [{"seccion_temario_relacionada": "...", "descripcion_conexion": "..."}],
+        "subpartes": [
+          {
+            "numero_subparte": 1,
+            "titulo": "string — nombre descriptivo de la subparte",
+            "contenido": "string — qué abarca",
+            "identificacion": "string — ubicación precisa",
+            "bloque_inicio": X,
+            "bloque_fin": Y,
+            "temas_cubiertos": ["string — subconjunto de temas de la parte"]
+          }
+        ]
       }
     ]
   }
@@ -368,6 +531,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   **Restricciones duras del formato:**
   - `bloque_inicio` y `bloque_fin` deben coincidir EXACTAMENTE con los marcadores visibles `=== BLOQUE X ===` del documento.
   - Los rangos deben ser contiguos internamente y cubrir todos los bloques sustantivos exactamente una vez entre todas las partes.
+  - Los rangos de subpartes deben ser subrangos contiguos dentro de su parte padre.
   - Si `es_segmentable = false`: `decision_num_partes = 0`, `partes = []`, `temas_identificados = []`.
   </output_format>
 
@@ -531,6 +695,98 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                     "extension_estimada": genai.types.Schema(type=genai.types.Type.STRING),
                     "complejidad": genai.types.Schema(type=genai.types.Type.STRING),
                     "expansion_prevista": genai.types.Schema(type=genai.types.Type.STRING),
+                    "subpartes": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        description=(
+                            "División de la parte en unidades explicativas independientes y autocontenidas. "
+                            "Cada subparte será explicada por separado por el agente explainer, por lo que debe "
+                            "poder entenderse y desarrollarse de forma aislada. Las subpartes son MECE dentro "
+                            "de la parte: cubren todos sus temas sin solapamientos ni huecos."
+                        ),
+                        items=genai.types.Schema(
+                            type=genai.types.Type.OBJECT,
+                            required=[
+                                "numero_subparte",
+                                "titulo",
+                                "contenido",
+                                "identificacion",
+                                "bloque_inicio",
+                                "bloque_fin",
+                                "temas_cubiertos",
+                            ],
+                            properties={
+                                "numero_subparte": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Número secuencial dentro de la parte (1, 2, 3...).",
+                                ),
+                                "titulo": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Título descriptivo de la subparte.",
+                                ),
+                                "contenido": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Descripción de qué abarca esta subparte.",
+                                ),
+                                "identificacion": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description=(
+                                        "Identificación autocontenida y precisa de dónde empieza y termina "
+                                        "esta subparte en el texto, con frases textuales de inicio y fin."
+                                    ),
+                                ),
+                                "bloque_inicio": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Primer bloque visible `=== BLOQUE X ===` de esta subparte.",
+                                ),
+                                "bloque_fin": genai.types.Schema(
+                                    type=genai.types.Type.INTEGER,
+                                    description="Último bloque visible `=== BLOQUE X ===` de esta subparte.",
+                                ),
+                                "temas_cubiertos": genai.types.Schema(
+                                    type=genai.types.Type.ARRAY,
+                                    items=genai.types.Schema(type=genai.types.Type.STRING),
+                                    description=(
+                                        "Subconjunto de los temas_cubiertos de la parte que cubre esta subparte."
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                    "introduccion": genai.types.Schema(
+                        type=genai.types.Type.STRING,
+                        description=(
+                            "Uno o dos párrafos que contextualizan pedagógicamente esta parte: qué tema aborda, "
+                            "por qué importa, y qué aprenderá el estudiante. Redactado con visión global del documento."
+                        ),
+                    ),
+                    "conclusion": genai.types.Schema(
+                        type=genai.types.Type.STRING,
+                        description=(
+                            "Uno o dos párrafos de síntesis integradora: ideas clave de la parte, conexiones "
+                            "principales entre los conceptos desarrollados, y cierre pedagógico."
+                        ),
+                    ),
+                    "conexiones_contextuales": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        description=(
+                            "Referencias cruzadas con otras partes del temario. Cómo se relaciona esta parte "
+                            "con las demás. Vacío si no aplica."
+                        ),
+                        items=genai.types.Schema(
+                            type=genai.types.Type.OBJECT,
+                            required=["seccion_temario_relacionada", "descripcion_conexion"],
+                            properties={
+                                "seccion_temario_relacionada": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Nombre o título de la otra parte/sección del temario relacionada.",
+                                ),
+                                "descripcion_conexion": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="Descripción de cómo se conectan ambas partes temáticamente.",
+                                ),
+                            },
+                        ),
+                    ),
                 },
             ),
         ),

@@ -335,3 +335,126 @@ def run_explainer(
             }
         )
         raise
+
+
+# ---------------------------------------------------------------------------
+# Subpart explainer: generates only "desarrollo" (sections/subsections).
+# The introduccion, conclusion and conexiones_contextuales are provided by the
+# segmentador which has global vision of the entire document.
+# ---------------------------------------------------------------------------
+
+SUBPART_RESPONSE_SCHEMA = genai.types.Schema(
+    type=genai.types.Type.OBJECT,
+    required=["desarrollo"],
+    properties={
+        "desarrollo": genai.types.Schema(
+            type=genai.types.Type.ARRAY,
+            description="Array de secciones temáticas que constituyen el cuerpo principal de la explicación de esta subparte.",
+            items=genai.types.Schema(
+                type=genai.types.Type.OBJECT,
+                required=["titulo_seccion", "explicacion_introductoria", "subsecciones"],
+                properties={
+                    "titulo_seccion": genai.types.Schema(type=genai.types.Type.STRING),
+                    "explicacion_introductoria": genai.types.Schema(type=genai.types.Type.STRING),
+                    "subsecciones": genai.types.Schema(
+                        type=genai.types.Type.ARRAY,
+                        items=genai.types.Schema(
+                            type=genai.types.Type.OBJECT,
+                            required=["titulo_subseccion", "explicacion_detallada"],
+                            properties={
+                                "titulo_subseccion": genai.types.Schema(type=genai.types.Type.STRING),
+                                "explicacion_detallada": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description=(
+                                        "Explicación exhaustiva y en prosa del elemento. "
+                                        "Integra: definición técnica + reformulación accesible, "
+                                        "términos clave preservados exactamente, ejemplos concretos, "
+                                        "analogías cuando el concepto sea abstracto, desarrollo de matices. "
+                                        "NUNCA condensar artificialmente."
+                                    ),
+                                ),
+                            },
+                        ),
+                    ),
+                },
+            ),
+        ),
+    },
+)
+
+
+@gemini_retry(max_retries=5)
+def run_subpart_explainer(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    model: str = "gemini-3-flash-preview",
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any]:
+    """Run the Explainer agent for a single subpart — returns only desarrollo."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente explainer (subparte)",
+        extra={
+            "file_uri_prefix": file_uri[:60] + "..." if len(file_uri) > 60 else file_uri,
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "mime_type": mime_type,
+        }
+    )
+
+    client = genai.Client(api_key=api_key)
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
+                types.Part.from_text(text=identificacion),
+            ],
+        ),
+    ]
+
+    config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+        response_mime_type="application/json",
+        response_schema=SUBPART_RESPONSE_SCHEMA,
+        system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
+    )
+
+    response = generate_content_with_retry(
+        client=client,
+        model=model,
+        contents=contents,
+        config=config,
+        max_retries=5,
+        operation_context={"agent": "subpart_explainer"},
+    )
+
+    try:
+        result = json.loads(response.text)
+        total_duration = (time.time() - start_time) * 1000
+        num_secciones = len(result.get("desarrollo", []))
+
+        logger.info(
+            f"Subpart explainer completado: {num_secciones} secciones en {int(total_duration)}ms",
+            extra={
+                "num_secciones": num_secciones,
+                "total_duration_ms": int(total_duration),
+                "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0) if response.usage_metadata else 0,
+                "candidates_tokens": getattr(response.usage_metadata, "candidates_token_count", 0) if response.usage_metadata else 0,
+                "thoughts_tokens": getattr(response.usage_metadata, "thoughts_token_count", 0) if response.usage_metadata else 0,
+            }
+        )
+
+        return result, response.usage_metadata
+
+    except json.JSONDecodeError as e:
+        logger.error(
+            f"Error al parsear JSON de subpart explainer: {str(e)}",
+            extra={
+                "error_type": "json_decode_error",
+                "response_preview": response.text[:200] if response.text else "empty",
+            }
+        )
+        raise
