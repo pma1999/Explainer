@@ -12,7 +12,6 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 
-ALLOWED_MODELS = {"gemini-3-flash-preview", "gemini-3.1-pro-preview"}
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +44,7 @@ from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
 from backend.segmentation_tema_coverage import (
@@ -976,7 +976,7 @@ async def _format_and_finalize_part(
         await send_event(project_id, {"type": "part_completed", "part_id": part_id})
 
 
-async def _process_project(project_id: str, user_id: str, model_name: str = "gemini-3-flash-preview") -> None:
+async def _process_project(project_id: str, user_id: str) -> None:
     process_start_time = time.time()
     pdf_temp_path = None
     numbered_pdf_path = None
@@ -1025,10 +1025,15 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
 
         from google import genai
         client = genai.Client(api_key=api_key)
-        logger.info(f"[Process] Modelo seleccionado: {model_name}")
+        logger.info(
+            "[Process] Enrutamiento de modelos: segmentador=%s, resto=%s",
+            MODEL_SEGMENTADOR,
+            MODEL_AGENTS,
+        )
 
         cumulative_usage = {
-            "model": model_name,
+            "segmentation_model": MODEL_SEGMENTADOR,
+            "agents_model": MODEL_AGENTS,
             "prompt_tokens": 0,
             "tool_use_prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -1037,7 +1042,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             "total_cost": 0.0,
         }
 
-        def _update_usage(usage_meta, phase: str = "unknown"):
+        def _update_usage(usage_meta, phase: str = "unknown", *, cost_model: str):
             if not usage_meta:
                 return
             p = getattr(usage_meta, "prompt_token_count", 0) or 0
@@ -1050,7 +1055,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             cumulative_usage["candidates_tokens"] += c
             cumulative_usage["thoughts_tokens"] += t
             cumulative_usage["total_tokens"] += tt
-            cost = calculate_cost(model_name, usage_meta)
+            cost = calculate_cost(cost_model, usage_meta)
             cumulative_usage["total_cost"] += cost
             update_project(project_id, user_id, {"usage": cumulative_usage})
 
@@ -1058,6 +1063,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 f"[Process] Uso de tokens actualizado - fase: {phase}",
                 extra={
                     "phase": phase,
+                    "cost_model": cost_model,
                     "tokens_this_call": tt,
                     "cost_this_call": round(cost, 6),
                     "cumulative_total": cumulative_usage["total_tokens"],
@@ -1106,7 +1112,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                     extract_web_content,
                     source_url,
                     api_key,
-                    model_name,
+                    MODEL_AGENTS,
                 )
                 source_text = extracted_content.text
                 source_title = extracted_content.title
@@ -1132,7 +1138,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 resolved_source_url = source_metadata.get("resolved_url") or source_url
 
             if extraction_usage:
-                _update_usage(extraction_usage, phase="web_extraction")
+                _update_usage(extraction_usage, phase="web_extraction", cost_model=MODEL_AGENTS)
                 await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             web_blocks = await asyncio.to_thread(build_text_blocks, source_text)
@@ -1244,12 +1250,12 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 api_key,
                 file_uri,
                 seg_description,
-                model_name,
+                MODEL_SEGMENTADOR,
                 source_mime_type,
                 source_kind,
             )
             phase = "segmentation" if seg_attempt == 0 else f"segmentation_retry_{seg_attempt}"
-            _update_usage(usage_meta, phase=phase)
+            _update_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             tema_report = validate_tema_partition(segmentation)
@@ -1629,10 +1635,10 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             agents_start = time.time()
             explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
             results = await asyncio.gather(
-                *[asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, model_name, agent_mime_type)
+                *[asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
                   for sp_prompt in subpart_prompts],
-                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
-                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, model_name, agent_mime_type),
+                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
+                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                 return_exceptions=True,
             )
             agents_duration = (time.time() - agents_start) * 1000
@@ -1653,7 +1659,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
                 else:
                     sp_data, sp_usage = sp_result
                     if sp_usage:
-                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}")
+                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=MODEL_AGENTS)
                     subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
             # Assemble: intro/conclusion/conexiones from segmentador + desarrollos from subpart explainers
@@ -1671,9 +1677,9 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             resources_data, usage_res = resources_result if not isinstance(resources_result, Exception) else (resources_result, None)
 
             if usage_rec:
-                _update_usage(usage_rec, phase=f"part_{part_id}_recorrido")
+                _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
             if usage_res:
-                _update_usage(usage_res, phase=f"part_{part_id}_resources")
+                _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=MODEL_AGENTS)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             # Store explainer (assembled) and notify
@@ -1810,7 +1816,7 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             error_msg = (
                 "Error interno en Gemini API (500). "
                 "El sistema reintentó automáticamente pero el servicio sigue fallando. "
-                "Intenta con un modelo diferente (ej: cambia de Pro a Flash) o espera unos minutos."
+                "Espera unos minutos e inténtalo de nuevo."
             )
         elif exc.status_code == 503:
             error_msg = (
@@ -1822,14 +1828,14 @@ async def _process_project(project_id: str, user_id: str, model_name: str = "gem
             error_msg = (
                 "Timeout procesando la petición en Gemini API (504). "
                 "El texto puede ser demasiado largo o complejo. "
-                "Intenta con un documento más pequeño o un modelo diferente."
+                "Prueba con un documento más corto o espera e inténtalo de nuevo."
             )
         elif exc.status_code == 400:
             error_msg = f"Error en la petición a Gemini API (400): {exc.message}"
         elif exc.status_code == 403:
             error_msg = (
                 "Error de permisos en Gemini API (403). "
-                "Verifica que tu API key sea válida y tenga acceso al modelo seleccionado."
+                "Verifica que tu API key sea válida y tenga acceso a los modelos Gemini necesarios."
             )
         else:
             error_msg = f"Error en Gemini API (code={exc.status_code}): {exc.message}"
@@ -2001,7 +2007,6 @@ async def api_process_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
     background_tasks: BackgroundTasks,
-    model: str = Query("gemini-3-flash-preview"),
 ):
     """Start processing a project using the user's own API key (BYOK)."""
     logger.info(
@@ -2029,19 +2034,17 @@ async def api_process_project(
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
 
-    if model not in ALLOWED_MODELS:
-        raise HTTPException(status_code=400, detail=f"Modelo no válido. Opciones: {', '.join(sorted(ALLOWED_MODELS))}")
-
     logger.info(
         f"[API] Iniciando procesamiento en background",
         extra={
             "project_id": project_id,
             "project_name": project.get("name", "unnamed"),
             "source_type": project.get("source_type", "pdf"),
-            "model": model,
+            "segmentation_model": MODEL_SEGMENTADOR,
+            "agents_model": MODEL_AGENTS,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id, model)
+    background_tasks.add_task(_process_project, project_id, user_id)
     return {"ok": True, "status": "started"}
 
 
