@@ -19,6 +19,7 @@ from backend.url_extraction import (
     slice_block_range,
 )
 import main
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 
 
 def _usage(
@@ -106,7 +107,7 @@ def test_extract_web_content_uses_deterministic_pipeline(monkeypatch):
     extracted, usage_meta = extract_web_content(
         "https://example.com/article#frag",
         api_key="AIzaFakeKey",
-        model="gemini-3-flash-preview",
+        model=MODEL_AGENTS,
     )
 
     assert usage_meta is None
@@ -130,7 +131,7 @@ def test_extract_web_content_aborts_when_no_pipeline_succeeds(monkeypatch):
     monkeypatch.setattr("backend.url_extraction._extract_with_gemini_url_context", lambda **kwargs: (None, _usage()))
 
     try:
-        extract_web_content("https://example.com/article", api_key="AIzaFakeKey", model="gemini-3-flash-preview")
+        extract_web_content("https://example.com/article", api_key="AIzaFakeKey", model=MODEL_AGENTS)
         assert False, "Expected WebExtractionError"
     except WebExtractionError as exc:
         assert "no se pudo extraer" in str(exc).lower()
@@ -207,7 +208,7 @@ def test_extract_web_content_uses_browser_render_before_gemini(monkeypatch):
     extracted, usage_meta = extract_web_content(
         "https://example.com/article",
         api_key="AIzaFakeKey",
-        model="gemini-3-flash-preview",
+        model=MODEL_AGENTS,
     )
 
     assert usage_meta is None
@@ -252,7 +253,7 @@ def test_extract_web_content_tries_gemini_after_recoverable_fetch_error(monkeypa
     extracted, usage_meta = extract_web_content(
         "https://example.com/article",
         api_key="AIzaFakeKey",
-        model="gemini-3-flash-preview",
+        model=MODEL_AGENTS,
     )
 
     assert extracted.extraction_method == "gemini_url_context"
@@ -326,6 +327,7 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
                 "file_uri": file_uri,
                 "mime_type": mime_type,
                 "source_kind": source_kind,
+                "model": model,
             }
         )
         return (
@@ -359,15 +361,17 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
         )
 
     def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
-        explainer_calls.append({"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt})
+        explainer_calls.append(
+            {"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt, "model": model}
+        )
         return ({"ok": True}, _usage())
 
     def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type):
-        recorrido_calls.append({"file_uri": file_uri, "mime_type": mime_type})
+        recorrido_calls.append({"file_uri": file_uri, "mime_type": mime_type, "model": model})
         return ({"ok": True}, _usage())
 
     def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type):
-        resources_calls.append({"file_uri": file_uri, "mime_type": mime_type})
+        resources_calls.append({"file_uri": file_uri, "mime_type": mime_type, "model": model})
         return ({"ok": True}, _usage())
 
     monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
@@ -377,6 +381,10 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
 
     asyncio.run(main._process_project("proj-web-1", "user-123"))
 
+    assert segmentador_calls[0]["model"] == MODEL_SEGMENTADOR
+    assert explainer_calls[0]["model"] == MODEL_AGENTS
+    assert recorrido_calls[0]["model"] == MODEL_AGENTS
+    assert resources_calls[0]["model"] == MODEL_AGENTS
     assert segmentador_calls[0]["mime_type"] == "text/plain"
     assert segmentador_calls[0]["source_kind"] == "text"
     assert explainer_calls[0]["mime_type"] == "text/plain"
@@ -444,6 +452,7 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
                 "file_uri": file_uri,
                 "mime_type": mime_type,
                 "source_kind": source_kind,
+                "model": model,
             }
         )
         return (
@@ -486,6 +495,7 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
 
     asyncio.run(main._process_project("proj-web-bad-scrape", "user-123"))
 
+    assert segmentador_calls[0]["model"] == MODEL_SEGMENTADOR
     assert segmentador_calls[0]["mime_type"] == "text/plain"
     assert segmentador_calls[0]["source_kind"] == "text"
     assert explainer_calls == []
