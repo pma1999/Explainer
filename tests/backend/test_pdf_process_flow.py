@@ -14,6 +14,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 import main
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.segmentation_tema_coverage import (
     MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
     SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
@@ -114,6 +115,7 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
                     "file_uri": file_uri,
                     "mime_type": mime_type,
                     "source_kind": source_kind,
+                    "model": model,
                 }
             )
             return (
@@ -132,7 +134,9 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             )
 
         def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
-            explainer_calls.append({"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt})
+            explainer_calls.append(
+                {"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt, "model": model}
+            )
             return ({"ok": True}, _usage())
 
         def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type):
@@ -153,6 +157,8 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
 
         asyncio.run(main._process_project("proj-pdf-1", "user-123"))
 
+        assert segmentador_calls[0]["model"] == MODEL_SEGMENTADOR
+        assert all(c["model"] == MODEL_AGENTS for c in explainer_calls)
         assert segmentador_calls[0]["mime_type"] == "application/pdf"
         assert segmentador_calls[0]["source_kind"] == "pdf"
         assert segmentador_calls[0]["file_uri"].startswith("uploaded://")
