@@ -13,7 +13,8 @@ import {
 import { $, show, hide, toast } from './dom.js';
 import { api, API_BASE_URL, getAccessToken } from './api.js';
 import { isOffline } from './pwa.js';
-import { loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
+import { refreshApiKeyStatus } from './auth.js';
+import { loadBackupAsync, mergeProjects, syncProjectsToBackup, invalidateProjectsCache, ensureProjectsFetched } from './storage.js';
 import {
   renderProjectView,
   renderSidebarNav,
@@ -329,6 +330,12 @@ export function initVisibilityHandling() {
       const wasPaused = state.ssePausedByVisibility;
       state.ssePausedByVisibility = false;
       if (isOffline()) return;
+
+      // Refresh stale data when returning to the app
+      invalidateProjectsCache();
+      ensureProjectsFetched().catch(() => {});
+      refreshApiKeyStatus();
+
       if (wasPaused && state.sseProjectId && state.currentProjectId === state.sseProjectId) {
         const idle = Date.now() - state.sseLastEventAt > 5000;
         const closed = !state.processingSSE || state.processingSSE.readyState === EventSource.CLOSED;

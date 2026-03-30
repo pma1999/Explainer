@@ -200,6 +200,7 @@ export async function loadProjectsView() {
   };
 
   try {
+    invalidateProjectsCache();
     const merged = await ensureProjectsFetched({ onQuotaExceeded });
     await renderProjectsList(merged, pins);
   } catch (err) {
