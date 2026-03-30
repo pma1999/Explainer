@@ -13,10 +13,12 @@ from backend.segmentation_page_coverage import (
 CONTENT = frozenset(range(3, 21))
 
 
-def _parte(num: int, pi: int, pf: int, subpartes: list[dict] | None = None) -> dict:
+def _parte(num: int, pi: int, pf: int, subpartes: list[dict] | None = None, temas: list[str] | None = None) -> dict:
     p: dict = {"numero": num, "titulo": f"Parte {num}", "pagina_inicio": pi, "pagina_fin": pf}
     if subpartes is not None:
         p["subpartes"] = subpartes
+    if temas is not None:
+        p["temas_cubiertos"] = temas
     return p
 
 
@@ -193,6 +195,62 @@ def test_retry_suffix_requirements_block():
         attempt=0, segmentation=seg, report=report, content_page_set=content
     )
     assert "REQUISITOS" in text
+
+
+# ── Retry suffix — semantic anchoring ────────────────────────────────────────
+
+def test_retry_suffix_contains_instruccion_critica():
+    """Retry suffix must include an explicit 'only fix page ranges' instruction."""
+    seg = {"partes": [_parte(1, 3, 9), _parte(2, 12, 20)]}
+    report = validate_page_coverage(seg, CONTENT)
+    text = build_page_coverage_retry_suffix(
+        attempt=0, segmentation=seg, report=report, content_page_set=CONTENT
+    )
+    assert "INSTRUCCIÓN CRÍTICA" in text or "SOLO modifica" in text
+
+
+def test_retry_suffix_includes_temas_identificados_when_present():
+    """When segmentation has temas_identificados, they must appear in the retry suffix."""
+    temas = ["La querella de las investiduras", "El Papado gregoriano", "El Imperio y el Papado"]
+    seg = {
+        "temas_identificados": temas,
+        "partes": [
+            _parte(1, 3, 9, temas=["La querella de las investiduras"]),
+            _parte(2, 12, 20, temas=["El Papado gregoriano", "El Imperio y el Papado"]),
+        ],
+    }
+    report = validate_page_coverage(seg, CONTENT)
+    text = build_page_coverage_retry_suffix(
+        attempt=0, segmentation=seg, report=report, content_page_set=CONTENT
+    )
+    assert "La querella de las investiduras" in text
+    assert "El Papado gregoriano" in text
+
+
+def test_retry_suffix_temas_section_absent_when_no_temas_identificados():
+    """When temas_identificados is missing, suffix still works without crash."""
+    seg = {"partes": [_parte(1, 3, 9), _parte(2, 12, 20)]}
+    report = validate_page_coverage(seg, CONTENT)
+    text = build_page_coverage_retry_suffix(
+        attempt=0, segmentation=seg, report=report, content_page_set=CONTENT
+    )
+    assert "<correccion_rangos_pagina>" in text
+    assert "</correccion_rangos_pagina>" in text
+
+
+def test_compact_segmentation_ranges_includes_temas_cubiertos():
+    """_compact_segmentation_ranges must include temas_cubiertos in part entries."""
+    from backend.segmentation_page_coverage import _compact_segmentation_ranges
+    seg = {
+        "partes": [
+            _parte(1, 3, 9, temas=["Tema A", "Tema B"]),
+            _parte(2, 12, 20, temas=["Tema C"]),
+        ]
+    }
+    text = _compact_segmentation_ranges(seg)
+    assert "Tema A" in text
+    assert "Tema B" in text
+    assert "Tema C" in text
 
 
 if __name__ == "__main__":

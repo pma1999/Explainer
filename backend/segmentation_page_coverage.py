@@ -261,7 +261,7 @@ def _compact_page_list(pages: list[int]) -> str:
 
 
 def _compact_segmentation_ranges(segmentation: dict[str, Any], max_chars: int = 6000) -> str:
-    """Extract only page-range fields from segmentation for the retry message."""
+    """Extract page-range and theme fields from segmentation for the retry message."""
     partes = segmentation.get("partes")
     slim: list[dict[str, Any]] = []
     if isinstance(partes, list):
@@ -271,20 +271,25 @@ def _compact_segmentation_ranges(segmentation: dict[str, Any], max_chars: int = 
             entry: dict[str, Any] = {
                 "numero": p.get("numero"),
                 "titulo": p.get("titulo"),
+                "temas_cubiertos": p.get("temas_cubiertos"),
                 "pagina_inicio": p.get("pagina_inicio"),
                 "pagina_fin": p.get("pagina_fin"),
             }
             sps = p.get("subpartes")
             if isinstance(sps, list):
-                entry["subpartes"] = [
-                    {
+                sp_entries = []
+                for sp in sps:
+                    if not isinstance(sp, dict):
+                        continue
+                    sp_entry: dict[str, Any] = {
                         "numero_subparte": sp.get("numero_subparte"),
                         "pagina_inicio": sp.get("pagina_inicio"),
                         "pagina_fin": sp.get("pagina_fin"),
                     }
-                    for sp in sps
-                    if isinstance(sp, dict)
-                ]
+                    if sp.get("temas_cubiertos") is not None:
+                        sp_entry["temas_cubiertos"] = sp.get("temas_cubiertos")
+                    sp_entries.append(sp_entry)
+                entry["subpartes"] = sp_entries
             slim.append(entry)
     text = json.dumps(slim, ensure_ascii=False, indent=2)
     if len(text) > max_chars:
@@ -303,11 +308,31 @@ def build_page_coverage_retry_suffix(
 
     Returns a string starting with <correccion_rangos_pagina> that describes
     each error and lists the requirements for a valid correction.
+
+    Includes an explicit semantic-anchoring block so the model preserves
+    temas_identificados and temas_cubiertos unchanged, fixing ONLY page ranges.
     """
     lines: list[str] = [
         "<correccion_rangos_pagina>",
         f"Intento de corrección: {attempt + 1}. Los rangos de página de la respuesta anterior no son correctos.",
         "",
+        "INSTRUCCIÓN CRÍTICA: Esta es una corrección EXCLUSIVA de rangos de página.",
+        "Tu respuesta anterior tenía la estructura temática CORRECTA.",
+        "DEBES reproducir exactamente: temas_identificados, número de partes, títulos de partes",
+        "y subpartes, temas_cubiertos, y todos los demás campos textuales.",
+        "SOLO modifica los valores de pagina_inicio y pagina_fin donde se indican los errores.",
+        "",
+    ]
+
+    # Anchor temas_identificados so the model cannot silently drop topics
+    temas_previos = segmentation.get("temas_identificados")
+    if isinstance(temas_previos, list) and temas_previos:
+        lines.append("TEMAS IDENTIFICADOS DE TU RESPUESTA ANTERIOR (copiar exactamente en temas_identificados, sin añadir ni eliminar):")
+        for i, t in enumerate(temas_previos, start=1):
+            lines.append(f"  {i}. {t}")
+        lines.append("")
+
+    lines += [
         f"PÁGINAS DE CONTENIDO QUE DEBEN CUBRIRSE: {_compact_page_list(sorted(content_page_set))}",
         "",
     ]
@@ -346,7 +371,7 @@ def build_page_coverage_retry_suffix(
         "  - Primera subparte de cada parte: pagina_inicio == parte.pagina_inicio.",
         "  - Última subparte de cada parte: pagina_fin == parte.pagina_fin.",
         "",
-        "RESPUESTA ANTERIOR — rangos de página (corrige y devuelve el JSON completo válido):",
+        "ESTRUCTURA DE TU RESPUESTA ANTERIOR (conserva todo; solo corrige pagina_inicio/pagina_fin):",
         _compact_segmentation_ranges(segmentation),
         "</correccion_rangos_pagina>",
     ]
