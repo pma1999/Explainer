@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Muestra en consola el flujo completo: segmentación Gemini Flash, validación MECE de temas
-(con reintentos si hace falta), recorte por páginas y explainer.
+"""Muestra en consola el flujo completo: segmentación (Gemini 3.1 Pro), validación MECE de temas
+(con reintentos si hace falta), recorte por páginas y explainer (Flash Lite preview).
 
 Uso (desde la raíz del repo):
 
   python scripts/demo_investiture_gemini_flow.py
 
-Requiere GEMINI_API_KEY o GOOGLE_API_KEY (o .env). Opcional: GEMINI_LIVE_MODEL.
+Requiere GEMINI_API_KEY o GOOGLE_API_KEY (o .env). Los modelos siguen el enrutamiento fijo del backend.
 """
 
 from __future__ import annotations

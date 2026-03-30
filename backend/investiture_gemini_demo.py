@@ -1,4 +1,4 @@
-"""Investiture PDF → Gemini Flash: segmentación, recorte por páginas y explainer (demo / test helper)."""
+"""Investiture PDF → Gemini: segmentación (Pro), recorte por páginas y explainer (Flash Lite) — demo / test helper."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from google import genai
 from pypdf import PdfReader
 
 from backend.gemini_client import upload_file_with_retry
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
 from backend.agents.explainer import run_explainer
@@ -187,7 +188,8 @@ def _merge_usage_dicts(usages: list[dict[str, Any]]) -> dict[str, Any]:
 @dataclass
 class InvestitureDemoResult:
     pdf_path: Path
-    model: str
+    segmentation_model: str
+    agents_model: str
     total_pages_numbered: int
     segmentation: dict[str, Any]
     first_part: dict[str, Any]
@@ -203,7 +205,6 @@ def run_investiture_pdf_gemini_demo(
     *,
     api_key: str,
     pdf_path: Path | str | None = None,
-    model: str | None = None,
     verbose: bool = False,
     cleanup_remote_files: bool = True,
 ) -> InvestitureDemoResult:
@@ -219,7 +220,6 @@ def run_investiture_pdf_gemini_demo(
             "Coloca el .pdf en la raíz o pasa pdf_path=."
         )
 
-    model = model or os.environ.get("GEMINI_LIVE_MODEL", "gemini-3-flash-preview")
     client = genai.Client(api_key=api_key)
 
     numbered_path: str | None = None
@@ -258,7 +258,7 @@ def run_investiture_pdf_gemini_demo(
             print(f"  MIME: {mime}")
             print(f"  file_uri: {file_uri_full[:80]}…" if len(file_uri_full) > 80 else f"  file_uri: {file_uri_full}")
 
-        log(box=f"4. Segmentador (IA) — modelo {model}")
+        log(box=f"4. Segmentador (IA) — modelo {MODEL_SEGMENTADOR}")
         if verbose:
             print("  La IA debe devolver pagina_inicio / pagina_fin por parte según las marcas visibles.")
             print(
@@ -288,7 +288,7 @@ def run_investiture_pdf_gemini_demo(
                 api_key,
                 file_uri_full,
                 seg_description,
-                model,
+                MODEL_SEGMENTADOR,
                 mime,
                 "pdf",
             )
@@ -443,7 +443,7 @@ def run_investiture_pdf_gemini_demo(
             nucleo_fin=int(first["pagina_fin"]),
         )
 
-        log(box=f"7. Explainer (IA) — mismo modelo {model}, adjunto = sub-PDF anterior")
+        log(box=f"7. Explainer (IA) — modelo {MODEL_AGENTS}, adjunto = sub-PDF anterior")
         if verbose:
             chunks = prompt.split("\n---\n")
             labels = (
@@ -467,7 +467,7 @@ def run_investiture_pdf_gemini_demo(
             api_key,
             uploaded_seg.uri,
             prompt,
-            model,
+            MODEL_AGENTS,
             "application/pdf",
         )
         usage_e = _usage_summary(usage_exp)
@@ -508,7 +508,8 @@ def run_investiture_pdf_gemini_demo(
 
         return InvestitureDemoResult(
             pdf_path=path,
-            model=model,
+            segmentation_model=MODEL_SEGMENTADOR,
+            agents_model=MODEL_AGENTS,
             total_pages_numbered=total_pages,
             segmentation=segmentation,
             first_part=first,
