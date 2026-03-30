@@ -217,7 +217,11 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
 - Para cada parte (ya definida), identifica unidades explicativas independientes (subpartes):
   - ¿Qué subtemas dentro de la parte pueden explicarse de forma aislada?
   - ¿Dónde hay cambios internos de foco, concepto o argumento?
-  - Asigna subrangos de páginas contiguos a cada subparte
+  - Asigna subrangos de páginas contiguos a cada subparte. REGLA DE TRANSICIÓN: cuando
+    una nueva subsección comienza en la página P, la subparte anterior termina en P-1
+    (pagina_fin = P-1) y la nueva subparte comienza en P (pagina_inicio = P). Nunca
+    asignes la misma página como pagina_fin de una subparte Y como pagina_inicio de la
+    siguiente; esa página pertenece a exactamente una subparte.
   - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte
   - Cada subparte necesita identificación precisa con frases textuales de inicio y fin
 - Para cada parte, redacta:
