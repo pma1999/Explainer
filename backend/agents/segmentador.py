@@ -31,7 +31,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   4. **Sentido y Utilidad**: Tu prioridad absoluta es encontrar la **mejor división posible, la que más sentido tenga** pedagógicamente. No divides por algoritmos rígidos; divides allí donde el texto "pide" un cambio de módulo para facilitar el aprendizaje.
   5. **Economía racional de partes**: Buscas el punto óptimo: ni microdivisión agotadora ni macrodivisión abrumadora. **No separas por separar**; solo creas una nueva parte cuando hay una ruptura temática real que justifica un nuevo módulo de estudio.
   6. **Marcadores estructurales**: Priorizas divisiones en cambios de tema, capítulos, secciones, o transiciones naturales del texto. Si el texto no tiene estructura clara, la identificas por cambios de argumento o contenido.
-  7. **Atomicidad estructural jerárquica**: Si el documento tiene estructura explícita, tratas cada sección de primer nivel como una unidad atómica a nivel de parte, y cada subsección como una unidad atómica a nivel de subparte. Puedes agrupar varias unidades hermanas completas si están estrechamente relacionadas, pero nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
+  7. **Atomicidad estructural jerárquica**: Si el documento tiene estructura explícita, tratas cada sección de primer nivel como una unidad atómica a nivel de parte, y cada subsección como una unidad atómica a nivel de subparte. **Cada sección de primer nivel (capítulo, apartado, etc.) que trate un tema distinto debe ser una parte separada.** Dos secciones que abordan aspectos diferentes de un mismo tema general son temas distintos y van en partes separadas. Solo puedes fusionar secciones hermanas si una literalmente no se comprende sin la otra (inseparabilidad real, no mera afinidad temática). Nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
   8. **Identificación precisa de páginas**: Cada página del documento PDF tiene una marca visible en la parte inferior con el formato "— Página X / N —". DEBES usar estas marcas para identificar con precisión en qué página empieza y termina cada parte. Las páginas que no contengan contenido sustantivo (portadas, índices, páginas en blanco) pueden excluirse, pero toda página con contenido debe estar asignada a alguna parte.
 
   **Principios MECE (Mutually Exclusive, Collectively Exhaustive):**
@@ -98,26 +98,28 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Usa subpartes para "reparar" una mala división de partes que ya no es atómica o no es MECE.
   - Separa artificialmente un tema que debería ser unitario.
   - Junta artificialmente temas que son conceptualmente independientes.
+  - **Ejemplo concreto de agrupación indebida**: Un libro tiene Cap. 5 "Espiritualidad y amor divino" (~10 pp.) y Cap. 6 "Valores: vivir con una ética del amor" (~10 pp.). Ambos tratan sobre "amor" en sentido amplio, pero son conceptualmente independientes: uno analiza la dimensión espiritual y otro los valores éticos cotidianos. Agruparlos en una sola parte de ~20 pp. sería incorrecto — cada capítulo debe ser su propia parte porque aborda un tema distinto.
   </quality_criteria>
 
   <segmentation_heuristics>
   **Guías heurísticas para tu razonamiento (NO fórmulas rígidas):**
 
   **Por unidad temática (criterio principal):**
-  - Cada parte debe corresponder a un tema o conjunto de subtemas estrechamente relacionados.
+  - Cada parte debe corresponder a un único tema conceptualmente distinto (o a subtemas genuinamente inseparables — uno no se comprende sin el otro). No basta con que dos temas compartan un tema paraguas para fusionarlos; si tratan aspectos diferentes, son partes separadas.
   - La cantidad de partes depende de cuántos temas independientes identifiques, no del tamaño del texto.
+  - **Señal de alerta por extensión**: si una parte propuesta abarca más de ~15 páginas del documento original, revisa críticamente si realmente contiene un solo tema inseparable o si estás agrupando secciones que podrían estudiarse de forma independiente. La extensión no es un límite duro, pero sí un disparador obligatorio de revisión.
   - Un texto corto con 5 temas claros puede necesitar 5 partes.
   - Un texto largo pero monotemático puede necesitar solo 1 parte.
 
   **Por estructura del texto:**
-  - Texto con capítulos/apartados numerados → Agrupar apartados relacionados en partes
+  - Texto con capítulos/apartados numerados → Cada capítulo/apartado que aborde un tema distinto = una parte separada. Dos capítulos que tratan aspectos diferentes de un mismo tema amplio son temas distintos y van en partes separadas. Solo fusionar capítulos si uno literalmente no se comprende sin el otro
   - Texto monolítico sin estructura → Identificar cambios temáticos y dividir ahí
   - Texto normativo/legal (artículos) → Agrupar artículos por materia común
   - Texto científico (introducción-métodos-resultados-discusión) → Cada sección principal puede ser 1 parte
 
   **Por atomicidad estructural:**
-  - Si hay secciones explícitas de primer nivel, cada parte debe componerse de secciones completas. Puedes agrupar varias secciones completas, pero no partir una sección entre partes.
-  - Si hay subsecciones explícitas dentro de una parte, cada subparte debe componerse de subsecciones completas. Puedes agrupar varias subsecciones completas, pero no partir una subsección entre subpartes.
+  - Si hay secciones explícitas de primer nivel, cada sección con un tema distinto debe ser su propia parte. Solo fusionar varias secciones completas si una literalmente no se comprende sin la otra; aspectos diferentes de un tema amplio = temas distintos = partes separadas. Nunca partir una sección entre partes.
+  - Si hay subsecciones explícitas dentro de una parte, cada subparte debe componerse de subsecciones completas. Puedes agrupar varias subsecciones completas si son genuinamente inseparables, pero no partir una subsección entre subpartes.
   - Solo si NO existe estructura explícita puedes inferir unidades temáticas equivalentes; incluso entonces debes mantener la misma atomicidad conceptual.
 
   **Por complejidad conceptual:**
@@ -141,7 +143,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   **ADVERTENCIA CRÍTICA — NO CAMBIES LA GRANULARIDAD DE LAS PARTES:**
   La existencia de subpartes NO es excusa para crear partes más grandes de lo que harías sin ellas. Las partes deben tener EXACTAMENTE la misma granularidad que tendrían si las subpartes no existieran. Las subpartes son un nivel ADICIONAL de división dentro de cada parte, no un sustituto de partes bien definidas.
 
-  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un libro tiene capítulos temáticamente distintos, cada capítulo (o grupo de capítulos estrechamente relacionados) sigue siendo una parte, no una subparte.
+  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un libro tiene capítulos que abordan temas distintos, cada capítulo es una parte separada, no una subparte. Solo fusionar capítulos si uno literalmente no se comprende sin el otro (inseparabilidad real), no porque compartan un tema general. **Señal de alerta**: si la parte resultante supera ~15 páginas y contiene secciones con títulos distintos, es casi seguro que estás agrupando de más.
 
   **Regla de atomicidad jerárquica:** A nivel de partes, la sección es atómica. A nivel de subpartes, la subsección es atómica. Puedes agrupar varias unidades hermanas completas si la coherencia temática lo exige, pero nunca partir una unidad estructural explícita entre dos contenedores del mismo nivel.
 
@@ -497,7 +499,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   **Una segmentación excelente:**
   - Cada parte tiene unidad temática clara: el estudiante puede decir "esta parte trata de X".
   - Las divisiones ocurren donde el contenido cambia naturalmente de tema, sección o propósito.
-  - Los temas interdependientes permanecen juntos; los independientes se separan.
+  - Los temas genuinamente inseparables (uno no se comprende sin el otro) permanecen juntos; los meramente afines temáticamente se separan en partes distintas.
   - Si existen encabezados o secciones explícitas, cada sección de primer nivel queda íntegra en una sola parte y cada subsección queda íntegra en una sola subparte.
   - La expansión estimada de cada parte es equilibrada y manejable (~ninguna parte generará una explicación abrumadoramente más larga que las demás sin justificación).
   - Los rangos de bloques cubren todo el contenido sustantivo exactamente una vez.
@@ -511,6 +513,8 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   - Partir una sección explícita entre varias partes o una subsección explícita entre varias subpartes.
   - Usar subpartes para compensar una macroparte que ya incumple atomicidad o MECE a nivel de partes.
   - Bloques sustantivos sin asignar o asignados a más de una parte.
+  - **Ejemplo concreto de agrupación indebida**: Un texto tiene Sección A "Espiritualidad y amor divino" (~12 bloques) y Sección B "Valores: vivir con una ética del amor" (~10 bloques). Ambas tratan sobre "amor", pero son conceptualmente independientes: una analiza la dimensión espiritual y otra los valores éticos cotidianos. Agruparlas en una sola parte sería incorrecto — cada sección debe ser su propia parte porque aborda un tema distinto.
+  - **Señal de alerta por extensión**: si una parte propuesta abarca más de ~15 bloques, revisa críticamente si realmente contiene un solo tema inseparable o si estás agrupando secciones que podrían estudiarse de forma independiente.
   </quality_criteria>
 
   <methodological_principles>
@@ -522,7 +526,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   Los marcadores `=== BLOQUE X ===` son indivisibles. Puedes agrupar bloques consecutivos, pero nunca partir un bloque. Si un bloque contiene una transición, asígnalo a la parte donde tenga mayor coherencia pedagógica.
 
   **Principio 3 — Atomicidad estructural jerárquica:**
-  Si el texto tiene secciones o encabezados explícitos, cada sección de primer nivel es atómica a nivel de parte y cada subsección es atómica a nivel de subparte. Puedes agrupar varias unidades hermanas completas, pero nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
+  Si el texto tiene secciones o encabezados explícitos, cada sección de primer nivel es atómica a nivel de parte y cada subsección es atómica a nivel de subparte. **Cada sección que trate un tema distinto debe ser una parte separada.** Dos secciones que abordan aspectos diferentes de un mismo tema general son temas distintos y van en partes separadas. Solo fusionar secciones hermanas si una literalmente no se comprende sin la otra (inseparabilidad real, no afinidad temática). Nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
 
   **Principio 4 — Doble MECE consistente:**
   La propuesta debe ser MECE en dos niveles a la vez: las partes deben particionar todo el texto sustantivo y las subpartes deben particionar exactamente su parte padre. La unión de las subpartes debe coincidir con lo que declara la parte, sin faltantes, sobrantes ni duplicados.
@@ -547,7 +551,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   **ADVERTENCIA CRÍTICA — NO CAMBIES LA GRANULARIDAD DE LAS PARTES:**
   La existencia de subpartes NO es excusa para crear partes más grandes de lo que harías sin ellas. Las partes deben tener EXACTAMENTE la misma granularidad que tendrían si las subpartes no existieran. Las subpartes son un nivel ADICIONAL de división dentro de cada parte, no un sustituto de partes bien definidas.
 
-  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un texto tiene secciones temáticamente distintas, cada sección sigue siendo una parte, no una subparte.
+  **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un texto tiene secciones que abordan temas distintos, cada sección es una parte separada, no una subparte. Solo fusionar secciones si una literalmente no se comprende sin la otra (inseparabilidad real), no porque compartan un tema general.
 
   **Regla de atomicidad jerárquica:** A nivel de partes, la sección es atómica. A nivel de subpartes, la subsección es atómica. Puedes agrupar varias unidades hermanas completas si eso mejora la coherencia, pero nunca partir una unidad estructural explícita entre dos contenedores del mismo nivel.
 
