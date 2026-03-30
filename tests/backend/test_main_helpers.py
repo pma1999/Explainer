@@ -44,3 +44,26 @@ def test_single_page():
     result = fn(frozenset([7]), total_pages=10)
     assert "7" in result
     assert "<paginas_contenido_verificado>" in result
+
+
+def test_prefix_contains_first_content_page_anchor():
+    fn = _get_helper()
+    result = fn(frozenset(range(3, 11)), total_pages=12)
+    assert "Primera página de contenido" in result
+    assert ": 3" in result
+
+
+def test_prefix_contains_last_content_page_anchor():
+    fn = _get_helper()
+    result = fn(frozenset(range(3, 11)), total_pages=12)
+    assert "Última página de contenido" in result
+    assert ": 10" in result
+
+
+def test_prefix_anchors_match_single_page():
+    fn = _get_helper()
+    result = fn(frozenset([7]), total_pages=10)
+    assert "Primera página de contenido" in result
+    assert "Última página de contenido" in result
+    # Both anchors reference page 7
+    assert result.count(": 7") >= 2

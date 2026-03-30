@@ -416,6 +416,8 @@ def _build_content_pages_prefix(content_page_set: frozenset[int], total_pages: i
     return (
         "<paginas_contenido_verificado>\n"
         f"Páginas con contenido sustantivo (DEBEN cubrirse): {content_str}{non_content_str}\n"
+        f"Primera página de contenido (la primera parte DEBE empezar aquí o antes): {sorted_pages[0]}\n"
+        f"Última página de contenido (la última parte DEBE terminar aquí o después): {sorted_pages[-1]}\n"
         "RESTRICCIÓN OBLIGATORIA: Los rangos pagina_inicio/pagina_fin de las partes deben cubrir "
         "colectivamente TODAS las páginas de contenido, sin huecos ni solapamientos entre partes. "
         "Las subpartes de cada parte deben ser contiguas y cubrir exactamente el rango de su parte padre.\n"
@@ -1282,18 +1284,26 @@ async def _process_project(project_id: str, user_id: str) -> None:
         # Clasificador de páginas (solo para PDF): identifica qué páginas son contenido vs. accesorias
         if source_type == "pdf" and numbered_pdf_path and file_uri and pdf_total_pages > 0:
             try:
-                content_page_set = await asyncio.to_thread(
+                content_page_set, clf_usage = await asyncio.to_thread(
                     run_page_classifier,
                     api_key,
                     file_uri,
                     pdf_total_pages,
                     MODEL_CLASSIFIER,
                 )
+                _update_usage(clf_usage, phase="page_classifier", cost_model=MODEL_CLASSIFIER)
+                await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+                clf_cost = calculate_cost(MODEL_CLASSIFIER, clf_usage)
                 logger.info(
-                    "[Process] Clasificador: %d páginas de contenido de %d",
+                    "[Process] Clasificador: %d páginas de contenido de %d (coste ~$%.6f USD)",
                     len(content_page_set),
                     pdf_total_pages,
-                    extra={"content_pages_count": len(content_page_set), "total_pages": pdf_total_pages},
+                    clf_cost,
+                    extra={
+                        "content_pages_count": len(content_page_set),
+                        "total_pages": pdf_total_pages,
+                        "classifier_cost_usd": clf_cost,
+                    },
                 )
             except Exception as clf_err:
                 content_page_set = frozenset(range(1, pdf_total_pages + 1))
