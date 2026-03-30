@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from backend.gemini_model_routing import MODEL_SEGMENTADOR
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
@@ -821,7 +822,7 @@ def run_segmentador(
     api_key: str,
     file_uri: str,
     description: str,
-    model: str = "gemini-3-flash-preview",
+    model: str = MODEL_SEGMENTADOR,
     mime_type: str = "application/pdf",
     source_kind: str = "pdf",
 ) -> tuple[dict[str, Any], Any]:

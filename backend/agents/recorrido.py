@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_RECORRIDO_REFUERZO_XML
@@ -346,7 +347,7 @@ def run_recorrido(
     api_key: str,
     file_uri: str,
     identificacion: str,
-    model: str = "gemini-3-flash-preview",
+    model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Recorrido Anotado agent and return (structured_result, usage_metadata)."""
