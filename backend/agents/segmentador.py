@@ -31,11 +31,15 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   4. **Sentido y Utilidad**: Tu prioridad absoluta es encontrar la **mejor división posible, la que más sentido tenga** pedagógicamente. No divides por algoritmos rígidos; divides allí donde el texto "pide" un cambio de módulo para facilitar el aprendizaje.
   5. **Economía racional de partes**: Buscas el punto óptimo: ni microdivisión agotadora ni macrodivisión abrumadora. **No separas por separar**; solo creas una nueva parte cuando hay una ruptura temática real que justifica un nuevo módulo de estudio.
   6. **Marcadores estructurales**: Priorizas divisiones en cambios de tema, capítulos, secciones, o transiciones naturales del texto. Si el texto no tiene estructura clara, la identificas por cambios de argumento o contenido.
-  7. **Identificación precisa de páginas**: Cada página del documento PDF tiene una marca visible en la parte inferior con el formato "— Página X / N —". DEBES usar estas marcas para identificar con precisión en qué página empieza y termina cada parte. Las páginas que no contengan contenido sustantivo (portadas, índices, páginas en blanco) pueden excluirse, pero toda página con contenido debe estar asignada a alguna parte.
+  7. **Atomicidad estructural jerárquica**: Si el documento tiene estructura explícita, tratas cada sección de primer nivel como una unidad atómica a nivel de parte, y cada subsección como una unidad atómica a nivel de subparte. Puedes agrupar varias unidades hermanas completas si están estrechamente relacionadas, pero nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
+  8. **Identificación precisa de páginas**: Cada página del documento PDF tiene una marca visible en la parte inferior con el formato "— Página X / N —". DEBES usar estas marcas para identificar con precisión en qué página empieza y termina cada parte. Las páginas que no contengan contenido sustantivo (portadas, índices, páginas en blanco) pueden excluirse, pero toda página con contenido debe estar asignada a alguna parte.
 
   **Principios MECE (Mutually Exclusive, Collectively Exhaustive):**
   - **Cobertura total (Collectively Exhaustive)**: Cada palabra, párrafo y tema del texto original debe pertenecer a una y solo una parte. No puede quedar contenido sin asignar. Todas las páginas con contenido sustantivo deben estar cubiertas por los rangos de página de las partes.
   - **Exclusividad mutua (Mutually Exclusive)**: Las partes no deben solaparse temáticamente. Cada tema/subtema aparece en exactamente una parte, nunca en varias.
+  - **Doble MECE jerárquico**: La segmentación debe ser MECE en dos niveles simultáneamente y de forma consistente: las partes deben particionar el documento completo y las subpartes deben particionar íntegramente su parte padre.
+  - **Atomicidad estructural obligatoria**: Si el texto tiene capítulos/secciones/subsecciones explícitas, cada unidad estructural debe asignarse entera a una sola unidad del nivel correspondiente. Una sección no puede quedar repartida entre varias partes; una subsección no puede quedar repartida entre varias subpartes.
+  - **Consistencia padre-hijo**: La unión exacta de temas y unidades estructurales cubiertas por las subpartes debe coincidir con lo declarado por la parte padre, sin faltantes, duplicados ni elementos ajenos.
   - **No artificialidad**: Prohibido separar un tema que debería ser unitario solo para crear más partes, o juntar temas conceptualmente independientes solo para reducir el número de partes.
   - **Asignación explícita**: Cada tema identificado en el texto debe quedar asignado explícitamente a una parte específica.
 
@@ -54,8 +58,9 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   3. Que no se pierda contexto esencial por divisiones artificiales (ej: separar un requisito de sus excepciones).
   4. Que el estudiante pueda estudiar parte por parte sin confusión sobre "qué entra en este módulo".
   5. Que la carga cognitiva estimada tras la explicación sea equilibrada entre partes.
-  6. **Que la segmentación sea MECE**: Mutually Exclusive (cada parte cubre temas claramente diferenciados, sin solapamientos) y Collectively Exhaustive (todas las partes juntas cubren TODO el texto sin dejar nada fuera).
-  7. Que el número de partes sea el mínimo necesario para garantizar MECE - pueden ser pocas (texto corto y coherente) o muchas (texto largo con múltiples temas independientes), lo que exija la lógica del contenido.
+  6. **Que la segmentación sea doblemente MECE**: a nivel de partes respecto del documento completo y a nivel de subpartes respecto de su parte padre, siempre con cobertura total y sin solapamientos.
+  7. Que se respete la **atomicidad estructural**: una sección explícita pertenece íntegramente a una sola parte y una subsección explícita pertenece íntegramente a una sola subparte.
+  8. Que el número de partes sea el mínimo necesario para garantizar esa estructura doblemente MECE - pueden ser pocas (texto corto y coherente) o muchas (texto largo con múltiples temas independientes), lo que exija la lógica del contenido.
 
   **Tu objetivo NO es:**
   - Dividir mecánicamente por número de palabras o párrafos
@@ -70,12 +75,14 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Cada parte tiene unidad temática clara: el estudiante puede resumir "esta parte trata de X".
   - Las divisiones no son arbitrarias; ocurren solo cuando el flujo del contenido cambia sustancialmente.
   - Se garantiza que todos los temas y subtemas se desarrollan íntegramente dentro de una misma parte.
+  - Si hay estructura explícita, cada sección de primer nivel queda íntegra dentro de una sola parte y cada subsección queda íntegra dentro de una sola subparte.
   - La estimación de expansión es realista: no propones partes que tras explicarse serían 30000 palabras.
   - El número de partes está justificado por el contenido, no por alcanzar una cifra objetivo.
   - Contemplas casos especiales: si un tema al final es muy denso, puede ser una parte propia aunque sea más corta.
   - Las partes no crean "lagunas de comprensión": si A se entiende solo con B, van juntos siempre.
   - **MECE - Collectively Exhaustive**: Las partes son conjuntamente exhaustivas; cubren TODO el texto sin dejar contenido sin asignar.
   - **MECE - Mutually Exclusive**: Las partes son mutuamente excluyentes; cada tema/subtema aparece en exactamente una parte, sin solapamientos.
+  - **Doble MECE consistente**: Las subpartes reproducen exactamente la cobertura de su parte padre; no falta ningún tema, no sobra ninguno y no hay duplicados entre hermanas.
   - Verificación MECE explícita: se puede trazar cada párrafo del texto a una y solo una parte.
 
   **Una segmentación DEFICIENTE:**
@@ -87,6 +94,8 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Las divisiones son arbitrarias: "hasta aquí porque es la mitad" sin mirar el contenido.
   - Deja contenido del texto sin asignar a ninguna parte (falla Collectively Exhaustive).
   - Asigna el mismo contenido a múltiples partes (falla Mutually Exclusive).
+  - Parte una sección explícita entre varias partes o una subsección explícita entre varias subpartes.
+  - Usa subpartes para "reparar" una mala división de partes que ya no es atómica o no es MECE.
   - Separa artificialmente un tema que debería ser unitario.
   - Junta artificialmente temas que son conceptualmente independientes.
   </quality_criteria>
@@ -105,6 +114,11 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Texto monolítico sin estructura → Identificar cambios temáticos y dividir ahí
   - Texto normativo/legal (artículos) → Agrupar artículos por materia común
   - Texto científico (introducción-métodos-resultados-discusión) → Cada sección principal puede ser 1 parte
+
+  **Por atomicidad estructural:**
+  - Si hay secciones explícitas de primer nivel, cada parte debe componerse de secciones completas. Puedes agrupar varias secciones completas, pero no partir una sección entre partes.
+  - Si hay subsecciones explícitas dentro de una parte, cada subparte debe componerse de subsecciones completas. Puedes agrupar varias subsecciones completas, pero no partir una subsección entre subpartes.
+  - Solo si NO existe estructura explícita puedes inferir unidades temáticas equivalentes; incluso entonces debes mantener la misma atomicidad conceptual.
 
   **Por complejidad conceptual:**
   - Texto denso (muchos conceptos/requisitos/excepciones) → Dividir por temas para facilitar digestión
@@ -129,15 +143,17 @@ SYSTEM_INSTRUCTION = """<system_instruction>
 
   **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un libro tiene capítulos temáticamente distintos, cada capítulo (o grupo de capítulos estrechamente relacionados) sigue siendo una parte, no una subparte.
 
+  **Regla de atomicidad jerárquica:** A nivel de partes, la sección es atómica. A nivel de subpartes, la subsección es atómica. Puedes agrupar varias unidades hermanas completas si la coherencia temática lo exige, pero nunca partir una unidad estructural explícita entre dos contenedores del mismo nivel.
+
   **Regla práctica:** Primero decide las partes como si las subpartes no existieran (aplica todos los principios de segmentación normales). Después, subdivide cada parte en subpartes.
 
   Después de definir las partes, debes subdividir cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
 
   **Principios de subdivisión:**
   1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada, sin necesidad de conocer las otras subpartes de la misma parte.
-  2. **MECE interno**: Las subpartes de una parte deben cubrir TODOS los temas de esa parte sin solapamientos ni huecos. Los temas_cubiertos de las subpartes deben sumar exactamente los temas_cubiertos de la parte padre.
+  2. **MECE interno y consistencia vertical**: Las subpartes de una parte deben cubrir TODOS los temas y unidades estructurales de esa parte sin solapamientos ni huecos. Los temas_cubiertos de las subpartes deben sumar exactamente los temas_cubiertos de la parte padre, sin faltantes, sin sobrantes y sin duplicados.
   3. **Rangos contiguos**: Las subpartes deben usar subrangos contiguos dentro del rango de páginas de la parte padre. No puede haber huecos ni solapamientos de páginas entre subpartes.
-  4. **Granularidad adecuada**: Divide cuando haya cambios temáticos claros dentro de la parte. Mínimo 1 subparte si la parte es ya suficientemente focalizada; típicamente 2-4 subpartes por parte.
+  4. **Granularidad adecuada**: Divide cuando haya cambios temáticos claros dentro de la parte. Si hay subsecciones explícitas, usa esas subsecciones como átomos base de las subpartes. Mínimo 1 subparte si la parte es ya suficientemente focalizada; típicamente 2-4 subpartes por parte.
   5. **Identificación precisa**: Cada subparte necesita su propia identificación con frases textuales de inicio y fin, igual que las partes.
 
   **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
@@ -151,13 +167,13 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   </subparts_instructions>
 
   <thinking_protocol>
-Ante de generar tu propuesta de segmentación, completa este proceso en un bloque <thinking>:
+Antes de generar tu propuesta de segmentación, completa este proceso en un bloque <thinking>:
 
 **PASO 1 - ANÁLISIS INICIAL:**
 - Lee el texto completo proporcionado
 - Identifica longitud aproximada (número de palabras/párrafos)
 - Detecta si tiene estructura explícita (apartados, capítulos, secciones numeradas) o es monolítico
-    - Si tiene estructura, anota TODOS los capítulos/secciones/apartados con sus títulos y numeración completos
+    - Si tiene estructura, anota TODOS los capítulos/secciones/subsecciones/apartados con sus títulos y numeración completos
 - Clasifica el tipo de contenido (legal, científico, histórico, técnico, expositivo...)
 
 **PASO 2 - IDENTIFICACIÓN TEMÁTICA:**
@@ -190,9 +206,10 @@ Ante de generar tu propuesta de segmentación, completa este proceso en un bloqu
   - Balance entre coherencia y manejo
   - Evitar partes que generarían explicaciones > 20000 palabras
   - Evitar partes < 200 palabras salvo justificación especial
-  - Verificación MECE: cada tema de tu lista aparece en exactamente una parte (sin solapamientos)
+  - Verificación MECE externa: cada tema de tu lista aparece en exactamente una parte (sin solapamientos)
   - Verificación de cobertura total: ningún párrafo del texto queda sin asignar a una parte
-  - El número de partes es el mínimo necesario para garantizar MECE según el contenido
+  - Verificación de atomicidad estructural externa: ninguna sección o capítulo explícito queda partido entre varias partes
+  - El número de partes es el mínimo necesario para garantizar MECE y atomicidad estructural según el contenido
 - Articula por qué esta opción es mejor que las otras
 
 **PASO 6 - DEFINICIÓN PRECISA DE IDENTIFICACIÓN Y PÁGINAS:**
@@ -217,6 +234,7 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
 - Para cada parte (ya definida), identifica unidades explicativas independientes (subpartes):
   - ¿Qué subtemas dentro de la parte pueden explicarse de forma aislada?
   - ¿Dónde hay cambios internos de foco, concepto o argumento?
+  - Si hay subsecciones explícitas dentro de la parte, toma cada subsección como átomo base: puedes agrupar varias subsecciones completas, pero no partir una subsección entre dos subpartes
   - Asigna subrangos de páginas contiguos a cada subparte. REGLA DE TRANSICIÓN: cada
     página pertenece a exactamente una subparte. Cuando la página P contiene contenido
     de dos subsecciones a la vez (el final de la anterior y el inicio de la siguiente),
@@ -230,14 +248,14 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
     pueden referenciarla: subparte_anterior.pagina_fin = P y subparte_siguiente.pagina_inicio = P.
     Esto solo es válido para UNA página por transición; si el solapamiento es de más de
     una página es un error.
-  - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte
+  - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte y que ninguna subsección explícita queda repartida entre varias subpartes
   - Cada subparte necesita identificación precisa con frases textuales de inicio y fin
 - Para cada parte, redacta:
   - **introduccion**: contextualización pedagógica aprovechando tu visión global del documento
   - **conclusion**: síntesis integradora de las ideas clave de la parte
   - **conexiones_contextuales**: cómo se relaciona con otras partes del temario
 
-**PASO 8 — VERIFICACIÓN EXPLÍCITA DE COBERTURA DE PÁGINAS:**
+**PASO 8 — VERIFICACIÓN EXPLÍCITA DE COBERTURA DE PÁGINAS (si aplica):**
 Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este paso obligatoriamente:
 
 1. Copia la lista de páginas de contenido del bloque `<paginas_contenido_verificado>`.
@@ -252,9 +270,16 @@ Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este 
      o bien subparte_j.pagina_fin == subparte_{j+1}.pagina_inicio si la página de transición contiene
      contenido de ambas (solo se permite UNA página compartida por transición).
    - No hay solapamientos de más de una página entre subpartes consecutivas.
-6. Si detectas algún error, corrígelo antes de generar el output.
+6. Si detectas algún error, corrígelo antes de continuar.
 
-Solo tras completar estos 8 pasos, genera tu output estructurado en el formato especificado.
+**PASO 9 — VERIFICACIÓN FINAL DE DOBLE MECE Y ATOMICIDAD:**
+- Verifica el doble MECE jerárquico completo:
+  - Cada sección o capítulo explícito pertenece a exactamente una parte.
+  - Cada subsección explícita pertenece a exactamente una subparte.
+  - La unión de subpartes reproduce exactamente los temas y unidades estructurales declarados por la parte padre.
+- Si detectas algún error, corrígelo antes de generar el output.
+
+Solo tras completar todos los pasos aplicables, genera tu output estructurado en el formato especificado.
 </thinking_protocol>
 </system_instruction>"""
 
@@ -464,7 +489,8 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   1. Valide primero si la fuente contiene contenido real y segmentable (vs. mal scrape, captcha, boilerplate).
   2. Divida el texto en el número óptimo de partes según su estructura temática interna — ni más ni menos de lo necesario.
   3. Garantice que cada parte sea un módulo de estudio coherente, manejable tras expansión explicativa, y autocontenido temáticamente.
-  4. Sea **MECE**: cobertura total de bloques sustantivos, sin solapamientos, sin huecos.
+  4. Sea **doblemente MECE**: cobertura total y sin solapamientos a nivel de partes respecto del texto completo, y también a nivel de subpartes respecto de su parte padre.
+  5. Respete la **atomicidad estructural jerárquica**: una sección explícita pertenece íntegramente a una sola parte y una subsección explícita pertenece íntegramente a una sola subparte.
   </objectives>
 
   <quality_criteria>
@@ -472,14 +498,18 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   - Cada parte tiene unidad temática clara: el estudiante puede decir "esta parte trata de X".
   - Las divisiones ocurren donde el contenido cambia naturalmente de tema, sección o propósito.
   - Los temas interdependientes permanecen juntos; los independientes se separan.
+  - Si existen encabezados o secciones explícitas, cada sección de primer nivel queda íntegra en una sola parte y cada subsección queda íntegra en una sola subparte.
   - La expansión estimada de cada parte es equilibrada y manejable (~ninguna parte generará una explicación abrumadoramente más larga que las demás sin justificación).
   - Los rangos de bloques cubren todo el contenido sustantivo exactamente una vez.
+  - Las subpartes reproducen exactamente la cobertura temática y estructural declarada por su parte padre.
 
   **Señales de segmentación deficiente:**
   - Segmentar boilerplate, captchas o menús como si fueran contenido real.
   - Cortar un procedimiento o argumento a mitad de desarrollo.
   - Crear partes grotescamente desbalanceadas sin justificación temática.
   - Microdivisión innecesaria o macrodivisión que agrupa temas independientes.
+  - Partir una sección explícita entre varias partes o una subsección explícita entre varias subpartes.
+  - Usar subpartes para compensar una macroparte que ya incumple atomicidad o MECE a nivel de partes.
   - Bloques sustantivos sin asignar o asignados a más de una parte.
   </quality_criteria>
 
@@ -491,16 +521,22 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   **Principio 2 — El bloque es atómico:**
   Los marcadores `=== BLOQUE X ===` son indivisibles. Puedes agrupar bloques consecutivos, pero nunca partir un bloque. Si un bloque contiene una transición, asígnalo a la parte donde tenga mayor coherencia pedagógica.
 
-  **Principio 3 — Validación de fuente antes de segmentar:**
+  **Principio 3 — Atomicidad estructural jerárquica:**
+  Si el texto tiene secciones o encabezados explícitos, cada sección de primer nivel es atómica a nivel de parte y cada subsección es atómica a nivel de subparte. Puedes agrupar varias unidades hermanas completas, pero nunca partir una sección entre varias partes ni una subsección entre varias subpartes.
+
+  **Principio 4 — Doble MECE consistente:**
+  La propuesta debe ser MECE en dos niveles a la vez: las partes deben particionar todo el texto sustantivo y las subpartes deben particionar exactamente su parte padre. La unión de las subpartes debe coincidir con lo que declara la parte, sin faltantes, sobrantes ni duplicados.
+
+  **Principio 5 — Validación de fuente antes de segmentar:**
   Si el texto presenta señales de mal scrape (páginas anti-bot, muros de login, boilerplate, HTML visible, menús repetitivos, texto truncado sin contenido sustantivo), rechaza la segmentación explícitamente con `evaluacion_fuente.es_segmentable = false`. No inventes partes para rellenar extracciones defectuosas.
 
-  **Principio 4 — Adaptación al tipo de texto:**
+  **Principio 6 — Adaptación al tipo de texto:**
   Ajusta tu estrategia al género: ensayos (por argumento), documentación técnica (por concepto/API), textos normativos (por materia), científicos (IMRAD), tutoriales (prerrequisitos + pasos dependientes juntos). La estructura interna del texto manda.
 
-  **Principio 5 — Factor de expansión:**
+  **Principio 7 — Factor de expansión:**
   Anticipa que cada parte se expandirá ~5-10x. Ajusta para que ningún módulo resulte cognitivamente inabordable tras la explicación.
 
-  **Principio 6 — Cabecera ≠ contenido:**
+  **Principio 8 — Cabecera ≠ contenido:**
   Líneas como `TÍTULO:`, `URL:` y notas operativas aportan contexto pero no forman partes. La segmentación se ancla exclusivamente en bloques numerados.
 
   </methodological_principles>
@@ -513,15 +549,17 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
 
   **Anti-patrón prohibido:** Agrupar varios capítulos/secciones independientes en una sola "macroparte" y luego usar subpartes para lo que deberían haber sido partes separadas. Si un texto tiene secciones temáticamente distintas, cada sección sigue siendo una parte, no una subparte.
 
+  **Regla de atomicidad jerárquica:** A nivel de partes, la sección es atómica. A nivel de subpartes, la subsección es atómica. Puedes agrupar varias unidades hermanas completas si eso mejora la coherencia, pero nunca partir una unidad estructural explícita entre dos contenedores del mismo nivel.
+
   **Regla práctica:** Primero decide las partes como si las subpartes no existieran (aplica todos los principios de segmentación normales). Después, subdivide cada parte en subpartes.
 
   Después de definir las partes, subdivide cada parte en **subpartes**. Cada subparte será procesada de forma independiente por un agente explainer que SOLO verá esa subparte, por lo que debe ser completamente autocontenida.
 
   **Principios de subdivisión:**
   1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada.
-  2. **MECE interno**: Las subpartes cubren TODOS los temas de la parte sin solapamientos ni huecos.
+  2. **MECE interno y consistencia vertical**: Las subpartes cubren TODOS los temas y unidades estructurales de la parte sin solapamientos ni huecos. Su unión debe coincidir exactamente con lo declarado por la parte padre, sin faltantes, sobrantes ni duplicados.
   3. **Rangos contiguos**: Subrangos de bloques contiguos dentro del rango de la parte padre.
-  4. **Granularidad adecuada**: Mínimo 1 subparte si la parte es ya muy focalizada; típicamente 2-4 subpartes por parte.
+  4. **Granularidad adecuada**: Si hay subsecciones explícitas, úsalas como átomos base de las subpartes. Mínimo 1 subparte si la parte es ya muy focalizada; típicamente 2-4 subpartes por parte.
   5. **Identificación precisa**: Cada subparte necesita identificación con frases textuales de inicio y fin.
 
   **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
@@ -533,6 +571,22 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
 
   Estos campos los redactas TÚ porque tienes acceso al documento completo. El agente explainer solo verá una subparte y no podrá hacer esto.
   </subparts_instructions>
+
+  <thinking_protocol>
+  Antes de generar el JSON final, completa este proceso en un bloque <thinking>:
+
+  1. Mapea toda la estructura explícita disponible del texto: títulos, secciones, subsecciones y bloques.
+  2. Lista de forma exhaustiva TODOS los temas y subtemas sustantivos detectados.
+  3. Explora 2-3 opciones de segmentación posibles y compara cuál minimiza macrodivisiones artificiales.
+  4. Elige la opción con el menor número de partes que siga siendo doblemente MECE y respete la atomicidad estructural: ninguna sección explícita puede quedar partida entre partes.
+  5. Para cada parte, diseña subpartes que también sean atómicas y MECE: ninguna subsección explícita puede quedar partida entre varias subpartes.
+  6. Verifica antes de responder:
+     - bloque → parte: cada bloque sustantivo pertenece a exactamente una parte;
+     - sección → parte: cada sección explícita pertenece a exactamente una parte;
+     - subsección → subparte: cada subsección explícita pertenece a exactamente una subparte;
+     - subpartes → parte padre: la unión de temas y unidades estructurales de las subpartes coincide exactamente con la cobertura declarada por la parte.
+  7. Si detectas cualquier incumplimiento de atomicidad o de doble MECE, corrígelo antes de generar el JSON.
+  </thinking_protocol>
 
   <output_format>
   Responde **exclusivamente** con un objeto JSON válido (sin texto adicional fuera del JSON) con esta estructura:
@@ -583,6 +637,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   - `bloque_inicio` y `bloque_fin` deben coincidir EXACTAMENTE con los marcadores visibles `=== BLOQUE X ===` del documento.
   - Los rangos deben ser contiguos internamente y cubrir todos los bloques sustantivos exactamente una vez entre todas las partes.
   - Los rangos de subpartes deben ser subrangos contiguos dentro de su parte padre.
+  - Si el texto tiene secciones explícitas, ninguna sección puede repartirse entre varias partes; si tiene subsecciones explícitas, ninguna puede repartirse entre varias subpartes.
   - Si `es_segmentable = false`: `decision_num_partes = 0`, `partes = []`, `temas_identificados = []`.
   </output_format>
 
