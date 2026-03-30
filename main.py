@@ -44,7 +44,7 @@ from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
-from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_SEGMENTADOR
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
 from backend.segmentation_tema_coverage import (
@@ -53,6 +53,14 @@ from backend.segmentation_tema_coverage import (
     build_tema_coverage_retry_suffix,
     validate_tema_partition,
 )
+from backend.agents.page_classifier import run_page_classifier
+from backend.segmentation_page_coverage import (
+    MAX_PAGE_COVERAGE_ATTEMPTS,
+    SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
+    build_page_coverage_retry_suffix,
+    validate_page_coverage,
+)
+from pypdf import PdfReader
 from backend.agents.explainer import run_explainer, run_subpart_explainer
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
@@ -372,6 +380,47 @@ async def api_delete_project(
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     delete_project(project_id, user_id)
     return {"ok": True}
+
+
+def _build_content_pages_prefix(content_page_set: frozenset[int], total_pages: int) -> str:
+    """Build the <paginas_contenido_verificado> block injected into the segmentador prompt."""
+    if not content_page_set:
+        return ""
+    sorted_pages = sorted(content_page_set)
+    ranges: list[str] = []
+    start = prev = sorted_pages[0]
+    for p in sorted_pages[1:]:
+        if p == prev + 1:
+            prev = p
+        else:
+            ranges.append(f"{start}-{prev}" if start != prev else str(start))
+            start = prev = p
+    ranges.append(f"{start}-{prev}" if start != prev else str(start))
+    content_str = ", ".join(ranges)
+
+    non_content = sorted(set(range(1, total_pages + 1)) - content_page_set)
+    if non_content:
+        nc_ranges: list[str] = []
+        s = pr = non_content[0]
+        for p in non_content[1:]:
+            if p == pr + 1:
+                pr = p
+            else:
+                nc_ranges.append(f"{s}-{pr}" if s != pr else str(s))
+                s = pr = p
+        nc_ranges.append(f"{s}-{pr}" if s != pr else str(s))
+        non_content_str = f"\nPáginas sin contenido (accesorias, pueden excluirse): {', '.join(nc_ranges)}"
+    else:
+        non_content_str = ""
+
+    return (
+        "<paginas_contenido_verificado>\n"
+        f"Páginas con contenido sustantivo (DEBEN cubrirse): {content_str}{non_content_str}\n"
+        "RESTRICCIÓN OBLIGATORIA: Los rangos pagina_inicio/pagina_fin de las partes deben cubrir "
+        "colectivamente TODAS las páginas de contenido, sin huecos ni solapamientos entre partes. "
+        "Las subpartes de cada parte deben ser contiguas y cubrir exactamente el rango de su parte padre.\n"
+        "</paginas_contenido_verificado>\n\n"
+    )
 
 
 def _build_pdf_table_of_contents(segmentation: dict, num_partes: int) -> str:
@@ -981,6 +1030,8 @@ async def _process_project(project_id: str, user_id: str) -> None:
     pdf_temp_path = None
     numbered_pdf_path = None
     segment_pdf_paths: list[str] = []
+    pdf_total_pages: int = 0
+    content_page_set: frozenset[int] = frozenset()
     temp_paths: list[str] = []
     web_blocks = []
     source_mime_type = "application/pdf"
@@ -1209,6 +1260,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
             numbered_pdf_path = await asyncio.to_thread(add_page_numbers, pdf_temp_path)
             logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
             temp_paths.append(numbered_pdf_path)
+            pdf_total_pages = len(PdfReader(numbered_pdf_path).pages)
 
             upload_start = time.time()
             uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
@@ -1227,23 +1279,70 @@ async def _process_project(project_id: str, user_id: str) -> None:
             update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
             await send_event(project_id, {"type": "segmenting"})
 
-        # Fase de segmentación (con validación MECE de temas y reintentos)
+        # Clasificador de páginas (solo para PDF): identifica qué páginas son contenido vs. accesorias
+        if source_type == "pdf" and numbered_pdf_path and file_uri and pdf_total_pages > 0:
+            try:
+                content_page_set = await asyncio.to_thread(
+                    run_page_classifier,
+                    api_key,
+                    file_uri,
+                    pdf_total_pages,
+                    MODEL_CLASSIFIER,
+                )
+                logger.info(
+                    "[Process] Clasificador: %d páginas de contenido de %d",
+                    len(content_page_set),
+                    pdf_total_pages,
+                    extra={"content_pages_count": len(content_page_set), "total_pages": pdf_total_pages},
+                )
+            except Exception as clf_err:
+                content_page_set = frozenset(range(1, pdf_total_pages + 1))
+                logger.warning(
+                    "[Process] Clasificador de páginas falló, asumiendo todas como contenido: %s",
+                    clf_err,
+                    extra={"error_type": type(clf_err).__name__},
+                )
+
+        # Fase de segmentación (con validación MECE de temas + cobertura de páginas y reintentos)
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
         segmentation: dict | None = None
         tema_report = None
-        for seg_attempt in range(MAX_SEGMENTATION_COVERAGE_ATTEMPTS):
+        page_report = None
+        is_pdf_seg = source_type == "pdf"
+        content_pages_prefix = (
+            _build_content_pages_prefix(content_page_set, pdf_total_pages)
+            if is_pdf_seg and content_page_set
+            else ""
+        )
+        MAX_COMBINED_ATTEMPTS = max(MAX_SEGMENTATION_COVERAGE_ATTEMPTS, MAX_PAGE_COVERAGE_ATTEMPTS)
+
+        for seg_attempt in range(MAX_COMBINED_ATTEMPTS):
             if seg_attempt == 0:
-                seg_description = project["description"]
+                seg_description = content_pages_prefix + (project["description"].strip() or DEFAULT_DESCRIPTION)
             else:
-                assert segmentation is not None and tema_report is not None
-                retry_suffix = build_tema_coverage_retry_suffix(
-                    attempt=seg_attempt,
-                    segmentation=segmentation,
-                    report=tema_report,
-                )
-                base_eff = project["description"].strip() or DEFAULT_DESCRIPTION
-                seg_description = f"{base_eff}\n\n{retry_suffix}"
+                assert segmentation is not None
+                correction_parts = []
+                if tema_report is not None and not tema_report.is_valid:
+                    correction_parts.append(
+                        build_tema_coverage_retry_suffix(
+                            attempt=seg_attempt,
+                            segmentation=segmentation,
+                            report=tema_report,
+                        )
+                    )
+                if page_report is not None and not page_report.is_valid:
+                    correction_parts.append(
+                        build_page_coverage_retry_suffix(
+                            attempt=seg_attempt,
+                            segmentation=segmentation,
+                            report=page_report,
+                            content_page_set=content_page_set,
+                        )
+                    )
+                correction_suffix = "\n\n".join(correction_parts)
+                base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
+                seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
             segmentation, usage_meta = await asyncio.to_thread(
                 run_segmentador,
@@ -1259,7 +1358,15 @@ async def _process_project(project_id: str, user_id: str) -> None:
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             tema_report = validate_tema_partition(segmentation)
-            if tema_report.is_valid:
+            page_report = (
+                validate_page_coverage(segmentation, content_page_set)
+                if is_pdf_seg
+                else None
+            )
+
+            both_valid = tema_report.is_valid and (page_report is None or page_report.is_valid)
+
+            if both_valid:
                 if tema_report.empty_temas_inventory:
                     logger.warning(
                         "[Process] Segmentación sin temas_identificados; se omite validación MECE de temas",
@@ -1267,39 +1374,43 @@ async def _process_project(project_id: str, user_id: str) -> None:
                     )
                 if seg_attempt > 0:
                     logger.info(
-                        "[Process] Segmentación corregida tras reintento MECE de temas",
+                        "[Process] Segmentación corregida tras reintento (temas + páginas)",
                         extra={"project_id": project_id, "seg_attempt": seg_attempt},
                     )
                 break
 
             logger.warning(
-                "[Process] Validación MECE de temas fallida; se reintentará el segmentador si quedan intentos",
+                "[Process] Validación fallida; se reintentará el segmentador si quedan intentos",
                 extra={
                     "project_id": project_id,
                     "seg_attempt": seg_attempt,
-                    "missing_count": len(tema_report.missing),
-                    "duplicates_count": len(tema_report.duplicates),
-                    "orphans_count": len(tema_report.orphans),
-                    "structural_count": len(tema_report.structural_errors),
+                    "tema_valid": tema_report.is_valid,
+                    "page_valid": page_report.is_valid if page_report else True,
+                    "tema_missing": len(tema_report.missing),
+                    "tema_duplicates": len(tema_report.duplicates),
+                    "page_part_errors": len(page_report.part_errors) if page_report else 0,
+                    "page_subpart_errors": len(page_report.subpart_errors) if page_report else 0,
                 },
             )
         else:
-            assert segmentation is not None and tema_report is not None
-            detail_bits = []
-            if tema_report.missing:
-                detail_bits.append(f"{len(tema_report.missing)} tema(s) sin asignar")
-            if tema_report.duplicates:
-                detail_bits.append(f"{len(tema_report.duplicates)} tema(s) duplicados entre partes")
-            if tema_report.orphans:
-                detail_bits.append(f"{len(tema_report.orphans)} entrada(s) huérfana(s) en temas_cubiertos")
-            if tema_report.structural_errors:
-                detail_bits.append(f"{len(tema_report.structural_errors)} error(es) de forma")
-            detail = "; ".join(detail_bits) if detail_bits else "inconsistencias en temas_cubiertos"
+            assert segmentation is not None
+            error_bits = []
+            if tema_report and not tema_report.is_valid:
+                if tema_report.missing:
+                    error_bits.append(f"{len(tema_report.missing)} tema(s) sin asignar")
+                if tema_report.duplicates:
+                    error_bits.append(f"{len(tema_report.duplicates)} tema(s) duplicados")
+            if page_report and not page_report.is_valid:
+                if page_report.part_errors:
+                    error_bits.append(f"{len(page_report.part_errors)} error(es) de rango en partes")
+                if page_report.subpart_errors:
+                    error_bits.append(f"{len(page_report.subpart_errors)} error(es) de rango en subpartes")
+            detail = "; ".join(error_bits) if error_bits else "inconsistencias en segmentación"
             logger.error(
-                "[Process] Segmentación abortada tras agotar reintentos MECE",
+                "[Process] Segmentación abortada tras agotar reintentos",
                 extra={
                     "project_id": project_id,
-                    "attempts": MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
+                    "attempts": MAX_COMBINED_ATTEMPTS,
                     "detail": detail,
                 },
             )
