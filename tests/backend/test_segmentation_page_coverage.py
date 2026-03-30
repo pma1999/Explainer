@@ -111,6 +111,14 @@ def test_subpart_overlap():
     assert any(e.type == "overlap" for e in r.subpart_errors)
 
 
+def test_subpart_shared_transition_page_is_valid():
+    """SP1.pagina_fin == SP2.pagina_inicio (one shared page) is allowed."""
+    part = _parte(1, 3, 20, subpartes=[_sp(1, 3, 10), _sp(2, 10, 20)])
+    r = validate_page_coverage({"partes": [part]}, CONTENT)
+    assert r.is_valid
+    assert not r.subpart_errors
+
+
 def test_subpart_doesnt_start_at_part():
     part = _parte(1, 3, 20, subpartes=[_sp(1, 5, 10), _sp(2, 11, 20)])
     r = validate_page_coverage({"partes": [part]}, CONTENT)

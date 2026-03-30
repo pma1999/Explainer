@@ -222,7 +222,9 @@ def validate_page_coverage(
                         f"Páginas sin cubrir: {_compact_page_list(list(range(a_end + 1, b_start)))}."
                     ),
                 ))
-            elif a_end >= b_start:
+            elif a_end > b_start:
+                # Strict overlap (more than one shared page) → error.
+                # a_end == b_start (exactly one shared transition page) is allowed.
                 subpart_errors.append(SubpartPageError(
                     type="overlap",
                     part_numero=p_num,
@@ -367,7 +369,9 @@ def build_page_coverage_retry_suffix(
         "  - pagina_inicio y pagina_fin de cada parte: enteros positivos con pagina_inicio ≤ pagina_fin.",
         "  - Rangos de partes sin solapamientos: parte_i.pagina_fin < parte_{i+1}.pagina_inicio.",
         "  - Todas las páginas de contenido cubiertas por exactamente una parte.",
-        "  - Subpartes de cada parte contiguas: subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio.",
+        "  - Subpartes de cada parte contiguas: subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio "
+        "(o subparte_j.pagina_fin == subparte_{j+1}.pagina_inicio si la página de transición contiene "
+        "el final de la subparte anterior y el inicio de la siguiente — solo se permite UNA página compartida).",
         "  - Primera subparte de cada parte: pagina_inicio == parte.pagina_inicio.",
         "  - Última subparte de cada parte: pagina_fin == parte.pagina_fin.",
         "",

@@ -217,11 +217,19 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
 - Para cada parte (ya definida), identifica unidades explicativas independientes (subpartes):
   - ¿Qué subtemas dentro de la parte pueden explicarse de forma aislada?
   - ¿Dónde hay cambios internos de foco, concepto o argumento?
-  - Asigna subrangos de páginas contiguos a cada subparte. REGLA DE TRANSICIÓN: cuando
-    una nueva subsección comienza en la página P, la subparte anterior termina en P-1
-    (pagina_fin = P-1) y la nueva subparte comienza en P (pagina_inicio = P). Nunca
-    asignes la misma página como pagina_fin de una subparte Y como pagina_inicio de la
-    siguiente; esa página pertenece a exactamente una subparte.
+  - Asigna subrangos de páginas contiguos a cada subparte. REGLA DE TRANSICIÓN: cada
+    página pertenece a exactamente una subparte. Cuando la página P contiene contenido
+    de dos subsecciones a la vez (el final de la anterior y el inicio de la siguiente),
+    asígnala a la que ocupe más espacio en esa página:
+    · Si el contenido nuevo domina la página P → la subparte anterior termina en P-1 y
+      la nueva comienza en P.
+    · Si el contenido anterior domina la página P → la subparte anterior termina en P y
+      la nueva comienza en P+1.
+    EXCEPCIÓN: si la página P contiene simultáneamente el final de la subparte anterior
+    y el inicio de la siguiente (cambio de sección a mitad de página), AMBAS subpartes
+    pueden referenciarla: subparte_anterior.pagina_fin = P y subparte_siguiente.pagina_inicio = P.
+    Esto solo es válido para UNA página por transición; si el solapamiento es de más de
+    una página es un error.
   - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte
   - Cada subparte necesita identificación precisa con frases textuales de inicio y fin
 - Para cada parte, redacta:
@@ -240,8 +248,10 @@ Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este 
 5. Para cada parte, verifica que sus subpartes cubren exactamente el rango [pagina_inicio, pagina_fin]:
    - La primera subparte empieza en pagina_inicio de la parte.
    - La última subparte termina en pagina_fin de la parte.
-   - No hay huecos entre subpartes consecutivas (subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio).
-   - No hay solapamientos entre subpartes consecutivas.
+   - No hay huecos entre subpartes consecutivas: subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio,
+     o bien subparte_j.pagina_fin == subparte_{j+1}.pagina_inicio si la página de transición contiene
+     contenido de ambas (solo se permite UNA página compartida por transición).
+   - No hay solapamientos de más de una página entre subpartes consecutivas.
 6. Si detectas algún error, corrígelo antes de generar el output.
 
 Solo tras completar estos 8 pasos, genera tu output estructurado en el formato especificado.
