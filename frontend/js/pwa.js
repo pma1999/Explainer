@@ -236,15 +236,28 @@ export function updateOnlineState() {
   if (banner) {
     banner.classList.toggle('hidden', !effectiveOffline);
     if (textEl) {
+      const compactCopy = window.matchMedia('(max-width: 768px)').matches;
       textEl.textContent = preferOnly
-        ? 'Modo offline activado — solo proyectos guardados localmente; sin sincronización en segundo plano'
-        : 'Sin conexión — mostrando proyectos disponibles offline';
+        ? (compactCopy
+          ? 'Modo offline activado — solo copias locales'
+          : 'Modo offline activado — solo proyectos guardados localmente; sin sincronización en segundo plano')
+        : (compactCopy
+          ? 'Sin conexión — solo contenido offline'
+          : 'Sin conexión — mostrando proyectos disponibles offline');
     }
   }
 
   document.body.classList.toggle('is-offline', effectiveOffline);
   document.body.classList.toggle('is-online', !effectiveOffline);
   document.body.classList.toggle('is-prefer-offline', preferOnly);
+  syncOfflineBannerHeight();
+}
+
+function syncOfflineBannerHeight() {
+  const banner = document.getElementById('offline-banner');
+  const visible = banner && !banner.classList.contains('hidden');
+  const height = visible ? Math.ceil(banner.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty('--offline-banner-h', `${height}px`);
 }
 
 // ─── Init ───────────────────────────────────────────────────
@@ -258,4 +271,5 @@ export function initPWA() {
 
   listenInstallPrompt();
   listenOnlineOffline();
+  window.addEventListener('resize', updateOnlineState);
 }
