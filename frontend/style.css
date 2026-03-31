@@ -44,6 +44,9 @@
 
   --sidebar-w: 280px;
   --header-h: 60px;
+  --offline-banner-h: 0px;
+  --mobile-header-h: 49px;
+  --mobile-toolbar-h: 41px;
 }
 
 /* ── Reset & Base ── */
@@ -667,7 +670,7 @@ body {
   justify-content: space-between;
   padding: 0 32px;
   position: sticky;
-  top: 0;
+  top: var(--offline-banner-h);
   z-index: 50;
 }
 
@@ -912,7 +915,7 @@ body {
 /* ── Reading Progress Bar ── */
 #reading-progress-bar {
   position: fixed;
-  top: 0;
+  top: var(--offline-banner-h);
   left: 0;
   height: 2px;
   width: 0%;
@@ -961,9 +964,9 @@ body {
   display: flex;
   flex-direction: column;
   position: fixed;
-  top: 0;
+  top: var(--offline-banner-h);
   left: 0;
-  height: 100vh;
+  height: calc(100vh - var(--offline-banner-h));
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 40;
@@ -1325,7 +1328,7 @@ body {
   background: var(--ink-800);
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
   position: sticky;
-  top: 0;
+  top: var(--offline-banner-h);
   z-index: 30;
 }
 
@@ -2507,13 +2510,12 @@ body {
 
   .reading-toolbar {
     padding: 8px 20px;
-    top: 49px;
-    /* mobile-header height */
+    top: calc(var(--offline-banner-h) + var(--mobile-header-h));
   }
 
   .tabs-bar {
     padding: 0 20px;
-    top: 90px;
+    top: calc(var(--offline-banner-h) + var(--mobile-header-h) + var(--mobile-toolbar-h));
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -4237,11 +4239,11 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 9999;
+  z-index: 60;
   background: #7c3aed;
   color: #fff;
   text-align: center;
-  padding: 0.45rem 1rem;
+  padding: 0.5rem 0.9rem;
   font-size: 0.8125rem;
   display: flex;
   align-items: center;
@@ -4269,6 +4271,23 @@ body.is-prefer-offline .offline-banner {
 /* Push content down when banner is visible */
 body:not(.is-offline) .offline-banner {
   display: none;
+}
+
+@media (max-width: 768px) {
+  .offline-banner {
+    justify-content: flex-start;
+    text-align: left;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    padding: 0.45rem 0.75rem;
+  }
+
+  .offline-banner #offline-banner-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* ============================================================
