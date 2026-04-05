@@ -7,6 +7,7 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
 
 from google import genai
 from google.genai import types
@@ -39,6 +40,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Distingues claramente entre lo que ESTÁ en los textos y lo que serían añadidos externos; solo trabajas con lo primero.
   - Tratas cada elemento del texto como si fuera la pregunta decisiva del examen del usuario.
   </role>
+""" + CASTELLANO_ESPANIA_XML + """
 
   <objectives>
   **Tu objetivo es producir una explicación que logre:**
