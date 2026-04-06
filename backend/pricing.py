@@ -24,6 +24,13 @@ PRICING = {
         "output_small": 1.50,  # $1.50 / 1M tokens
         "output_large": 1.50,
     },
+    # OpenRouter models
+    "x-ai/grok-4.1-fast": {
+        "input_small": 0.20,   # $0.20 / 1M tokens (precio plano)
+        "input_large": 0.20,
+        "output_small": 0.50,  # $0.50 / 1M tokens
+        "output_large": 0.50,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

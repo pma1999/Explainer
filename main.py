@@ -45,6 +45,10 @@ from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
 from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_SEGMENTADOR
+
+_OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
+USE_OPENROUTER_EXPLAINER: bool = bool(_OPENROUTER_API_KEY)
+
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
 from backend.segmentation_tema_coverage import (
@@ -62,6 +66,11 @@ from backend.segmentation_page_coverage import (
 )
 from pypdf import PdfReader
 from backend.agents.explainer import run_explainer, run_subpart_explainer
+from backend.agents.explainer_openrouter import (
+    run_explainer_or,
+    run_subpart_explainer_or,
+    OPENROUTER_MODEL_AGENTS as OPENROUTER_EXPLAINER_MODEL,
+)
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
@@ -1754,10 +1763,21 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
             # Execute all subpart explainers + recorrido + resources in parallel
             agents_start = time.time()
-            explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
+            use_or = USE_OPENROUTER_EXPLAINER and segment_temp_path is not None
+            if use_or:
+                explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
+                explainer_calls = [
+                    asyncio.to_thread(explainer_fn_or, segment_temp_path, sp_prompt, OPENROUTER_EXPLAINER_MODEL, agent_mime_type)
+                    for sp_prompt in subpart_prompts
+                ]
+            else:
+                explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
+                explainer_calls = [
+                    asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
+                    for sp_prompt in subpart_prompts
+                ]
             results = await asyncio.gather(
-                *[asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
-                  for sp_prompt in subpart_prompts],
+                *explainer_calls,
                 asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                 asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                 return_exceptions=True,
@@ -1780,7 +1800,8 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 else:
                     sp_data, sp_usage = sp_result
                     if sp_usage:
-                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=MODEL_AGENTS)
+                        _explainer_cost_model = OPENROUTER_EXPLAINER_MODEL if use_or else MODEL_AGENTS
+                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=_explainer_cost_model)
                     subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
             # Assemble: intro/conclusion/conexiones from segmentador + desarrollos from subpart explainers
