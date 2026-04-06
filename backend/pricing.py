@@ -25,11 +25,11 @@ PRICING = {
         "output_large": 1.50,
     },
     # OpenRouter models
-    "x-ai/grok-4.1-fast": {
-        "input_small": 0.20,   # $0.20 / 1M tokens
-        "input_large": 0.20,
-        "output_small": 0.50,  # $0.50 / 1M tokens
-        "output_large": 0.50,
+    "xiaomi/mimo-v2-flash": {
+        "input_small": 0.09,   # $0.09 / 1M tokens
+        "input_large": 0.09,
+        "output_small": 0.29,  # $0.29 / 1M tokens
+        "output_large": 0.29,
     },
     # Valores por defecto para otros modelos
     "default": {
