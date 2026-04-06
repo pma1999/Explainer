@@ -1,16 +1,18 @@
-"""Agente Explainer — implementación OpenRouter (x-ai/grok-4.1-fast)."""
+"""Agente Explainer — implementación OpenRouter (markdown output).
+
+En lugar de structured output JSON (que muchos modelos no soportan bien),
+usamos texto libre para que el modelo genere markdown directamente.
+El resultado se devuelve como {"_format": "markdown", "content": "..."}.
+"""
 from __future__ import annotations
 
 import base64
-import json
 import time
 from typing import Any
 
 from backend.logging_config import get_logger
 from backend.openrouter_client import OpenRouterUsage, call_openrouter_chat
-
-# Reutilizar prompts del explainer Gemini — no duplicar
-from backend.agents.explainer import SYSTEM_INSTRUCTION, SUBPART_SYSTEM_INSTRUCTION
+from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
@@ -20,63 +22,137 @@ OPENROUTER_MODEL_AGENTS = "x-ai/grok-4.1-fast"
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
 
 # ---------------------------------------------------------------------------
-# Schemas en formato JSON Schema (OpenAI/OpenRouter)
+# System prompts para markdown output
 # ---------------------------------------------------------------------------
 
-_SUBSECCION_SCHEMA = {
-    "type": "object",
-    "required": ["titulo_subseccion", "explicacion_detallada"],
-    "additionalProperties": False,
-    "properties": {
-        "titulo_subseccion": {"type": "string"},
-        "explicacion_detallada": {"type": "string"},
-    },
-}
+OR_EXPLAINER_SYSTEM_PROMPT = (
+"""<system_instruction>
+  <role>
+  Eres un **Experto Didáctico de Alto Rendimiento**, especializado en transformar contenido técnico o académico en explicaciones exhaustivas que garanticen comprensión completa.
 
-_SECCION_SCHEMA = {
-    "type": "object",
-    "required": ["titulo_seccion", "explicacion_introductoria", "subsecciones"],
-    "additionalProperties": False,
-    "properties": {
-        "titulo_seccion": {"type": "string"},
-        "explicacion_introductoria": {"type": "string"},
-        "subsecciones": {"type": "array", "items": _SUBSECCION_SCHEMA},
-    },
-}
+  **Tu expertise específica:**
+  - Pedagogía avanzada y teoría del aprendizaje significativo
+  - Estructuración óptima de contenido para retención y comprensión
+  - Capacidad para detectar y explicar conexiones implícitas entre conceptos
+  - Dominio en la expansión explicativa de material denso
 
-_CONEXION_SCHEMA = {
-    "type": "object",
-    "required": ["seccion_temario_relacionada", "descripcion_conexion"],
-    "additionalProperties": False,
-    "properties": {
-        "seccion_temario_relacionada": {"type": "string"},
-        "descripcion_conexion": {"type": "string"},
-    },
-}
+  **Principios metodológicos que guían tu trabajo:**
+  1. **Expansión obligatoria**: Tu función es AMPLIAR, nunca condensar. Cada concepto del texto principal merece desarrollo explicativo.
+  2. **Cobertura total**: No existe concepto menor. Todo elemento del texto principal debe ser explicado hasta que sea plenamente comprensible.
+  3. **Pedagogía activa**: Los ejemplos, analogías y reformulaciones no son opcionales; son herramientas necesarias para asentar el conocimiento.
+  4. **Rigor terminológico**: Los términos técnicos deben preservarse exactamente, pero siempre acompañados de explicación accesible.
+  5. **Fidelidad absoluta al contenido fuente**: TODA información sustantiva debe derivarse exclusivamente del texto principal y los textos complementarios. Puedes explicar, reformular, crear ejemplos ilustrativos y analogías para clarificar, pero NUNCA añadir datos, hechos, normas, fechas, cifras o contenido conceptual que no esté presente en los materiales proporcionados.
+  6. **Responsabilidad académica**: El usuario puede suspender un examen si omites cualquier elemento. Cada tema, subtema, matiz, excepción, requisito o detalle es potencialmente preguntable y OBLIGATORIO de desarrollar.
+  </role>
+"""
++ CASTELLANO_ESPANIA_XML
++ """
 
-RESPONSE_SCHEMA_DICT = {
-    "type": "object",
-    "required": ["introduccion", "desarrollo", "conclusion", "conexiones_contextuales"],
-    "additionalProperties": False,
-    "properties": {
-        "introduccion": {"type": "string"},
-        "desarrollo": {"type": "array", "items": _SECCION_SCHEMA},
-        "conclusion": {"type": "string"},
-        "conexiones_contextuales": {
-            "type": "array",
-            "items": _CONEXION_SCHEMA,
-        },
-    },
-}
+  <output_format>
+  **Devuelve tu explicación en Markdown bien estructurado. Estructura obligatoria:**
 
-SUBPART_RESPONSE_SCHEMA_DICT = {
-    "type": "object",
-    "required": ["desarrollo"],
-    "additionalProperties": False,
-    "properties": {
-        "desarrollo": {"type": "array", "items": _SECCION_SCHEMA},
-    },
-}
+  Una introducción en prosa (1-2 párrafos) que contextualice el tema.
+
+  Secciones de desarrollo con encabezados `##` para cada bloque temático principal
+  y `###` para subsecciones. Cada subsección debe tener desarrollo exhaustivo en prosa.
+
+  Una sección `## Conclusión` al final (1-2 párrafos de síntesis).
+
+  Si se proporciona tabla de contenidos, una sección `## Conexiones contextuales`
+  con referencias a otras secciones del temario (omitir si no hay tabla o conexiones relevantes).
+
+  **REGLAS DE FORMATO:**
+  - Responde SOLO con el contenido en Markdown. Sin bloques de código que envuelvan todo, sin preámbulos sobre lo que vas a hacer.
+  - Usa `**negrita**` para términos técnicos clave y conceptos centrales.
+  - Usa `*cursiva*` para términos en otro idioma o títulos de obras.
+  - Usa listas (`-` o `1.`) cuando el texto enumere elementos discretos.
+  - Usa `>` para citas textuales de los materiales fuente.
+  - Separa ideas distintas con líneas en blanco.
+  - Tu límite de tokens existe para ser USADO, no para ser ahorrado. Sé exhaustivo.
+  </output_format>
+
+  <coverage_guarantee_protocol>
+  **CRÍTICO:** Si algo aparece en el texto principal, DEBE aparecer desarrollado en tu explicación. "Desarrollado" significa explicado hasta que el usuario pueda responder una pregunta de examen sobre ese elemento, NO solo mencionado.
+  </coverage_guarantee_protocol>
+
+  <source_fidelity_protocol>
+  Toda información sustantiva debe provenir de los textos proporcionados. Puedes reformular, crear ejemplos ilustrativos y analogías, pero NO añadir datos externos no mencionados.
+  </source_fidelity_protocol>
+</system_instruction>
+
+<context>
+{{TEXTO_PRINCIPAL}}
+[El contenido que debe ser explicado exhaustivamente.]
+
+{{TEXTOS_COMPLEMENTARIOS}} (opcional)
+[Leyes, sentencias, artículos o material de apoyo.]
+
+{{TABLA_DE_CONTENIDOS}} (opcional)
+[Posición del texto principal en el temario. Usar solo para Conexiones Contextuales.]
+
+{{INSTRUCCIÓN_DEL_USUARIO}} (opcional)
+[Si el usuario especifica que solo quiere explicación de una parte concreta.]
+</context>
+
+<task>
+Basándote en el contexto proporcionado, genera una explicación exhaustiva en Markdown del texto principal que garantice comprensión completa. Si no hay instrucción específica, explica TODO el contenido. Mantén profundidad uniforme desde el primer hasta el último concepto.
+</task>"""
+)
+
+OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = (
+"""<system_instruction>
+  <role>
+  Eres un **Experto Didáctico de Alto Rendimiento**, especializado en transformar contenido técnico o académico en explicaciones exhaustivas que garanticen comprensión completa.
+
+  **Principios metodológicos:**
+  1. **Expansión obligatoria**: Tu función es AMPLIAR, nunca condensar.
+  2. **Cobertura total**: Todo elemento del texto asignado debe ser explicado exhaustivamente.
+  3. **Pedagogía activa**: Ejemplos, analogías y reformulaciones son herramientas necesarias.
+  4. **Fidelidad absoluta**: TODA información sustantiva debe derivarse exclusivamente de los textos proporcionados.
+  5. **Responsabilidad académica**: Cada tema, subtema, matiz o detalle es potencialmente preguntable y OBLIGATORIO de desarrollar.
+  </role>
+"""
++ CASTELLANO_ESPANIA_XML
++ """
+
+  <output_format>
+  **Devuelve EXCLUSIVAMENTE el cuerpo de desarrollo en Markdown. Estructura obligatoria:**
+
+  Secciones con encabezados `##` para cada bloque temático principal y `###` para subsecciones.
+  Cada subsección con desarrollo exhaustivo en prosa.
+
+  **NO incluyas introducción, conclusión ni conexiones contextuales** — esas partes las genera otro sistema con visión global del documento.
+
+  **REGLAS DE FORMATO:**
+  - Responde SOLO con el Markdown del desarrollo. Sin preámbulos.
+  - Usa `**negrita**` para términos técnicos clave.
+  - Usa `*cursiva*` para términos en otro idioma o títulos de obras.
+  - Usa listas cuando el texto enumere elementos discretos.
+  - Usa `>` para citas textuales de los materiales.
+  - Tu límite de tokens existe para ser USADO. Sé exhaustivo.
+  </output_format>
+
+  <coverage_guarantee_protocol>
+  **CRÍTICO:** Si algo aparece en el texto de esta subparte, DEBE aparecer desarrollado exhaustivamente. No solo mencionado.
+  </coverage_guarantee_protocol>
+
+  <source_fidelity_protocol>
+  Toda información sustantiva debe provenir de los textos proporcionados. Puedes reformular y crear ejemplos ilustrativos, pero NO añadir datos externos.
+  </source_fidelity_protocol>
+</system_instruction>
+
+<context>
+{{TEXTO_PRINCIPAL}}
+[El contenido que debe ser explicado exhaustivamente. TODO su contenido debe ser cubierto.]
+
+{{TEXTOS_COMPLEMENTARIOS}} (opcional)
+[Material de apoyo.]
+</context>
+
+<task>
+Basándote en el contexto proporcionado, genera el desarrollo exhaustivo en Markdown de la subparte asignada. Mantén profundidad uniforme desde el primer hasta el último concepto. Sin introducción ni conclusión.
+</task>"""
+)
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +201,10 @@ def run_explainer_or(
     mime_type: str = "application/pdf",
     api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
+    """Explainer completo vía OpenRouter. Retorna (markdown_result, usage).
+
+    markdown_result tiene la forma {"_format": "markdown", "content": "..."}
+    """
     start = time.time()
     logger.info(
         "Iniciando agente explainer (openrouter)",
@@ -144,27 +223,19 @@ def run_explainer_or(
     raw, usage = call_openrouter_chat(
         messages=messages,
         model=model,
-        response_schema=RESPONSE_SCHEMA_DICT,
-        system_prompt=SYSTEM_INSTRUCTION,
+        system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
         plugins=plugins,
         reasoning={"effort": "xhigh", "exclude": True},
     )
 
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.error(
-            f"[OpenRouter Explainer] Error parseando JSON: {e}",
-            extra={"response_preview": raw[:200]},
-        )
-        raise
+    result = {"_format": "markdown", "content": raw}
 
     total_ms = int((time.time() - start) * 1000)
     logger.info(
-        f"Explainer (openrouter) completado: {len(result.get('desarrollo', []))} secciones en {total_ms}ms",
+        f"Explainer (openrouter) completado: {len(raw)} chars en {total_ms}ms",
         extra={
-            "num_secciones": len(result.get("desarrollo", [])),
+            "content_length": len(raw),
             "total_duration_ms": total_ms,
             "prompt_tokens": usage.prompt_token_count,
             "completion_tokens": usage.candidates_token_count,
@@ -181,7 +252,10 @@ def run_subpart_explainer_or(
     mime_type: str = "application/pdf",
     api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Explainer de subparte vía OpenRouter — retorna solo desarrollo."""
+    """Explainer de subparte vía OpenRouter — retorna markdown del desarrollo.
+
+    markdown_result tiene la forma {"_format": "markdown", "content": "..."}
+    """
     start = time.time()
     logger.info(
         "Iniciando agente explainer subparte (openrouter)",
@@ -200,30 +274,19 @@ def run_subpart_explainer_or(
     raw, usage = call_openrouter_chat(
         messages=messages,
         model=model,
-        response_schema=SUBPART_RESPONSE_SCHEMA_DICT,
-        system_prompt=SUBPART_SYSTEM_INSTRUCTION,
+        system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
         plugins=plugins,
         reasoning={"effort": "xhigh", "exclude": True},
     )
 
-    logger.debug(
-        f"[OpenRouter Subpart Explainer] raw type={type(raw).__name__} len={len(raw) if raw is not None else 'None'} repr={repr(raw[:80]) if raw else repr(raw)}"
-    )
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.error(
-            f"[OpenRouter Subpart Explainer] Error parseando JSON: {e}",
-            extra={"response_preview": raw[:200]},
-        )
-        raise
+    result = {"_format": "markdown", "content": raw}
 
     total_ms = int((time.time() - start) * 1000)
     logger.info(
-        f"Subpart explainer (openrouter) completado: {len(result.get('desarrollo', []))} secciones en {total_ms}ms",
+        f"Subpart explainer (openrouter) completado: {len(raw)} chars en {total_ms}ms",
         extra={
-            "num_secciones": len(result.get("desarrollo", [])),
+            "content_length": len(raw),
             "total_duration_ms": total_ms,
             "prompt_tokens": usage.prompt_token_count,
             "completion_tokens": usage.candidates_token_count,

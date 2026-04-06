@@ -612,6 +612,44 @@ def _assemble_part_explainer(
     }
 
 
+def _assemble_part_explainer_markdown(
+    parte: dict,
+    subpart_markdowns: list[str],
+) -> dict:
+    """Assemble markdown explainer for a part processed via OpenRouter.
+
+    Combines intro/conclusion/conexiones from the segmentador (plain text strings)
+    with the markdown development bodies from each subpart explainer.
+    Returns {"_format": "markdown", "content": "..."}.
+    """
+    parts: list[str] = []
+    intro = (parte.get("introduccion") or "").strip()
+    conclusion = (parte.get("conclusion") or "").strip()
+    conexiones = parte.get("conexiones_contextuales") or []
+
+    if intro:
+        parts.append(intro)
+
+    for md in subpart_markdowns:
+        if md.strip():
+            parts.append(md.strip())
+
+    if conclusion:
+        parts.append(f"**Conclusión**\n\n{conclusion}")
+
+    if conexiones:
+        cx_lines = ["**Conexiones contextuales**\n"]
+        for cx in conexiones:
+            tema = cx.get("seccion_temario_relacionada", "")
+            desc = cx.get("descripcion_conexion", "")
+            if tema or desc:
+                cx_lines.append(f"- **{tema}**: {desc}")
+        if len(cx_lines) > 1:
+            parts.append("\n".join(cx_lines))
+
+    return {"_format": "markdown", "content": "\n\n---\n\n".join(parts)}
+
+
 def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes: int) -> str:
     blocks: list[str] = []
     blocks.append("CONTEXTO DEL SEGMENTADOR Y DEL USUARIO")
@@ -1049,7 +1087,8 @@ async def _format_and_finalize_part(
     fmt_start = time.time()
     fmt_usage: dict = {}
     try:
-        if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict):
+        is_markdown_format = isinstance(explainer_data, dict) and explainer_data.get("_format") == "markdown"
+        if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict) and not is_markdown_format:
             formatted, fmt_usage = await format_explainer_content(api_key, explainer_data)
             partes_contenido[str(part_id)]["explainer"] = formatted
             partes_contenido[str(part_id)]["formatter_usage"] = fmt_usage
@@ -1832,6 +1871,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
             # Process subpart explainer results
             subpart_desarrollos: list[list[dict]] = []
+            subpart_markdowns: list[str] = []
             for i, sp_result in enumerate(subpart_results):
                 if isinstance(sp_result, Exception):
                     logger.error(
@@ -1843,13 +1883,20 @@ async def _process_project(project_id: str, user_id: str) -> None:
                     if sp_usage:
                         _explainer_cost_model = OPENROUTER_EXPLAINER_MODEL if use_or else MODEL_AGENTS
                         _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=_explainer_cost_model)
-                    subpart_desarrollos.append(sp_data.get("desarrollo") or [])
+                    if use_or:
+                        subpart_markdowns.append(sp_data.get("content", ""))
+                    else:
+                        subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
-            # Assemble: intro/conclusion/conexiones from segmentador + desarrollos from subpart explainers
+            # Assemble: intro/conclusion/conexiones from segmentador + subpart results
             if use_subpart_explainer:
-                assembled_explainer = _assemble_part_explainer(parte, subpart_desarrollos)
+                if use_or:
+                    assembled_explainer = _assemble_part_explainer_markdown(parte, subpart_markdowns)
+                else:
+                    assembled_explainer = _assemble_part_explainer(parte, subpart_desarrollos)
             else:
                 # Fallback: no subparts — use the full explainer output as-is
+                # Works for both Gemini (structured dict) and OpenRouter ({"_format":"markdown",...})
                 if subpart_results and not isinstance(subpart_results[0], Exception):
                     assembled_explainer = subpart_results[0][0]
                 else:

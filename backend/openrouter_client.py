@@ -40,15 +40,17 @@ class OpenRouterServiceError(OpenRouterError):
 def call_openrouter_chat(
     messages: list[dict],
     model: str,
-    response_schema: dict,
     system_prompt: str,
     api_key: str,
+    response_schema: dict | None = None,
     plugins: list[dict] | None = None,
     reasoning: dict | None = None,
     max_retries: int = 5,
 ) -> tuple[str, OpenRouterUsage]:
     """
-    Llama a OpenRouter /chat/completions con structured output (json_schema).
+    Llama a OpenRouter /chat/completions.
+    Si response_schema es None, el modelo devuelve texto libre (markdown).
+    Si se proporciona, añade structured output (json_schema).
     Retorna (content_string, OpenRouterUsage).
     """
     if not api_key:
@@ -65,15 +67,17 @@ def call_openrouter_chat(
             {"role": "system", "content": system_prompt},
             *messages,
         ],
-        "response_format": {
+    }
+
+    if response_schema is not None:
+        payload["response_format"] = {
             "type": "json_schema",
             "json_schema": {
                 "name": "structured_output",
                 "strict": True,
                 "schema": response_schema,
             },
-        },
-    }
+        }
 
     if plugins:
         payload["plugins"] = plugins

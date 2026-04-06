@@ -536,6 +536,9 @@ export function renderSidebarNav(project) {
 }
 
 function renderExplainer(data) {
+  if (data._format === 'markdown') {
+    return `<div class="explainer-content">${renderMd(data.content || '')}</div>`;
+  }
   let html = '';
   if (data.introduccion) {
     html += `<div class="explainer-intro">${renderMd(data.introduccion)}</div>`;
