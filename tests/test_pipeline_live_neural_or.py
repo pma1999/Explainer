@@ -1,7 +1,7 @@
 """Live pipeline test: page_classifier → segmentador → subpart_explainer_or (OpenRouter/Grok).
 
 Identical flow to test_pipeline_live_neural.py except Step 4 uses
-run_subpart_explainer_or (OpenRouter, x-ai/grok-4.1-fast) instead of
+run_subpart_explainer_or (OpenRouter, xiaomi/mimo-v2-flash) instead of
 the Gemini explainer.  Results are saved with an '_or_' prefix so both
 outputs coexist for comparison.
 
