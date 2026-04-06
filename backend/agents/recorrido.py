@@ -418,6 +418,15 @@ def run_recorrido(
             }
         )
 
+        # Quality preview (visible en desarrollo, nivel DEBUG)
+        for entry in result.get("recorrido_anotado", [])[:5]:
+            cita = entry.get("cita_textual", "")
+            anotacion = entry.get("anotacion", "")
+            logger.debug(
+                "  [Recorrido] cita: \"%s...\" | anotacion: \"%s...\"",
+                cita[:80], anotacion[:80],
+            )
+
         return result, response.usage_metadata
 
     except json.JSONDecodeError as e:

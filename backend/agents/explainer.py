@@ -485,6 +485,21 @@ def run_explainer(
             }
         )
 
+        # Quality preview (visible en desarrollo, nivel DEBUG)
+        logger.debug("Explainer — intro: %d chars", intro_length)
+        for sec in result.get("desarrollo", [])[:6]:
+            subs = sec.get("subsecciones", [])
+            logger.debug(
+                "  Sección: \"%s\" (%d subsecciones)",
+                sec.get("titulo_seccion", "?")[:70], len(subs),
+            )
+            for sub in subs[:3]:
+                exp = sub.get("explicacion_detallada", "")
+                logger.debug(
+                    "    └─ \"%s\": %d chars",
+                    sub.get("titulo_subseccion", "?")[:60], len(exp),
+                )
+
         return result, response.usage_metadata
 
     except json.JSONDecodeError as e:

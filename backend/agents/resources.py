@@ -347,6 +347,19 @@ def run_resources(
             }
         )
 
+        # Quality preview (visible en desarrollo, nivel DEBUG)
+        for eje in result.get("ejes_tematicos", []):
+            recursos = eje.get("recursos", [])
+            logger.debug(
+                "  [Resources] eje: \"%s\" — %d recursos",
+                eje.get("titulo_eje", "?")[:60], len(recursos),
+            )
+            for r in recursos[:2]:
+                logger.debug(
+                    "    · \"%s\" (%s)",
+                    r.get("titulo", "?")[:60], r.get("tipo", "?"),
+                )
+
         return result, response.usage_metadata
 
     except json.JSONDecodeError as e:

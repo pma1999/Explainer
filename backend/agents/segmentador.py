@@ -999,6 +999,26 @@ def run_segmentador(
             }
         )
 
+        # Quality preview (visible en desarrollo, nivel DEBUG)
+        logger.debug(
+            "Segmentador — temas: %s",
+            ", ".join(result.get("temas_identificados", [])[:8]),
+        )
+        for p in result.get("partes", []):
+            sps = p.get("subpartes", [])
+            logger.debug(
+                "  Parte %d: \"%s\" pp.%s-%s (%d subpartes)",
+                p.get("numero", "?"), p.get("titulo", "?"),
+                p.get("pagina_inicio", "?"), p.get("pagina_fin", "?"), len(sps),
+            )
+            for sp in sps:
+                logger.debug(
+                    "    SP %d: \"%s\" pp.%s-%s | temas: %s",
+                    sp.get("numero_subparte", "?"), sp.get("titulo", "?"),
+                    sp.get("pagina_inicio", "?"), sp.get("pagina_fin", "?"),
+                    ", ".join(sp.get("temas_cubiertos", [])),
+                )
+
         return result, response.usage_metadata
 
     except json.JSONDecodeError as e:

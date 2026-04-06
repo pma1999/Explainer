@@ -78,3 +78,8 @@ koyeb_secrets.txt
 # Temporary / dummy files
 dummy.txt
 dummy2.txt
+
+/test_output
+
+*.pdf
+.mcp.json

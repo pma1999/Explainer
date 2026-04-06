@@ -141,6 +141,13 @@ def setup_logging() -> None:
     logging.getLogger("google").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("hpack").setLevel(logging.WARNING)           # HTTP/2 header codec
+    logging.getLogger("h2").setLevel(logging.WARNING)              # HTTP/2 protocol
+    logging.getLogger("h11").setLevel(logging.WARNING)             # HTTP/1.1 protocol
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)      # uvicorn reload watcher
+    logging.getLogger("multipart").setLevel(logging.WARNING)       # file upload parser
+    logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
 
     # Logger propio
     logger = logging.getLogger("backend.logging_config")
