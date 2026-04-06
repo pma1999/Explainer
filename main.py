@@ -46,7 +46,7 @@ from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
-from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_SEGMENTADOR
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_EXPLAINER, MODEL_SEGMENTADOR
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
@@ -1121,8 +1121,6 @@ async def _process_project(project_id: str, user_id: str) -> None:
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
-        openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
-
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
 
         from google import genai
@@ -1803,19 +1801,11 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
             # Execute all subpart explainers + recorrido + resources in parallel
             agents_start = time.time()
-            use_or = bool(openrouter_api_key) and segment_temp_path is not None
-            if use_or:
-                explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
-                explainer_calls = [
-                    asyncio.to_thread(explainer_fn_or, segment_temp_path, sp_prompt, OPENROUTER_EXPLAINER_MODEL, agent_mime_type, openrouter_api_key)
-                    for sp_prompt in subpart_prompts
-                ]
-            else:
-                explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
-                explainer_calls = [
-                    asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
-                    for sp_prompt in subpart_prompts
-                ]
+            explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
+            explainer_calls = [
+                asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_EXPLAINER, agent_mime_type)
+                for sp_prompt in subpart_prompts
+            ]
             results = await asyncio.gather(
                 *explainer_calls,
                 asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
@@ -1840,8 +1830,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 else:
                     sp_data, sp_usage = sp_result
                     if sp_usage:
-                        _explainer_cost_model = OPENROUTER_EXPLAINER_MODEL if use_or else MODEL_AGENTS
-                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=_explainer_cost_model)
+                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=MODEL_EXPLAINER)
                     subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
             # Assemble: intro/conclusion/conexiones from segmentador + subpart results
