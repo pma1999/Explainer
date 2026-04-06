@@ -25,11 +25,11 @@ PRICING = {
         "output_large": 1.50,
     },
     # OpenRouter models
-    "minimax/minimax-m2.7": {
-        "input_small": 0.30,   # $0.30 / 1M tokens (precio plano)
-        "input_large": 0.30,
-        "output_small": 1.20,  # $1.20 / 1M tokens
-        "output_large": 1.20,
+    "x-ai/grok-4.1-fast": {
+        "input_small": 0.20,   # $0.20 / 1M tokens
+        "input_large": 0.20,
+        "output_small": 0.50,  # $0.50 / 1M tokens
+        "output_large": 0.50,
     },
     # Valores por defecto para otros modelos
     "default": {

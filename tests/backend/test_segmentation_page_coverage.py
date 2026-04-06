@@ -46,6 +46,13 @@ def test_parts_overlap():
     assert any(e.type == "overlap" for e in r.part_errors)
 
 
+def test_part_shared_transition_page_is_valid():
+    """Part1.pagina_fin == Part2.pagina_inicio (one shared transition page) is allowed."""
+    r = validate_page_coverage({"partes": [_parte(1, 3, 10), _parte(2, 10, 20)]}, CONTENT)
+    assert r.is_valid
+    assert not r.part_errors
+
+
 def test_content_page_uncovered():
     # Pages 10-11 are content but not in any part
     r = validate_page_coverage({"partes": [_parte(1, 3, 9), _parte(2, 12, 20)]}, CONTENT)

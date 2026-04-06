@@ -1,4 +1,4 @@
-"""Agente Explainer — implementación OpenRouter (minimax/minimax-m2.7)."""
+"""Agente Explainer — implementación OpenRouter (x-ai/grok-4.1-fast)."""
 from __future__ import annotations
 
 import base64
@@ -14,7 +14,7 @@ from backend.agents.explainer import SYSTEM_INSTRUCTION, SUBPART_SYSTEM_INSTRUCT
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "minimax/minimax-m2.7"
+OPENROUTER_MODEL_AGENTS = "x-ai/grok-4.1-fast"
 
 # PDF parsing plugin (cloudflare-ai es gratis y funciona con cualquier modelo)
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
@@ -148,6 +148,7 @@ def run_explainer_or(
         system_prompt=SYSTEM_INSTRUCTION,
         api_key=api_key,
         plugins=plugins,
+        reasoning={"effort": "xhigh", "exclude": True},
     )
 
     try:
@@ -203,8 +204,12 @@ def run_subpart_explainer_or(
         system_prompt=SUBPART_SYSTEM_INSTRUCTION,
         api_key=api_key,
         plugins=plugins,
+        reasoning={"effort": "xhigh", "exclude": True},
     )
 
+    logger.debug(
+        f"[OpenRouter Subpart Explainer] raw type={type(raw).__name__} len={len(raw) if raw is not None else 'None'} repr={repr(raw[:80]) if raw else repr(raw)}"
+    )
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:

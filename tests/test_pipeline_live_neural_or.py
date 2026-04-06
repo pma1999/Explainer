@@ -268,6 +268,7 @@ def main():
                 source_path=seg_pdf_path,
                 identificacion=sp_prompt,
                 mime_type="application/pdf",
+                api_key=or_key,
             )
             sp_ms = (time.time() - sp_start) * 1000
             desarrollo = sp_result.get("desarrollo", [])

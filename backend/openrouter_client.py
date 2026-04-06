@@ -44,6 +44,7 @@ def call_openrouter_chat(
     system_prompt: str,
     api_key: str,
     plugins: list[dict] | None = None,
+    reasoning: dict | None = None,
     max_retries: int = 5,
 ) -> tuple[str, OpenRouterUsage]:
     """
@@ -76,6 +77,9 @@ def call_openrouter_chat(
 
     if plugins:
         payload["plugins"] = plugins
+
+    if reasoning:
+        payload["reasoning"] = reasoning
 
     last_exc: Exception = OpenRouterError("No se realizó ningún intento.")
     for attempt in range(1, max_retries + 1):
@@ -113,7 +117,10 @@ def call_openrouter_chat(
             data = resp.json()
 
             # Extraer content
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            message = choice.get("message", {})
+            content = message.get("content") or ""
+            finish_reason = choice.get("finish_reason", "unknown")
 
             # Extraer usage
             usage_raw = data.get("usage", {})
@@ -122,14 +129,27 @@ def call_openrouter_chat(
                 completion_tokens=usage_raw.get("completion_tokens", 0),
             )
 
-            logger.debug(
-                "[OpenRouter] Respuesta OK",
-                extra={
-                    "model": model,
-                    "prompt_tokens": usage.prompt_token_count,
-                    "completion_tokens": usage.candidates_token_count,
-                },
-            )
+            if not content:
+                logger.warning(
+                    "[OpenRouter] Contenido vacío recibido",
+                    extra={
+                        "model": model,
+                        "finish_reason": finish_reason,
+                        "message_keys": list(message.keys()),
+                        "full_choice": str(choice)[:500],
+                        "full_data_keys": list(data.keys()),
+                    },
+                )
+            else:
+                logger.debug(
+                    "[OpenRouter] Respuesta OK",
+                    extra={
+                        "model": model,
+                        "finish_reason": finish_reason,
+                        "prompt_tokens": usage.prompt_token_count,
+                        "completion_tokens": usage.candidates_token_count,
+                    },
+                )
             return content, usage
 
         except (OpenRouterRateLimitError, OpenRouterServiceError):
