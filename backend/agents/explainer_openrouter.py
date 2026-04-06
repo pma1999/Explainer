@@ -1,4 +1,4 @@
-"""Agente Explainer — implementación OpenRouter (x-ai/grok-4.1-fast)."""
+"""Agente Explainer — implementación OpenRouter (minimax/minimax-m2.7)."""
 from __future__ import annotations
 
 import base64
@@ -14,7 +14,7 @@ from backend.agents.explainer import SYSTEM_INSTRUCTION, SUBPART_SYSTEM_INSTRUCT
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "x-ai/grok-4.1-fast"
+OPENROUTER_MODEL_AGENTS = "minimax/minimax-m2.7"
 
 # PDF parsing plugin (cloudflare-ai es gratis y funciona con cualquier modelo)
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
