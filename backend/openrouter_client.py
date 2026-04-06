@@ -1,7 +1,6 @@
 """Cliente HTTP para OpenRouter API."""
 from __future__ import annotations
 
-import os
 import time
 import json
 from typing import Any
@@ -43,6 +42,7 @@ def call_openrouter_chat(
     model: str,
     response_schema: dict,
     system_prompt: str,
+    api_key: str,
     plugins: list[dict] | None = None,
     max_retries: int = 5,
 ) -> tuple[str, OpenRouterUsage]:
@@ -50,9 +50,8 @@ def call_openrouter_chat(
     Llama a OpenRouter /chat/completions con structured output (json_schema).
     Retorna (content_string, OpenRouterUsage).
     """
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
-        raise OpenRouterError("OPENROUTER_API_KEY no está configurada en el entorno.")
+        raise OpenRouterError("OpenRouter API key no proporcionada.")
 
     headers = {
         "Authorization": f"Bearer {api_key}",

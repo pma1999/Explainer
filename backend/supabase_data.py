@@ -385,49 +385,67 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
 
 # ========== User API Keys (BYOK) ==========
 
-def has_user_api_key(user_id: str) -> bool:
-    """Check if user has an API key configured."""
+PROVIDER_GEMINI = "google_gemini"
+PROVIDER_OPENROUTER = "openrouter"
+
+
+def has_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:
+    """Check if user has an API key configured for the given provider."""
     client = _client()
     try:
-        r = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+        r = (
+            client.table("user_api_keys")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .eq("provider", provider)
+            .maybe_single()
+            .execute()
+        )
         result = bool(r and r.data)
-        logger.debug("[has_user_api_key] user=%s... result=%s", user_id[:8], result)
+        logger.debug("[has_user_api_key] user=%s... provider=%s result=%s", user_id[:8], provider, result)
         return result
     except Exception as e:
-        logger.error(f"[has_user_api_key] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
+        logger.error(f"[has_user_api_key] Error for user {user_id[:8]}... provider={provider}: {type(e).__name__}: {e}")
         return False
 
 
-def get_user_api_key(user_id: str) -> Optional[str]:
+def get_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> Optional[str]:
     """
-    Get and decrypt the user's API key.
+    Get and decrypt the user's API key for the given provider.
 
     Args:
         user_id: UUID of the user
+        provider: API provider identifier (default: google_gemini)
 
     Returns:
         Decrypted API key or None if not found
     """
     client = _client()
     try:
-        r = client.table("user_api_keys").select("encrypted_api_key").eq("user_id", user_id).maybe_single().execute()
+        r = (
+            client.table("user_api_keys")
+            .select("encrypted_api_key")
+            .eq("user_id", user_id)
+            .eq("provider", provider)
+            .maybe_single()
+            .execute()
+        )
         if not r or not r.data:
             return None
-
         encrypted_key = r.data["encrypted_api_key"]
         return decrypt_user_api_key(encrypted_key, user_id)
     except Exception:
         return None
 
 
-def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini") -> None:
+def set_user_api_key(user_id: str, api_key: str, provider: str = PROVIDER_GEMINI) -> None:
     """
     Encrypt and save the user's API key (BYOK).
 
     Args:
         user_id: UUID of the user
         api_key: API key in plain text (will be encrypted before storage)
-        provider: API provider identifier
+        provider: API provider identifier (composite PK with user_id)
     """
     client = _client()
     encrypted_key = encrypt_user_api_key(api_key, user_id)
@@ -438,27 +456,34 @@ def set_user_api_key(user_id: str, api_key: str, provider: str = "google_gemini"
         "provider": provider,
     }
 
-    # Atomic upsert: insert if not exists, update if exists (user_id is PK)
-    client.table("user_api_keys").upsert(row, on_conflict="user_id").execute()
+    # Atomic upsert: insert if not exists, update if exists — PK is (user_id, provider)
+    client.table("user_api_keys").upsert(row, on_conflict="user_id,provider").execute()
 
 
-def delete_user_api_key(user_id: str) -> bool:
+def delete_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:
     """
-    Delete the user's API key.
+    Delete the user's API key for the given provider.
 
     Args:
         user_id: UUID of the user
+        provider: API provider identifier (default: google_gemini)
 
     Returns:
         True if deleted, False if not found
     """
     client = _client()
     try:
-        existing = client.table("user_api_keys").select("user_id").eq("user_id", user_id).maybe_single().execute()
+        existing = (
+            client.table("user_api_keys")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .eq("provider", provider)
+            .maybe_single()
+            .execute()
+        )
         if not existing or not existing.data:
             return False
-
-        client.table("user_api_keys").delete().eq("user_id", user_id).execute()
+        client.table("user_api_keys").delete().eq("user_id", user_id).eq("provider", provider).execute()
         return True
     except Exception:
         return False
@@ -466,32 +491,38 @@ def delete_user_api_key(user_id: str) -> bool:
 
 def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     """
-    Get API key status for a user (safe for returning to frontend).
+    Get API key status for all providers (safe for returning to frontend).
 
-    Returns info about API key without exposing any sensitive data.
-
-    Args:
-        user_id: UUID of the user
-
-    Returns:
-        Dict with has_api_key (bool), provider (str or None), updated_at (str or None)
+    Returns status without exposing any sensitive data.
+    Backwards-compatible: always includes has_api_key / provider / updated_at for Gemini.
+    Adds has_openrouter_key / openrouter_updated_at for OpenRouter.
     """
     client = _client()
-    try:
-        r = client.table("user_api_keys").select("provider, updated_at").eq("user_id", user_id).maybe_single().execute()
+    gemini_data: dict = {}
+    openrouter_data: dict = {}
 
-        if r and r.data:
-            return {
-                "has_api_key": True,
-                "provider": r.data.get("provider"),
-                "updated_at": r.data.get("updated_at"),
-            }
-        logger.warning(f"[API Key Status] No data found for user {user_id[:8]}... r={r}")
+    try:
+        rows = (
+            client.table("user_api_keys")
+            .select("provider, updated_at")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if rows and rows.data:
+            for row in rows.data:
+                if row.get("provider") == PROVIDER_GEMINI:
+                    gemini_data = row
+                elif row.get("provider") == PROVIDER_OPENROUTER:
+                    openrouter_data = row
     except Exception as e:
         logger.error(f"[API Key Status] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
 
     return {
-        "has_api_key": False,
-        "provider": None,
-        "updated_at": None,
+        # Gemini (backwards-compatible fields)
+        "has_api_key": bool(gemini_data),
+        "provider": gemini_data.get("provider") or None,
+        "updated_at": gemini_data.get("updated_at") or None,
+        # OpenRouter (new fields)
+        "has_openrouter_key": bool(openrouter_data),
+        "openrouter_updated_at": openrouter_data.get("updated_at") or None,
     }

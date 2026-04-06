@@ -817,6 +817,41 @@
             <p class="form-success" id="api-key-success"></p>
           </form>
         </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-title">API Key de OpenRouter <span class="settings-badge-optional">Opcional</span></h4>
+          <p class="settings-description">
+            Si la configuras, el explainer usará <strong>Grok (x-ai/grok-4.1-fast)</strong> en lugar de Gemini.
+            El resto de agentes (segmentación, recorrido, recursos) siguen usando Gemini.
+            Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
+          </p>
+
+          <div id="openrouter-key-not-set" class="api-key-status hidden">
+            <div class="status-badge status-neutral">No configurada</div>
+            <p class="status-text">El explainer usará Gemini por defecto.</p>
+          </div>
+
+          <div id="openrouter-key-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Configurada</div>
+            <p class="status-text">El explainer usará Grok vía OpenRouter.</p>
+          </div>
+
+          <form id="form-openrouter-key" class="settings-form">
+            <div class="form-group">
+              <label for="openrouter-key-input" class="form-label">API Key</label>
+              <input type="password" id="openrouter-key-input" class="form-input" placeholder="sk-or-v1-..." autocomplete="off" />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="btn-save-openrouter-key">
+                <span class="btn-text">Guardar API Key</span>
+                <span class="spinner hidden"></span>
+              </button>
+              <button type="button" class="btn-danger" id="btn-delete-openrouter-key">Eliminar</button>
+            </div>
+            <p class="form-error" id="openrouter-key-error"></p>
+            <p class="form-success" id="openrouter-key-success"></p>
+          </form>
+        </div>
       </div>
     </div>
   </div>

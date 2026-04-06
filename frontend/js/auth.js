@@ -5,13 +5,20 @@
 import { state, supabaseClient } from './state.js';
 import { $, show, hide, showView, toast } from './dom.js';
 import { api } from './api.js';
-import { getCachedApiKeyStatus, setCachedApiKeyStatus, invalidateProjectsCache } from './storage.js';
+import {
+  getCachedApiKeyStatus,
+  setCachedApiKeyStatus,
+  getCachedOpenRouterKeyStatus,
+  setCachedOpenRouterKeyStatus,
+  invalidateProjectsCache,
+} from './storage.js';
 import { getPreferOffline, setPreferOffline } from './pwa.js';
 
 export async function refreshApiKeyStatus() {
   const userId = state.user?.id;
   if (!userId) return;
 
+  // Seed from cache before network call
   const cached = getCachedApiKeyStatus(userId);
   if (cached !== null) {
     state.hasApiKey = cached;
@@ -19,19 +26,32 @@ export async function refreshApiKeyStatus() {
   } else {
     state.apiKeyStatus = 'loading';
   }
+
+  const cachedOR = getCachedOpenRouterKeyStatus(userId);
+  if (cachedOR !== null) {
+    state.hasOpenRouterKey = cachedOR;
+    state.openRouterKeyStatus = cachedOR ? 'has' : 'none';
+  } else {
+    state.openRouterKeyStatus = 'loading';
+  }
+
   updateApiKeyUI();
 
   try {
     const status = await api('/api/settings/api-key/status');
+
     state.hasApiKey = Boolean(status.has_api_key);
     state.apiKeyStatus = state.hasApiKey ? 'has' : 'none';
     setCachedApiKeyStatus(userId, state.hasApiKey);
+
+    state.hasOpenRouterKey = Boolean(status.has_openrouter_key);
+    state.openRouterKeyStatus = state.hasOpenRouterKey ? 'has' : 'none';
+    setCachedOpenRouterKeyStatus(userId, state.hasOpenRouterKey);
   } catch (_) {
-    // Only fall back to 'none' if we had no prior signal — don't cache false on transient errors
-    if (cached === null && state.apiKeyStatus === 'loading') {
-      state.apiKeyStatus = 'none';
-    }
+    if (cached === null && state.apiKeyStatus === 'loading') state.apiKeyStatus = 'none';
+    if (cachedOR === null && state.openRouterKeyStatus === 'loading') state.openRouterKeyStatus = 'none';
   }
+
   updateApiKeyUI();
 }
 
@@ -110,7 +130,7 @@ export function initSettings() {
   }
 
   $('btn-delete-api-key').addEventListener('click', async () => {
-    if (!confirm('¿Eliminar tu API key guardada?')) return;
+    if (!confirm('¿Eliminar tu API key de Gemini guardada?')) return;
 
     try {
       await api('/api/settings/api-key', { method: 'DELETE' });
@@ -118,9 +138,70 @@ export function initSettings() {
       state.apiKeyStatus = 'none';
       setCachedApiKeyStatus(state.user?.id, false);
       updateApiKeyUI();
-      toast('API key eliminada', 'success');
+      toast('API key de Gemini eliminada', 'success');
     } catch (err) {
       $('api-key-error').textContent = err.message;
+    }
+  });
+
+  // ---- OpenRouter key ----
+
+  $('form-openrouter-key').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const apiKey = $('openrouter-key-input').value.trim();
+
+    if (!apiKey) {
+      $('openrouter-key-error').textContent = 'Ingresa una API key de OpenRouter';
+      return;
+    }
+
+    const btn = $('btn-save-openrouter-key');
+    const spinner = btn.querySelector('.spinner');
+    const btnText = btn.querySelector('.btn-text');
+
+    btn.disabled = true;
+    show(spinner);
+    btnText.textContent = 'Guardando...';
+    $('openrouter-key-error').textContent = '';
+    $('openrouter-key-success').textContent = '';
+
+    try {
+      const formData = new FormData();
+      formData.append('api_key', apiKey);
+
+      await api('/api/settings/api-key/openrouter', {
+        method: 'POST',
+        body: formData,
+      });
+
+      state.hasOpenRouterKey = true;
+      state.openRouterKeyStatus = 'has';
+      setCachedOpenRouterKeyStatus(state.user?.id, true);
+      $('openrouter-key-input').value = '';
+      $('openrouter-key-success').textContent = 'API key de OpenRouter guardada';
+      updateApiKeyUI();
+      toast('API key de OpenRouter guardada', 'success');
+    } catch (err) {
+      $('openrouter-key-error').textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      hide(spinner);
+      btnText.textContent = 'Guardar API Key';
+    }
+  });
+
+  $('btn-delete-openrouter-key').addEventListener('click', async () => {
+    if (!confirm('¿Eliminar tu API key de OpenRouter guardada?')) return;
+
+    try {
+      await api('/api/settings/api-key/openrouter', { method: 'DELETE' });
+      state.hasOpenRouterKey = false;
+      state.openRouterKeyStatus = 'none';
+      setCachedOpenRouterKeyStatus(state.user?.id, false);
+      updateApiKeyUI();
+      toast('API key de OpenRouter eliminada', 'success');
+    } catch (err) {
+      $('openrouter-key-error').textContent = err.message;
     }
   });
 
@@ -252,9 +333,13 @@ export function hideSettings() {
   $('api-key-error').textContent = '';
   $('api-key-success').textContent = '';
   $('api-key-input').value = '';
+  $('openrouter-key-error').textContent = '';
+  $('openrouter-key-success').textContent = '';
+  $('openrouter-key-input').value = '';
 }
 
 export function updateApiKeyUI() {
+  // Gemini key UI
   const isLoading = state.apiKeyStatus === 'loading';
 
   if (state.hasApiKey) {
@@ -275,5 +360,22 @@ export function updateApiKeyUI() {
     show($('api-key-warning'));
   } else {
     hide($('api-key-warning'));
+  }
+
+  // OpenRouter key UI
+  const orLoading = state.openRouterKeyStatus === 'loading';
+
+  if (state.hasOpenRouterKey) {
+    hide($('openrouter-key-not-set'));
+    show($('openrouter-key-set'));
+    $('btn-delete-openrouter-key').style.display = 'inline-block';
+  } else if (orLoading) {
+    hide($('openrouter-key-not-set'));
+    hide($('openrouter-key-set'));
+    $('btn-delete-openrouter-key').style.display = 'none';
+  } else {
+    show($('openrouter-key-not-set'));
+    hide($('openrouter-key-set'));
+    $('btn-delete-openrouter-key').style.display = 'none';
   }
 }

@@ -39,15 +39,14 @@ from backend.supabase_data import (
     delete_user_api_key,
     has_user_api_key,
     get_user_api_key_status,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENROUTER,
 )
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
 from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_SEGMENTADOR
-
-_OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
-USE_OPENROUTER_EXPLAINER: bool = bool(_OPENROUTER_API_KEY)
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
@@ -120,6 +119,16 @@ def _validate_gemini_api_key(api_key: str) -> str:
     return key
 
 
+def _validate_openrouter_api_key(api_key: str) -> str:
+    """Validate and normalize OpenRouter API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if not key.startswith("sk-or-") or len(key) < 20 or len(key) > 200:
+        raise HTTPException(status_code=400, detail="API key de OpenRouter inválida (debe empezar por sk-or-)")
+    return key
+
+
+# ---- Gemini key endpoints ----
+
 @app.post("/api/settings/api-key")
 @api_key_rate_limit
 async def api_set_api_key(
@@ -127,10 +136,10 @@ async def api_set_api_key(
     user_id: Annotated[str, Depends(get_current_user_id)],
     api_key: str = Form(...),
 ):
-    """Store user's API key (BYOK)."""
+    """Store user's Gemini API key (BYOK)."""
     api_key = _validate_gemini_api_key(api_key)
-    set_user_api_key(user_id, api_key, provider="google_gemini")
-    logger.info("[API Key] User %s... configured API key: %s", user_id[:8], mask_api_key(api_key))
+    set_user_api_key(user_id, api_key, provider=PROVIDER_GEMINI)
+    logger.info("[API Key] User %s... configured Gemini key: %s", user_id[:8], mask_api_key(api_key))
     return {"ok": True}
 
 
@@ -140,15 +149,45 @@ async def api_delete_api_key(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ):
-    """Delete user's API key."""
-    delete_user_api_key(user_id)
-    logger.info("[API Key] User %s... deleted their API key", user_id[:8])
+    """Delete user's Gemini API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_GEMINI)
+    logger.info("[API Key] User %s... deleted Gemini key", user_id[:8])
     return {"ok": True}
 
 
+# ---- OpenRouter key endpoints ----
+
+@app.post("/api/settings/api-key/openrouter")
+@api_key_rate_limit
+async def api_set_openrouter_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    api_key: str = Form(...),
+):
+    """Store user's OpenRouter API key (BYOK)."""
+    api_key = _validate_openrouter_api_key(api_key)
+    set_user_api_key(user_id, api_key, provider=PROVIDER_OPENROUTER)
+    logger.info("[API Key] User %s... configured OpenRouter key: %s", user_id[:8], mask_api_key(api_key))
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key/openrouter")
+@api_key_rate_limit
+async def api_delete_openrouter_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Delete user's OpenRouter API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
+    logger.info("[API Key] User %s... deleted OpenRouter key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- Status (all providers) ----
+
 @app.get("/api/settings/api-key/status")
 async def api_api_key_status(user_id: Annotated[str, Depends(get_current_user_id)]):
-    """Get API key status for the authenticated user."""
+    """Get API key status for all providers."""
     return get_user_api_key_status(user_id)
 
 
@@ -1075,13 +1114,15 @@ async def _process_project(project_id: str, user_id: str) -> None:
             }
         )
 
-        # Get user's API key (BYOK) from Supabase
-        api_key = get_user_api_key(user_id)
+        # Get user's API keys (BYOK) from Supabase
+        api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
         if not api_key:
-            logger.error(f"[Process] API key no configurada para user: {user_id[:8]}...")
+            logger.error(f"[Process] API key Gemini no configurada para user: {user_id[:8]}...")
             await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada. Configúrala en Ajustes."})
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
+
+        openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
 
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
 
@@ -1763,11 +1804,11 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
             # Execute all subpart explainers + recorrido + resources in parallel
             agents_start = time.time()
-            use_or = USE_OPENROUTER_EXPLAINER and segment_temp_path is not None
+            use_or = bool(openrouter_api_key) and segment_temp_path is not None
             if use_or:
                 explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
                 explainer_calls = [
-                    asyncio.to_thread(explainer_fn_or, segment_temp_path, sp_prompt, OPENROUTER_EXPLAINER_MODEL, agent_mime_type)
+                    asyncio.to_thread(explainer_fn_or, segment_temp_path, sp_prompt, OPENROUTER_EXPLAINER_MODEL, agent_mime_type, openrouter_api_key)
                     for sp_prompt in subpart_prompts
                 ]
             else:

@@ -123,6 +123,7 @@ def run_explainer_or(
     identificacion: str,
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
     start = time.time()
@@ -145,6 +146,7 @@ def run_explainer_or(
         model=model,
         response_schema=RESPONSE_SCHEMA_DICT,
         system_prompt=SYSTEM_INSTRUCTION,
+        api_key=api_key,
         plugins=plugins,
     )
 
@@ -176,6 +178,7 @@ def run_subpart_explainer_or(
     identificacion: str,
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer de subparte vía OpenRouter — retorna solo desarrollo."""
     start = time.time()
@@ -198,6 +201,7 @@ def run_subpart_explainer_or(
         model=model,
         response_schema=SUBPART_RESPONSE_SCHEMA_DICT,
         system_prompt=SUBPART_SYSTEM_INSTRUCTION,
+        api_key=api_key,
         plugins=plugins,
     )
 

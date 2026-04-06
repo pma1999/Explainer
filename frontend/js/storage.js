@@ -6,6 +6,7 @@ import {
   state,
   LOCAL_BACKUP_KEY_LEGACY,
   API_KEY_CACHE_KEY_PREFIX,
+  OPENROUTER_KEY_CACHE_KEY_PREFIX,
   API_KEY_CACHE_TTL_MS,
 } from './state.js';
 import { api } from './api.js';
@@ -45,6 +46,30 @@ export function setCachedApiKeyStatus(userId, hasApiKey) {
   try {
     localStorage.setItem(API_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
       hasApiKey: Boolean(hasApiKey),
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+
+export function getCachedOpenRouterKeyStatus(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(OPENROUTER_KEY_CACHE_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const age = Date.now() - (parsed.updatedAt ? new Date(parsed.updatedAt).getTime() : 0);
+    if (age > API_KEY_CACHE_TTL_MS) return null;
+    return parsed.hasKey === true;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setCachedOpenRouterKeyStatus(userId, hasKey) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(OPENROUTER_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
+      hasKey: Boolean(hasKey),
       updatedAt: new Date().toISOString(),
     }));
   } catch (_) {}

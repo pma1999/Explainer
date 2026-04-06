@@ -24,6 +24,8 @@ export const state = {
   pollCurrentProjectInterval: null,
   hasApiKey: false,
   apiKeyStatus: 'loading',
+  hasOpenRouterKey: false,
+  openRouterKeyStatus: 'loading',
   session: null,
   user: null,
   previousUserId: null,
@@ -39,4 +41,5 @@ export const VISIBILITY_RECONNECT_DELAY_MS = 800;
 export const LOCAL_BACKUP_KEY_LEGACY = 'explainer.projects.backup.v1';
 export const SESSION_VIEW_KEY = 'explainer.current_view.v1';
 export const API_KEY_CACHE_KEY_PREFIX = 'explainer.apiKeyStatus.v1.';
+export const OPENROUTER_KEY_CACHE_KEY_PREFIX = 'explainer.openrouterKeyStatus.v1.';
 export const API_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
