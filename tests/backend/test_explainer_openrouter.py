@@ -164,3 +164,79 @@ def test_run_subpart_explainer_or_rejects_invalid_payload(monkeypatch):
             mime_type="text/plain",
             api_key="sk-or-v1-test",
         )
+
+
+def test_run_subpart_explainer_or_retries_when_desarrollo_is_empty(monkeypatch):
+    source_path = _write_text_source()
+    calls: list[dict] = []
+
+    responses = [
+        (
+            {"desarrollo": []},
+            _usage(),
+        ),
+        (
+            {
+                "desarrollo": [
+                    {
+                        "titulo_seccion": "Sección válida",
+                        "explicacion_introductoria": "Contexto",
+                        "subsecciones": [
+                            {
+                                "titulo_subseccion": "Sub",
+                                "explicacion_detallada": "Detalle",
+                            }
+                        ],
+                    }
+                ]
+            },
+            _usage(),
+        ),
+    ]
+
+    def _fake_call(**kwargs):
+        calls.append(kwargs)
+        return responses.pop(0)
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_call)
+    monkeypatch.setattr(module.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module.random, "uniform", lambda *_args, **_kwargs: 0.0)
+
+    result, usage = module.run_subpart_explainer_or(
+        source_path=source_path,
+        identificacion="Prompt de prueba",
+        mime_type="text/plain",
+        api_key="sk-or-v1-test",
+    )
+
+    assert len(calls) == 2
+    assert usage.prompt_token_count == 34
+    assert usage.candidates_token_count == 62
+    retry_messages = calls[1]["messages"]
+    assert any(
+        isinstance(item, dict)
+        and item.get("role") == "user"
+        and "incumple el contrato JSON" in str(item.get("content"))
+        for item in retry_messages
+    )
+    assert result["desarrollo"][0]["titulo_seccion"] == "Sección válida"
+
+
+def test_run_subpart_explainer_or_raises_after_exhausting_validation_attempts(monkeypatch):
+    source_path = _write_text_source()
+
+    monkeypatch.setattr(
+        module,
+        "call_openrouter_chat",
+        lambda **kwargs: ({"desarrollo": []}, _usage()),
+    )
+    monkeypatch.setattr(module.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module.random, "uniform", lambda *_args, **_kwargs: 0.0)
+
+    with pytest.raises(OpenRouterError, match="falló tras"):
+        module.run_subpart_explainer_or(
+            source_path=source_path,
+            identificacion="Prompt de prueba",
+            mime_type="text/plain",
+            api_key="sk-or-v1-test",
+        )

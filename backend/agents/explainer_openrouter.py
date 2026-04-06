@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import base64
+import os
+import random
 import time
-from typing import Any
+from typing import Any, Callable
 
 from backend.logging_config import get_logger
 from backend.openrouter_client import OpenRouterError, OpenRouterUsage, call_openrouter_chat
@@ -12,6 +14,10 @@ from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
 logger = get_logger("backend.agents.explainer_openrouter")
 
 OPENROUTER_MODEL_AGENTS = "xiaomi/mimo-v2-flash"
+OPENROUTER_VALIDATION_MAX_ATTEMPTS = max(1, int(os.environ.get("OPENROUTER_VALIDATION_MAX_ATTEMPTS", "3")))
+OPENROUTER_VALIDATION_BASE_BACKOFF_SECONDS = max(
+    0.0, float(os.environ.get("OPENROUTER_VALIDATION_BASE_BACKOFF_SECONDS", "1.5"))
+)
 
 # PDF parsing plugin (cloudflare-ai es gratis y funciona con cualquier modelo)
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
@@ -307,6 +313,110 @@ def _count_payload_chars(payload: dict[str, Any]) -> int:
 
     return total
 
+
+def _merge_usage(usages: list[OpenRouterUsage]) -> OpenRouterUsage:
+    if not usages:
+        return OpenRouterUsage(prompt_tokens=0, completion_tokens=0)
+    return OpenRouterUsage(
+        prompt_tokens=sum(u.prompt_token_count for u in usages),
+        completion_tokens=sum(u.candidates_token_count for u in usages),
+    )
+
+
+def _build_validation_retry_message(*, attempt: int, max_attempts: int, validation_error: str) -> str:
+    return (
+        "Tu última respuesta incumple el contrato JSON requerido. "
+        f"Error de validación detectado: {validation_error}. "
+        "Reintenta desde cero y devuelve EXCLUSIVAMENTE un objeto JSON válido que cumpla "
+        "estrictamente el esquema pedido: campos obligatorios presentes, listas no vacías cuando "
+        "corresponda y tipos correctos. Sin texto fuera del JSON.\n"
+        f"Intento de corrección {attempt}/{max_attempts}."
+    )
+
+
+def _compute_retry_wait_seconds(attempt: int) -> float:
+    base = OPENROUTER_VALIDATION_BASE_BACKOFF_SECONDS * (2 ** max(0, attempt - 1))
+    jitter = random.uniform(0.0, OPENROUTER_VALIDATION_BASE_BACKOFF_SECONDS)
+    return min(base + jitter, 20.0)
+
+
+def _call_with_contract_retries(
+    *,
+    base_messages: list[dict[str, Any]],
+    model: str,
+    system_prompt: str,
+    api_key: str,
+    plugins: list[dict[str, Any]] | None,
+    validator: Callable[[Any], dict[str, Any]],
+    operation_name: str,
+) -> tuple[dict[str, Any], OpenRouterUsage]:
+    usages: list[OpenRouterUsage] = []
+    corrective_messages: list[dict[str, str]] = []
+    last_exc: Exception | None = None
+    max_attempts = OPENROUTER_VALIDATION_MAX_ATTEMPTS
+
+    for attempt in range(1, max_attempts + 1):
+        messages = [*base_messages, *corrective_messages]
+        try:
+            raw, usage = call_openrouter_chat(
+                messages=messages,
+                model=model,
+                system_prompt=system_prompt,
+                api_key=api_key,
+                response_format="json_object",
+                plugins=plugins,
+                enable_response_healing=True,
+                reasoning={"effort": "xhigh", "exclude": True},
+            )
+            usages.append(usage)
+            try:
+                return validator(raw), _merge_usage(usages)
+            except OpenRouterError as validation_exc:
+                last_exc = validation_exc
+                if attempt >= max_attempts:
+                    break
+                wait = _compute_retry_wait_seconds(attempt)
+                corrective_messages = [
+                    {
+                        "role": "user",
+                        "content": _build_validation_retry_message(
+                            attempt=attempt + 1,
+                            max_attempts=max_attempts,
+                            validation_error=str(validation_exc),
+                        ),
+                    }
+                ]
+                logger.warning(
+                    "[OpenRouter] %s inválido tras validación local; reintento %s/%s en %.2fs",
+                    operation_name,
+                    attempt,
+                    max_attempts,
+                    wait,
+                    extra={"validation_error": str(validation_exc)[:400], "model": model},
+                )
+                time.sleep(wait)
+        except OpenRouterError as exc:
+            last_exc = exc
+            if attempt >= max_attempts:
+                break
+            wait = _compute_retry_wait_seconds(attempt)
+            logger.warning(
+                "[OpenRouter] Fallo en %s; reintento %s/%s en %.2fs",
+                operation_name,
+                attempt,
+                max_attempts,
+                wait,
+                extra={"error_type": type(exc).__name__, "error": str(exc)[:400], "model": model},
+            )
+            time.sleep(wait)
+
+    usage = _merge_usage(usages)
+    if isinstance(last_exc, OpenRouterError):
+        raise OpenRouterError(
+            f"{operation_name} falló tras {max_attempts} intento(s): {last_exc}"
+        ) from last_exc
+    raise OpenRouterError(f"{operation_name} falló tras {max_attempts} intento(s) sin causa explícita.")
+
 def _build_content(source_path: str, identificacion: str, mime_type: str) -> tuple[list[dict], list[dict] | None]:
     """
     Construye el array de content y la lista de plugins para OpenRouter.
@@ -365,18 +475,15 @@ def run_explainer_or(
     content, plugins = _build_content(source_path, identificacion, mime_type)
     messages = [{"role": "user", "content": content}]
 
-    raw, usage = call_openrouter_chat(
-        messages=messages,
+    result, usage = _call_with_contract_retries(
+        base_messages=messages,
         model=model,
         system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
-        response_format="json_object",
         plugins=plugins,
-        enable_response_healing=True,
-        reasoning={"effort": "xhigh", "exclude": True},
+        validator=_validate_full_explainer_payload,
+        operation_name="explainer_openrouter",
     )
-
-    result = _validate_full_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)
@@ -424,18 +531,15 @@ def run_subpart_explainer_or(
     content, plugins = _build_content(source_path, identificacion, mime_type)
     messages = [{"role": "user", "content": content}]
 
-    raw, usage = call_openrouter_chat(
-        messages=messages,
+    result, usage = _call_with_contract_retries(
+        base_messages=messages,
         model=model,
         system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
-        response_format="json_object",
         plugins=plugins,
-        enable_response_healing=True,
-        reasoning={"effort": "xhigh", "exclude": True},
+        validator=_validate_subpart_explainer_payload,
+        operation_name="subpart_explainer_openrouter",
     )
-
-    result = _validate_subpart_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)
