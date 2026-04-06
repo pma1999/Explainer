@@ -106,7 +106,9 @@ def validate_page_coverage(
         b_num = int(b["numero"])
         a_end = int(a["pagina_fin"])
         b_start = int(b["pagina_inicio"])
-        if a_end >= b_start:
+        if a_end > b_start:
+            # a_end == b_start (exactly one shared transition page) is allowed,
+            # consistent with subpart boundary rules.
             part_errors.append(PartPageError(
                 type="overlap",
                 part_numero=a_num,
@@ -367,7 +369,7 @@ def build_page_coverage_retry_suffix(
     lines += [
         "REQUISITOS PARA LA CORRECCIÓN:",
         "  - pagina_inicio y pagina_fin de cada parte: enteros positivos con pagina_inicio ≤ pagina_fin.",
-        "  - Rangos de partes sin solapamientos: parte_i.pagina_fin < parte_{i+1}.pagina_inicio.",
+        "  - Rangos de partes sin solapamientos: parte_i.pagina_fin <= parte_{i+1}.pagina_inicio (se permite una página de transición compartida, igual que entre subpartes).",
         "  - Todas las páginas de contenido cubiertas por exactamente una parte.",
         "  - Subpartes de cada parte contiguas: subparte_j.pagina_fin + 1 == subparte_{j+1}.pagina_inicio "
         "(o subparte_j.pagina_fin == subparte_{j+1}.pagina_inicio si la página de transición contiene "
