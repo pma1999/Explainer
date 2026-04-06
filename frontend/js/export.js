@@ -125,6 +125,11 @@ function triggerDownload(blob, filename) {
 }
 
 function formatExplicacionMd(data, autor, obra, partName) {
+  if (data && data._format === 'markdown') {
+    const content = typeof data.content === 'string' ? data.content.trim() : '';
+    return content ? `${content}\n` : '';
+  }
+
   let md = '';
   if (data.introduccion) {
     md += `> [!summary] Introducción\n> ${data.introduccion.replace(/\n/g, '\n> ')}\n\n---\n\n`;

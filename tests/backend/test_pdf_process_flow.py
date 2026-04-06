@@ -80,7 +80,11 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         segment_upload_page_counts: list[int] = []
 
         monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
-        monkeypatch.setattr(main, "get_user_api_key", lambda uid: "AIzaFakeKey")
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
         monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(payload))
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
@@ -202,7 +206,11 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
         seg_calls = []
 
         monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
-        monkeypatch.setattr(main, "get_user_api_key", lambda uid: "AIzaFakeKey")
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
         monkeypatch.setattr(main, "mask_api_key", lambda k: "AIza****")
         monkeypatch.setattr(main, "update_project", lambda pid, uid, p: updates.append(p))
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)

@@ -1,9 +1,4 @@
-"""Agente Explainer — implementación OpenRouter (markdown output).
-
-En lugar de structured output JSON (que muchos modelos no soportan bien),
-usamos texto libre para que el modelo genere markdown directamente.
-El resultado se devuelve como {"_format": "markdown", "content": "..."}.
-"""
+"""Agente Explainer — implementación OpenRouter con JSON mode."""
 from __future__ import annotations
 
 import base64
@@ -11,7 +6,7 @@ import time
 from typing import Any
 
 from backend.logging_config import get_logger
-from backend.openrouter_client import OpenRouterUsage, call_openrouter_chat
+from backend.openrouter_client import OpenRouterError, OpenRouterUsage, call_openrouter_chat
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
 
 logger = get_logger("backend.agents.explainer_openrouter")
@@ -22,7 +17,7 @@ OPENROUTER_MODEL_AGENTS = "xiaomi/mimo-v2-flash"
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
 
 # ---------------------------------------------------------------------------
-# System prompts para markdown output
+# System prompts para JSON mode
 # ---------------------------------------------------------------------------
 
 OR_EXPLAINER_SYSTEM_PROMPT = (
@@ -48,28 +43,44 @@ OR_EXPLAINER_SYSTEM_PROMPT = (
 + CASTELLANO_ESPANIA_XML
 + """
 
-  <output_format>
-  **Devuelve tu explicación en Markdown bien estructurado. Estructura obligatoria:**
+  <output_contract>
+  Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto. No uses bloques ```json.
 
-  Una introducción en prosa (1-2 párrafos) que contextualice el tema.
+  La forma exacta del objeto es:
+  {
+    "introduccion": "string",
+    "desarrollo": [
+      {
+        "titulo_seccion": "string",
+        "explicacion_introductoria": "string",
+        "subsecciones": [
+          {
+            "titulo_subseccion": "string",
+            "explicacion_detallada": "string"
+          }
+        ]
+      }
+    ],
+    "conclusion": "string",
+    "conexiones_contextuales": [
+      {
+        "seccion_temario_relacionada": "string",
+        "descripcion_conexion": "string"
+      }
+    ]
+  }
 
-  Secciones de desarrollo con encabezados `##` para cada bloque temático principal
-  y `###` para subsecciones. Cada subsección debe tener desarrollo exhaustivo en prosa.
-
-  Una sección `## Conclusión` al final (1-2 párrafos de síntesis).
-
-  Si se proporciona tabla de contenidos, una sección `## Conexiones contextuales`
-  con referencias a otras secciones del temario (omitir si no hay tabla o conexiones relevantes).
-
-  **REGLAS DE FORMATO:**
-  - Responde SOLO con el contenido en Markdown. Sin bloques de código que envuelvan todo, sin preámbulos sobre lo que vas a hacer.
-  - Usa `**negrita**` para términos técnicos clave y conceptos centrales.
-  - Usa `*cursiva*` para términos en otro idioma o títulos de obras.
-  - Usa listas (`-` o `1.`) cuando el texto enumere elementos discretos.
-  - Usa `>` para citas textuales de los materiales fuente.
-  - Separa ideas distintas con líneas en blanco.
+  Reglas JSON obligatorias:
+  - Todas esas claves deben existir SIEMPRE.
+  - `conexiones_contextuales` debe ser `[]` cuando no aplique.
+  - No añadas claves extra.
+  - Cada valor debe respetar exactamente su tipo.
+  - Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
+  - `titulo_seccion` y `titulo_subseccion` son títulos breves; no los repitas dentro del cuerpo.
+  - `introduccion` y `conclusion` contienen solo sus párrafos; no incluyas los rótulos literales "Introducción" o "Conclusión".
+  - `explicacion_introductoria` y `explicacion_detallada` contienen solo el cuerpo explicativo de ese bloque, sin encabezados duplicados ni metacomentarios.
   - Tu límite de tokens existe para ser USADO, no para ser ahorrado. Sé exhaustivo.
-  </output_format>
+  </output_contract>
 
   <coverage_guarantee_protocol>
   **CRÍTICO:** Si algo aparece en el texto principal, DEBE aparecer desarrollado en tu explicación. "Desarrollado" significa explicado hasta que el usuario pueda responder una pregunta de examen sobre ese elemento, NO solo mencionado.
@@ -95,7 +106,7 @@ OR_EXPLAINER_SYSTEM_PROMPT = (
 </context>
 
 <task>
-Basándote en el contexto proporcionado, genera una explicación exhaustiva en Markdown del texto principal que garantice comprensión completa. Si no hay instrucción específica, explica TODO el contenido. Mantén profundidad uniforme desde el primer hasta el último concepto.
+Basándote en el contexto proporcionado, genera una explicación exhaustiva del texto principal que garantice comprensión completa. Si no hay instrucción específica, explica TODO el contenido. Mantén profundidad uniforme desde el primer hasta el último concepto y devuelve únicamente el objeto JSON descrito.
 </task>"""
 )
 
@@ -115,22 +126,34 @@ OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = (
 + CASTELLANO_ESPANIA_XML
 + """
 
-  <output_format>
-  **Devuelve EXCLUSIVAMENTE el cuerpo de desarrollo en Markdown. Estructura obligatoria:**
+  <output_contract>
+  Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto.
 
-  Secciones con encabezados `##` para cada bloque temático principal y `###` para subsecciones.
-  Cada subsección con desarrollo exhaustivo en prosa.
+  La forma exacta del objeto es:
+  {
+    "desarrollo": [
+      {
+        "titulo_seccion": "string",
+        "explicacion_introductoria": "string",
+        "subsecciones": [
+          {
+            "titulo_subseccion": "string",
+            "explicacion_detallada": "string"
+          }
+        ]
+      }
+    ]
+  }
 
-  **NO incluyas introducción, conclusión ni conexiones contextuales** — esas partes las genera otro sistema con visión global del documento.
-
-  **REGLAS DE FORMATO:**
-  - Responde SOLO con el Markdown del desarrollo. Sin preámbulos.
-  - Usa `**negrita**` para términos técnicos clave.
-  - Usa `*cursiva*` para términos en otro idioma o títulos de obras.
-  - Usa listas cuando el texto enumere elementos discretos.
-  - Usa `>` para citas textuales de los materiales.
+  Reglas JSON obligatorias:
+  - Devuelve SOLO la clave `desarrollo`.
+  - No añadas introducción, conclusión ni conexiones contextuales.
+  - No añadas claves extra.
+  - Cada `titulo_*` debe ser breve y no repetirse dentro del cuerpo.
+  - Cada `explicacion_*` contiene solo el cuerpo explicativo, sin encabezados duplicados ni metacomentarios.
+  - Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
   - Tu límite de tokens existe para ser USADO. Sé exhaustivo.
-  </output_format>
+  </output_contract>
 
   <coverage_guarantee_protocol>
   **CRÍTICO:** Si algo aparece en el texto de esta subparte, DEBE aparecer desarrollado exhaustivamente. No solo mencionado.
@@ -150,7 +173,7 @@ OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = (
 </context>
 
 <task>
-Basándote en el contexto proporcionado, genera el desarrollo exhaustivo en Markdown de la subparte asignada. Mantén profundidad uniforme desde el primer hasta el último concepto. Sin introducción ni conclusión.
+Basándote en el contexto proporcionado, genera el desarrollo exhaustivo de la subparte asignada. Mantén profundidad uniforme desde el primer hasta el último concepto. Sin introducción ni conclusión. Devuelve únicamente el objeto JSON descrito.
 </task>"""
 )
 
@@ -158,6 +181,131 @@ Basándote en el contexto proporcionado, genera el desarrollo exhaustivo en Mark
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _require_object(value: Any, *, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise OpenRouterError(f"Campo inválido en {path}: se esperaba un objeto JSON.")
+    return value
+
+
+def _require_string(value: Any, *, path: str, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise OpenRouterError(f"Campo inválido en {path}: se esperaba una cadena.")
+    normalized = value.strip()
+    if not allow_empty and not normalized:
+        raise OpenRouterError(f"Campo inválido en {path}: la cadena no puede estar vacía.")
+    return normalized
+
+
+def _validate_subsections(raw: Any, *, path: str) -> list[dict[str, str]]:
+    if not isinstance(raw, list) or not raw:
+        raise OpenRouterError(f"Campo inválido en {path}: se esperaba una lista no vacía.")
+    validated: list[dict[str, str]] = []
+    for index, item in enumerate(raw):
+        subsection = _require_object(item, path=f"{path}[{index}]")
+        validated.append(
+            {
+                "titulo_subseccion": _require_string(
+                    subsection.get("titulo_subseccion"),
+                    path=f"{path}[{index}].titulo_subseccion",
+                ),
+                "explicacion_detallada": _require_string(
+                    subsection.get("explicacion_detallada"),
+                    path=f"{path}[{index}].explicacion_detallada",
+                ),
+            }
+        )
+    return validated
+
+
+def _validate_desarrollo(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list) or not raw:
+        raise OpenRouterError("Campo inválido en desarrollo: se esperaba una lista no vacía.")
+    validated: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        section = _require_object(item, path=f"desarrollo[{index}]")
+        validated.append(
+            {
+                "titulo_seccion": _require_string(
+                    section.get("titulo_seccion"),
+                    path=f"desarrollo[{index}].titulo_seccion",
+                ),
+                "explicacion_introductoria": _require_string(
+                    section.get("explicacion_introductoria"),
+                    path=f"desarrollo[{index}].explicacion_introductoria",
+                ),
+                "subsecciones": _validate_subsections(
+                    section.get("subsecciones"),
+                    path=f"desarrollo[{index}].subsecciones",
+                ),
+            }
+        )
+    return validated
+
+
+def _validate_conexiones(raw: Any) -> list[dict[str, str]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise OpenRouterError(
+            "Campo inválido en conexiones_contextuales: se esperaba una lista o []."
+        )
+    validated: list[dict[str, str]] = []
+    for index, item in enumerate(raw):
+        connection = _require_object(item, path=f"conexiones_contextuales[{index}]")
+        validated.append(
+            {
+                "seccion_temario_relacionada": _require_string(
+                    connection.get("seccion_temario_relacionada"),
+                    path=f"conexiones_contextuales[{index}].seccion_temario_relacionada",
+                ),
+                "descripcion_conexion": _require_string(
+                    connection.get("descripcion_conexion"),
+                    path=f"conexiones_contextuales[{index}].descripcion_conexion",
+                ),
+            }
+        )
+    return validated
+
+
+def _validate_full_explainer_payload(payload: Any) -> dict[str, Any]:
+    data = _require_object(payload, path="root")
+    return {
+        "introduccion": _require_string(data.get("introduccion"), path="introduccion"),
+        "desarrollo": _validate_desarrollo(data.get("desarrollo")),
+        "conclusion": _require_string(data.get("conclusion"), path="conclusion"),
+        "conexiones_contextuales": _validate_conexiones(data.get("conexiones_contextuales")),
+    }
+
+
+def _validate_subpart_explainer_payload(payload: Any) -> dict[str, Any]:
+    data = _require_object(payload, path="root")
+    return {"desarrollo": _validate_desarrollo(data.get("desarrollo"))}
+
+
+def _count_desarrollo_subsections(desarrollo: list[dict[str, Any]]) -> int:
+    return sum(len(section.get("subsecciones") or []) for section in desarrollo)
+
+
+def _count_payload_chars(payload: dict[str, Any]) -> int:
+    total = 0
+    for key in ("introduccion", "conclusion"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            total += len(value)
+
+    for section in payload.get("desarrollo") or []:
+        total += len(section.get("titulo_seccion", ""))
+        total += len(section.get("explicacion_introductoria", ""))
+        for subsection in section.get("subsecciones") or []:
+            total += len(subsection.get("titulo_subseccion", ""))
+            total += len(subsection.get("explicacion_detallada", ""))
+
+    for connection in payload.get("conexiones_contextuales") or []:
+        total += len(connection.get("seccion_temario_relacionada", ""))
+        total += len(connection.get("descripcion_conexion", ""))
+
+    return total
 
 def _build_content(source_path: str, identificacion: str, mime_type: str) -> tuple[list[dict], list[dict] | None]:
     """
@@ -201,10 +349,7 @@ def run_explainer_or(
     mime_type: str = "application/pdf",
     api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Explainer completo vía OpenRouter. Retorna (markdown_result, usage).
-
-    markdown_result tiene la forma {"_format": "markdown", "content": "..."}
-    """
+    """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
     start = time.time()
     logger.info(
         "Iniciando agente explainer (openrouter)",
@@ -225,17 +370,28 @@ def run_explainer_or(
         model=model,
         system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
+        response_format="json_object",
         plugins=plugins,
+        enable_response_healing=True,
         reasoning={"effort": "xhigh", "exclude": True},
     )
 
-    result = {"_format": "markdown", "content": raw}
+    result = _validate_full_explainer_payload(raw)
+    desarrollo = result.get("desarrollo") or []
+    total_chars = _count_payload_chars(result)
+    total_subsections = _count_desarrollo_subsections(desarrollo)
 
     total_ms = int((time.time() - start) * 1000)
     logger.info(
-        f"Explainer (openrouter) completado: {len(raw)} chars en {total_ms}ms",
+        "Explainer (openrouter) completado: %s secciones, %s subsecciones, %s chars en %sms",
+        len(desarrollo),
+        total_subsections,
+        total_chars,
+        total_ms,
         extra={
-            "content_length": len(raw),
+            "num_sections": len(desarrollo),
+            "num_subsections": total_subsections,
+            "content_length": total_chars,
             "total_duration_ms": total_ms,
             "prompt_tokens": usage.prompt_token_count,
             "completion_tokens": usage.candidates_token_count,
@@ -252,10 +408,7 @@ def run_subpart_explainer_or(
     mime_type: str = "application/pdf",
     api_key: str = "",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Explainer de subparte vía OpenRouter — retorna markdown del desarrollo.
-
-    markdown_result tiene la forma {"_format": "markdown", "content": "..."}
-    """
+    """Explainer de subparte vía OpenRouter — retorna solo `desarrollo` estructurado."""
     start = time.time()
     logger.info(
         "Iniciando agente explainer subparte (openrouter)",
@@ -276,17 +429,28 @@ def run_subpart_explainer_or(
         model=model,
         system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
         api_key=api_key,
+        response_format="json_object",
         plugins=plugins,
+        enable_response_healing=True,
         reasoning={"effort": "xhigh", "exclude": True},
     )
 
-    result = {"_format": "markdown", "content": raw}
+    result = _validate_subpart_explainer_payload(raw)
+    desarrollo = result.get("desarrollo") or []
+    total_chars = _count_payload_chars(result)
+    total_subsections = _count_desarrollo_subsections(desarrollo)
 
     total_ms = int((time.time() - start) * 1000)
     logger.info(
-        f"Subpart explainer (openrouter) completado: {len(raw)} chars en {total_ms}ms",
+        "Subpart explainer (openrouter) completado: %s secciones, %s subsecciones, %s chars en %sms",
+        len(desarrollo),
+        total_subsections,
+        total_chars,
+        total_ms,
         extra={
-            "content_length": len(raw),
+            "num_sections": len(desarrollo),
+            "num_subsections": total_subsections,
+            "content_length": total_chars,
             "total_duration_ms": total_ms,
             "prompt_tokens": usage.prompt_token_count,
             "completion_tokens": usage.candidates_token_count,

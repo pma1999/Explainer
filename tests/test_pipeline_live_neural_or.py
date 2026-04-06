@@ -1,9 +1,9 @@
-"""Live pipeline test: page_classifier → segmentador → subpart_explainer_or (OpenRouter/Grok).
+"""Live pipeline test: page_classifier → segmentador → subpart_explainer_or (OpenRouter JSON mode).
 
 Identical flow to test_pipeline_live_neural.py except Step 4 uses
-run_subpart_explainer_or (OpenRouter, xiaomi/mimo-v2-flash) instead of
-the Gemini explainer.  Results are saved with an '_or_' prefix so both
-outputs coexist for comparison.
+run_subpart_explainer_or (OpenRouter, xiaomi/mimo-v2-flash, `json_object`)
+instead of the Gemini explainer. Results are saved with an '_or_' prefix
+so both outputs coexist for comparison.
 
 Usage:
     python tests/test_pipeline_live_neural_or.py

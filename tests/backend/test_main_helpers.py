@@ -12,6 +12,11 @@ def _get_helper():
     return m._build_content_pages_prefix
 
 
+def _get_assemble_helper():
+    import main as m
+    return m._assemble_part_explainer
+
+
 def test_single_range():
     fn = _get_helper()
     result = fn(frozenset(range(3, 11)), total_pages=12)
@@ -63,3 +68,50 @@ def test_prefix_anchors_match_single_page():
     result = fn(frozenset([7]), total_pages=10)
     assert "Primera página de contenido (la primera parte DEBE empezar aquí o antes): 7\n" in result
     assert "Última página de contenido (la última parte DEBE terminar aquí o después): 7\n" in result
+
+
+def test_assemble_part_explainer_merges_segmentador_scaffold_with_subpart_desarrollo():
+    fn = _get_assemble_helper()
+    parte = {
+        "introduccion": "Intro global",
+        "conclusion": "Cierre global",
+        "conexiones_contextuales": [
+            {
+                "seccion_temario_relacionada": "Tema relacionado",
+                "descripcion_conexion": "Conexión principal",
+            }
+        ],
+    }
+    subpart_desarrollos = [
+        [
+            {
+                "titulo_seccion": "Sección 1",
+                "explicacion_introductoria": "Apertura 1",
+                "subsecciones": [
+                    {
+                        "titulo_subseccion": "Sub 1",
+                        "explicacion_detallada": "Detalle 1",
+                    }
+                ],
+            }
+        ],
+        [
+            {
+                "titulo_seccion": "Sección 2",
+                "explicacion_introductoria": "Apertura 2",
+                "subsecciones": [
+                    {
+                        "titulo_subseccion": "Sub 2",
+                        "explicacion_detallada": "Detalle 2",
+                    }
+                ],
+            }
+        ],
+    ]
+
+    result = fn(parte, subpart_desarrollos)
+
+    assert result["introduccion"] == "Intro global"
+    assert result["conclusion"] == "Cierre global"
+    assert result["conexiones_contextuales"] == parte["conexiones_contextuales"]
+    assert [section["titulo_seccion"] for section in result["desarrollo"]] == ["Sección 1", "Sección 2"]

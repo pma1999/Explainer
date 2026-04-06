@@ -297,7 +297,11 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
     resources_calls = []
 
     monkeypatch.setattr(main, "get_project", lambda project_id, user_id, include_internal=False: project)
-    monkeypatch.setattr(main, "get_user_api_key", lambda user_id: "AIzaFakeKey")
+    monkeypatch.setattr(
+        main,
+        "get_user_api_key",
+        lambda user_id, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+    )
     monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
     monkeypatch.setattr(main, "update_project", lambda project_id, user_id, payload: updates.append(payload))
 
@@ -421,7 +425,11 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
     resources_calls = []
 
     monkeypatch.setattr(main, "get_project", lambda project_id, user_id, include_internal=False: project)
-    monkeypatch.setattr(main, "get_user_api_key", lambda user_id: "AIzaFakeKey")
+    monkeypatch.setattr(
+        main,
+        "get_user_api_key",
+        lambda user_id, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+    )
     monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
     monkeypatch.setattr(main, "update_project", lambda project_id, user_id, payload: updates.append(payload))
 
