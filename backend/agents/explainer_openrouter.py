@@ -16,7 +16,7 @@ from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "x-ai/grok-4.1-fast"
+OPENROUTER_MODEL_AGENTS = "xiaomi/mimo-v2-flash"
 
 # PDF parsing plugin (cloudflare-ai es gratis y funciona con cualquier modelo)
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
