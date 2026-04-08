@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -1001,10 +1002,26 @@ def call_openrouter_chat_full(
 
             usage_raw = data.get("usage", {})
             raw_cost = usage_raw.get("cost")
-            if isinstance(raw_cost, (int, float)):
-                cost_usd = round(float(raw_cost), 6)
-            else:
+            cost_usd: float | None = None
+            if isinstance(raw_cost, bool):
                 cost_usd = None
+            elif isinstance(raw_cost, (int, float)):
+                candidate = float(raw_cost)
+                if math.isfinite(candidate):
+                    cost_usd = round(candidate, 6)
+            elif isinstance(raw_cost, str):
+                normalized = raw_cost.strip()
+                if normalized and re.fullmatch(
+                    r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?",
+                    normalized,
+                ):
+                    try:
+                        candidate = float(normalized)
+                    except ValueError:
+                        cost_usd = None
+                    else:
+                        if math.isfinite(candidate):
+                            cost_usd = round(candidate, 6)
             usage = OpenRouterUsage(
                 prompt_tokens=usage_raw.get("prompt_tokens", 0),
                 completion_tokens=usage_raw.get("completion_tokens", 0),
