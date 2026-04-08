@@ -105,7 +105,8 @@ def list_projects_summary(user_id: str) -> list[dict[str, Any]]:
         .order("updated_at", desc=True)
         .execute()
     )
-    return [_row_to_list_summary(row) for row in (r.data or [])]
+    rows = (r.data or []) if r else []
+    return [_row_to_list_summary(row) for row in rows]
 
 
 def create_project(
@@ -169,6 +170,12 @@ def get_project(project_id: str, user_id: str, include_internal: bool = False) -
     """Load project by id and user_id. Returns None if not found."""
     client = _client()
     r = client.table("projects").select("*").eq("id", project_id).eq("user_id", user_id).maybe_single().execute()
+    if r is None:
+        logger.warning(
+            "Supabase projects select returned None from execute() (project_id=%s)",
+            project_id,
+        )
+        return None
     if not r.data:
         return None
     return _row_to_project(r.data, include_internal=include_internal)
@@ -178,7 +185,8 @@ def list_projects(user_id: str) -> list[dict[str, Any]]:
     """List projects for user, newest first."""
     client = _client()
     r = client.table("projects").select("*").eq("user_id", user_id).order("updated_at", desc=True).execute()
-    return [_row_to_project(row) for row in (r.data or [])]
+    rows = (r.data or []) if r else []
+    return [_row_to_project(row) for row in rows]
 
 
 def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -321,7 +329,7 @@ def get_project_by_share_token(share_token: str) -> Optional[dict[str, Any]]:
         .maybe_single()
         .execute()
     )
-    if not r.data:
+    if not r or not r.data:
         return None
     project = _row_to_project(r.data)
     if project.get("status") != "completed":

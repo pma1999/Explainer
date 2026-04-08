@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from backend.supabase_data import (
     _sanitize_project_for_shared,
     create_share_token,
+    get_project,
     revoke_share_token,
     get_project_by_share_token,
 )
@@ -142,6 +143,25 @@ class TestRevokeShareToken:
             with patch("backend.supabase_data.update_project", return_value=True):
                 result = revoke_share_token("p1", "user-123")
         assert result is True
+
+
+class TestGetProjectExecuteNone:
+    """Regression: execute() may return None; must not access .data on None."""
+
+    def test_returns_none_when_execute_returns_none(self):
+        mock_maybe = MagicMock(return_value=MagicMock(execute=MagicMock(return_value=None)))
+        mock_eq2 = MagicMock()
+        mock_eq2.maybe_single = mock_maybe
+        mock_eq1 = MagicMock()
+        mock_eq1.eq.return_value = mock_eq2
+        mock_select = MagicMock()
+        mock_select.eq.return_value = mock_eq1
+        mock_table = MagicMock()
+        mock_table.select.return_value = mock_select
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            result = get_project("7536ea47-abf8-4c06-8761-3a58d40e3941", "user-uuid")
+        assert result is None
 
 
 class TestGetProjectByShareToken:
