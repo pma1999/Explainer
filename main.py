@@ -47,7 +47,7 @@ from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
-from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_SEGMENTADOR
+from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_EXPLAINER, MODEL_SEGMENTADOR
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador

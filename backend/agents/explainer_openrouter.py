@@ -631,8 +631,6 @@ def run_explainer_or(
         pdf_cache_entry=pdf_cache_entry,
         page_numbers=page_numbers,
     )
-
-    result = _validate_full_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)
@@ -694,8 +692,6 @@ def run_subpart_explainer_or(
         pdf_cache_entry=pdf_cache_entry,
         page_numbers=page_numbers,
     )
-
-    result = _validate_subpart_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)
