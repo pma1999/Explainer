@@ -243,6 +243,9 @@ def _compare_records(gemini: dict[str, Any], openrouter: dict[str, Any]) -> dict
 
     g_metrics = gemini["metrics"]
     o_metrics = openrouter["metrics"]
+    g_excerpt = str(g_metrics.get("sample_excerpt", "") or "").strip()
+    o_excerpt = str(o_metrics.get("sample_excerpt", "") or "").strip()
+    excerpt_similarity = round(SequenceMatcher(a=g_excerpt, b=o_excerpt).ratio(), 4) if (g_excerpt or o_excerpt) else 1.0
 
     return {
         "comparable": True,
@@ -267,6 +270,7 @@ def _compare_records(gemini: dict[str, Any], openrouter: dict[str, Any]) -> dict
             _sequence_similarity(g_metrics["subsection_titles"], o_metrics["subsection_titles"]),
             4,
         ),
+        "sample_excerpt_similarity": excerpt_similarity,
     }
 
 
@@ -287,6 +291,11 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
         f"openrouter `{summary['models']['openrouter_explainer']}`, "
         f"ocr-priming `{summary['models']['openrouter_pdf_priming_model']}`"
     )
+    if shared.get("segmentation_reused"):
+        reuse = shared.get("segmentation_reuse") or {}
+        reuse_path = reuse.get("path") or "unknown"
+        reuse_sha = reuse.get("sha256") or "unknown"
+        lines.append(f"- Segmentation reused: `{reuse_path}` (SHA-256 `{reuse_sha}`)")
     lines.append(
         f"- Shared segmentation: {shared['num_partes']} partes, "
         f"{len(shared['temas_identificados'])} temas, parte comparada `{shared['selected_part']['titulo']}` "
@@ -321,8 +330,10 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Per Subpart")
     lines.append("")
-    lines.append("| SP | Pages | Prompt SHA-256 | G words | OR words | G ms | OR ms | Section Jaccard | Subsection Jaccard |")
-    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|")
+    lines.append(
+        "| SP | Pages | Prompt SHA-256 | G words | OR words | G ms | OR ms | Section Jaccard | Subsection Jaccard | Excerpt sim |"
+    )
+    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
 
     for item in summary["comparison"]["subparts"]:
         gemini_record = item["gemini"]
@@ -336,19 +347,30 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
             f"| {item['numero_subparte']} | {item['pagina_inicio']}-{item['pagina_fin']} | "
             f"`{item['shared_prompt_sha256'][:12]}` | {gemini_words} | {openrouter_words} | "
             f"{gemini_ms} | {openrouter_ms} | {compare.get('section_title_jaccard', 'n/a')} | "
-            f"{compare.get('subsection_title_jaccard', 'n/a')} |"
+            f"{compare.get('subsection_title_jaccard', 'n/a')} | {compare.get('sample_excerpt_similarity', 'n/a')} |"
         )
 
     lines.append("")
     lines.append("## Qualitative Notes")
     lines.append("")
     for item in summary["comparison"]["subparts"]:
+        g_excerpt = (
+            str(item.get("gemini", {}).get("metrics", {}).get("sample_excerpt", "") or "").strip().replace("\n", " ")
+        )
+        o_excerpt = (
+            str(item.get("openrouter", {}).get("metrics", {}).get("sample_excerpt", "") or "").strip().replace("\n", " ")
+        )
+        excerpt_sim = item.get("comparison", {}).get("sample_excerpt_similarity", "n/a")
         lines.append(
             f"- SP {item['numero_subparte']} `{item['titulo']}`: prompt `{item['shared_prompt_sha256'][:12]}`, "
             f"Gemini words {item['gemini'].get('metrics', {}).get('body_words', 0)}, "
             f"OpenRouter words {item['openrouter'].get('metrics', {}).get('body_words', 0)}, "
-            f"section overlap {item['comparison'].get('section_title_jaccard', 'n/a')}."
+            f"section overlap {item['comparison'].get('section_title_jaccard', 'n/a')}, excerpt sim {excerpt_sim}."
         )
+        if g_excerpt:
+            lines.append(f"  - Gemini excerpt: {g_excerpt[:260]}")
+        if o_excerpt:
+            lines.append(f"  - OpenRouter excerpt: {o_excerpt[:260]}")
 
     assembled = summary["comparison"].get("assembled")
     if assembled:
@@ -383,6 +405,27 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _load_segmentation_from_artifact(path: str) -> dict[str, Any]:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Segmentation artifact not found: {path}")
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError("Segmentation artifact must be a JSON object")
+
+    partes = data.get("partes")
+    if not isinstance(partes, list) or not partes:
+        raise ValueError("Segmentation artifact missing non-empty 'partes' list")
+
+    first = partes[0]
+    if not isinstance(first, dict) or "numero" not in first or "titulo" not in first:
+        raise ValueError("Segmentation artifact 'partes[0]' missing required fields ('numero', 'titulo')")
+
+    return data
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gemini-model", dest="gemini_model", default=GEMINI_EXPLAINER_MODEL)
@@ -390,6 +433,15 @@ def main() -> None:
         "--openrouter-model",
         dest="openrouter_model",
         default=OPENROUTER_EXPLAINER_MODEL,
+    )
+    parser.add_argument(
+        "--reuse-segmentation",
+        dest="reuse_segmentation",
+        default="",
+        help=(
+            "Path to a previously saved segmentation artifact JSON (e.g. shared_01_segmentation.json). "
+            "If set, STEP 3 (Segmentador) is skipped and the loaded segmentation is reused as-is."
+        ),
     )
     parser.add_argument(
         "--format-openrouter",
@@ -401,6 +453,7 @@ def main() -> None:
 
     gemini_explainer_model = (args.gemini_model or GEMINI_EXPLAINER_MODEL).strip()
     openrouter_explainer_model = (args.openrouter_model or OPENROUTER_EXPLAINER_MODEL).strip()
+    reuse_segmentation_path = (args.reuse_segmentation or "").strip()
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not gemini_api_key:
@@ -488,26 +541,60 @@ def main() -> None:
     content_prefix = _build_content_pages_prefix(content_pages, total_pages)
     seg_description = content_prefix + DEFAULT_DESCRIPTION
 
-    seg_start = time.time()
-    segmentation, seg_usage = run_segmentador(
-        gemini_api_key,
-        file_uri,
-        seg_description,
-        MODEL_SEGMENTADOR,
-        mime_type="application/pdf",
-        source_kind="pdf",
-    )
-    seg_ms = int((time.time() - seg_start) * 1000)
+    segmentation_reused = False
+    segmentation_reuse_meta: dict[str, Any] | None = None
 
-    segmentation_path = _save_json("shared_01_segmentation", segmentation, output_dir)
+    if reuse_segmentation_path:
+        try:
+            segmentation = _load_segmentation_from_artifact(reuse_segmentation_path)
+        except Exception as exc:
+            log.error(
+                "Failed to reuse segmentation from %s: %s",
+                reuse_segmentation_path,
+                exc,
+                exc_info=True,
+            )
+            sys.exit(1)
+
+        segmentation_reused = True
+        seg_ms = 0
+        seg_usage = None
+
+        reuse_abs = os.path.abspath(reuse_segmentation_path)
+        segmentation_reuse_meta = {
+            "path": reuse_abs,
+            "sha256": _sha256_file(reuse_abs),
+        }
+        segmentation_path = _save_json("shared_01_segmentation", segmentation, output_dir)
+        log.info("Reused segmentation artifact (%s) -> copied to %s", reuse_abs, segmentation_path)
+    else:
+        seg_start = time.time()
+        segmentation, seg_usage = run_segmentador(
+            gemini_api_key,
+            file_uri,
+            seg_description,
+            MODEL_SEGMENTADOR,
+            mime_type="application/pdf",
+            source_kind="pdf",
+        )
+        seg_ms = int((time.time() - seg_start) * 1000)
+        segmentation_path = _save_json("shared_01_segmentation", segmentation, output_dir)
+
     num_partes = len(segmentation.get("partes", []))
     temas_identificados = segmentation.get("temas_identificados", [])
-    log.info(
-        "Segmentador done in %dms -> %d partes, %d temas",
-        seg_ms,
-        num_partes,
-        len(temas_identificados),
-    )
+    if segmentation_reused:
+        log.info(
+            "Segmentador skipped (reused artifact) -> %d partes, %d temas",
+            num_partes,
+            len(temas_identificados),
+        )
+    else:
+        log.info(
+            "Segmentador done in %dms -> %d partes, %d temas",
+            seg_ms,
+            num_partes,
+            len(temas_identificados),
+        )
 
     if num_partes == 0:
         log.error("No partes found in segmentation")
@@ -869,6 +956,8 @@ def main() -> None:
             "segmentador_duration_ms": seg_ms,
             "segmentador_tokens": _tokens_gemini(seg_usage),
             "segmentation_artifact_path": segmentation_path,
+            "segmentation_reused": segmentation_reused,
+            "segmentation_reuse": segmentation_reuse_meta,
             "num_partes": num_partes,
             "temas_identificados": temas_identificados,
             "selected_part": {
@@ -901,7 +990,7 @@ def main() -> None:
             },
         },
         "comparison": {
-            "same_segmentador_execution": True,
+            "same_segmentador_execution": not segmentation_reused,
             "same_prompts_reused_between_explainers": True,
             "same_scope_pdf_reused_between_explainers": True,
             "subparts": subpart_comparisons,

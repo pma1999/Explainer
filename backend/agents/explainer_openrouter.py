@@ -27,7 +27,7 @@ from backend.agents.explainer_prompts import (
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "minimax/minimax-m2.7"
+OPENROUTER_MODEL_AGENTS = "qwen/qwen3.6-plus"
 OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
 OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
 OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(

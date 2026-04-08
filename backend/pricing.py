@@ -37,6 +37,15 @@ PRICING = {
         "output_small": 1.20,  # $1.20 / 1M tokens
         "output_large": 1.20,
     },
+    "qwen/qwen3.6-plus": {
+        # From provided pricing screenshot (USD per 1M tokens):
+        # Input:  <=256K $0.325, >256K $1.30
+        # Output: <=256K $1.95,  >256K $3.90
+        "input_small": 0.325,
+        "input_large": 1.30,
+        "output_small": 1.95,
+        "output_large": 3.90,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,
