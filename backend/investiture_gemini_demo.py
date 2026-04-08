@@ -29,6 +29,11 @@ from backend.segmentation_tema_coverage import (
 
 def resolve_gemini_api_key() -> str | None:
     load_dotenv(override=True)
+    # Live/integration tests consume quota and require a valid key. To avoid accidental
+    # live calls (e.g. when a placeholder key is present in the environment), we require
+    # an explicit opt-in flag.
+    if (os.environ.get("RUN_LIVE_GEMINI_TESTS") or "").strip().lower() not in {"1", "true", "yes", "on"}:
+        return None
     for key in (
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
