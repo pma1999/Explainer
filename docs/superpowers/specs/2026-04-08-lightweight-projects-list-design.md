@@ -1,7 +1,7 @@
 # Spec: Listado ligero de proyectos + merge seguro (OOM / plan gratuito)
 
 **Fecha:** 2026-04-08  
-**Estado:** Propuesto (revisión usuario)  
+**Estado:** Aprobado  
 **Alcance:** `GET /api/projects`, capa de datos Supabase, y `mergeProjects` en `frontend/js/storage.js`. **Fuera de alcance:** paralelismo del pipeline de IA (`MAX_CONCURRENT_PARTS`, `asyncio.gather` de agentes, límites de hilos del procesamiento).
 
 ---

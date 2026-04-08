@@ -30,7 +30,7 @@ from backend.supabase_data import (
     get_project_by_share_token,
     create_share_token,
     revoke_share_token,
-    list_projects,
+    list_projects_summary,
     update_project,
     set_section_read_status,
     delete_project,
@@ -340,7 +340,7 @@ async def api_create_project(
 
 @app.get("/api/projects")
 async def api_list_projects(user_id: Annotated[str, Depends(get_current_user_id)]):
-    return list_projects(user_id)
+    return list_projects_summary(user_id)
 
 
 @app.get("/api/projects/export")

@@ -23,6 +23,53 @@ import { isOffline } from './pwa.js';
 // Re-export offline pin helpers for use across the app
 export { pinProjectOffline, unpinProjectOffline, getOfflinePins, isProjectPinned };
 
+function _projectTimeMs(project) {
+  return new Date(project.updated_at || project.created_at || 0).getTime();
+}
+
+/**
+ * Merge two project records for the same id. Prefers newer updated_at.
+ * If the newer record is a server list_summary, preserve partes_contenido and source_text
+ * from the older record when missing on the newer.
+ */
+export function mergePairProjects(a, b) {
+  const ta = _projectTimeMs(a);
+  const tb = _projectTimeMs(b);
+  let newer;
+  let older;
+  if (tb > ta) {
+    newer = b;
+    older = a;
+  } else if (ta > tb) {
+    newer = a;
+    older = b;
+  } else {
+    return b;
+  }
+
+  if (!newer.list_summary) {
+    return newer;
+  }
+
+  const out = { ...newer };
+  if (
+    !Object.prototype.hasOwnProperty.call(newer, 'partes_contenido') &&
+    older &&
+    Object.prototype.hasOwnProperty.call(older, 'partes_contenido')
+  ) {
+    out.partes_contenido = older.partes_contenido;
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(newer, 'source_text') &&
+    older &&
+    Object.prototype.hasOwnProperty.call(older, 'source_text')
+  ) {
+    out.source_text = older.source_text;
+  }
+  delete out.list_summary;
+  return out;
+}
+
 export function getLocalBackupKey(userId) {
   return userId ? `explainer.projects.backup.v1.${userId}` : null;
 }
@@ -148,14 +195,11 @@ export function mergeProjects(serverProjects = [], localProjects = []) {
       byId.set(project.id, project);
       return;
     }
-
-    const currentUpdated = new Date(current.updated_at || current.created_at || 0).getTime();
-    const candidateUpdated = new Date(project.updated_at || project.created_at || 0).getTime();
-    byId.set(project.id, candidateUpdated >= currentUpdated ? project : current);
+    byId.set(project.id, mergePairProjects(current, project));
   });
 
-  return Array.from(byId.values()).sort((a, b) =>
-    new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
   );
 }
 

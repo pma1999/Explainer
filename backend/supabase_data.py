@@ -58,6 +58,56 @@ def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict
     return result
 
 
+# Columns for GET /api/projects list — omits heavy JSON blobs (OOM on small instances).
+PROJECT_LIST_SUMMARY_SELECT = (
+    "id,name,description,pdf_filename,source_type,source_url,source_metadata,"
+    "file_uri,status,segmentation,usage,reading_progress,error_message,"
+    "share_token,created_at,updated_at"
+)
+
+
+def _row_to_list_summary(row: dict[str, Any]) -> dict[str, Any]:
+    """API list item: same shape as project minus heavy fields; marks list_summary."""
+    result: dict[str, Any] = {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "description": row["description"],
+        "pdf_filename": row["pdf_filename"],
+        "source_type": row.get("source_type", "pdf"),
+        "source_url": row.get("source_url"),
+        "source_metadata": row.get("source_metadata") or {},
+        "file_uri": row.get("file_uri"),
+        "status": row["status"],
+        "segmentation": row.get("segmentation"),
+        "usage": row.get("usage") or {},
+        "reading_progress": row.get("reading_progress") or {},
+        "error_message": row.get("error_message"),
+        "created_at": row["created_at"].isoformat()
+        if hasattr(row["created_at"], "isoformat")
+        else str(row["created_at"]),
+        "updated_at": row["updated_at"].isoformat()
+        if hasattr(row["updated_at"], "isoformat")
+        else str(row["updated_at"]),
+        "list_summary": True,
+    }
+    if "share_token" in row:
+        result["share_token"] = row.get("share_token")
+    return result
+
+
+def list_projects_summary(user_id: str) -> list[dict[str, Any]]:
+    """List projects for user (newest first) without partes_contenido or source_text."""
+    client = _client()
+    r = (
+        client.table("projects")
+        .select(PROJECT_LIST_SUMMARY_SELECT)
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    return [_row_to_list_summary(row) for row in (r.data or [])]
+
+
 def create_project(
     user_id: str,
     name: str,
