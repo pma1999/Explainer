@@ -33,6 +33,7 @@ OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
 OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
         "openai/gpt-5.4-nano",
+        "qwen/qwen3.6-plus",
     }
 )
 
