@@ -5,7 +5,7 @@ import base64
 import os
 import tempfile
 import time
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from pypdf import PdfReader
 
@@ -30,6 +30,7 @@ logger = get_logger("backend.agents.explainer_openrouter")
 OPENROUTER_MODEL_AGENTS = "qwen/qwen3.6-plus"
 OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
 OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
+OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES = 2
 OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
         "openai/gpt-5.4-nano",
@@ -398,6 +399,43 @@ def _is_pdf_parse_failure(exc: OpenRouterError) -> bool:
     return "Failed to parse document.pdf" in message or "Failed to parse" in message
 
 
+def _is_retryable_payload_validation_error(exc: OpenRouterError) -> bool:
+    message = str(exc)
+    return message.startswith("Campo inválido en ")
+
+
+def _call_openrouter_with_validation_retries(
+    *,
+    call_operation: Callable[[], tuple[dict[str, Any], OpenRouterUsage]],
+    validate_payload: Callable[[Any], dict[str, Any]],
+    operation_label: str,
+) -> tuple[dict[str, Any], OpenRouterUsage]:
+    total_attempts = OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES + 1
+    for attempt in range(1, total_attempts + 1):
+        raw, usage = call_operation()
+        try:
+            return validate_payload(raw), usage
+        except OpenRouterError as exc:
+            if attempt >= total_attempts or not _is_retryable_payload_validation_error(exc):
+                raise
+            logger.warning(
+                "%s devolvió JSON estructurado inválido (%s). Reintentando %s/%s",
+                operation_label,
+                str(exc),
+                attempt,
+                OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES,
+                extra={
+                    "operation_label": operation_label,
+                    "validation_attempt": attempt,
+                    "validation_max_retries": OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES,
+                    "error_message": str(exc),
+                },
+            )
+    raise OpenRouterError(
+        f"{operation_label} agotó reintentos por payload inválido sin devolver JSON válido."
+    )
+
+
 def _extract_pdf_text_to_temp(source_path: str) -> str:
     reader = PdfReader(source_path)
     chunks: list[str] = []
@@ -621,18 +659,21 @@ def run_explainer_or(
         json_schema=OR_EXPLAINER_JSON_SCHEMA,
     )
 
-    raw, usage = _call_openrouter_json_with_pdf_fallback(
-        source_path=source_path,
-        identificacion=identificacion,
-        mime_type=mime_type,
-        model=model,
-        system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
-        response_format=response_format,
-        api_key=api_key,
-        pdf_cache_entry=pdf_cache_entry,
-        page_numbers=page_numbers,
+    result, usage = _call_openrouter_with_validation_retries(
+        call_operation=lambda: _call_openrouter_json_with_pdf_fallback(
+            source_path=source_path,
+            identificacion=identificacion,
+            mime_type=mime_type,
+            model=model,
+            system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
+            response_format=response_format,
+            api_key=api_key,
+            pdf_cache_entry=pdf_cache_entry,
+            page_numbers=page_numbers,
+        ),
+        validate_payload=_validate_full_explainer_payload,
+        operation_label="Explainer OpenRouter",
     )
-    result = _validate_full_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)
@@ -683,18 +724,21 @@ def run_subpart_explainer_or(
         json_schema=OR_SUBPART_EXPLAINER_JSON_SCHEMA,
     )
 
-    raw, usage = _call_openrouter_json_with_pdf_fallback(
-        source_path=source_path,
-        identificacion=identificacion,
-        mime_type=mime_type,
-        model=model,
-        system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
-        response_format=response_format,
-        api_key=api_key,
-        pdf_cache_entry=pdf_cache_entry,
-        page_numbers=page_numbers,
+    result, usage = _call_openrouter_with_validation_retries(
+        call_operation=lambda: _call_openrouter_json_with_pdf_fallback(
+            source_path=source_path,
+            identificacion=identificacion,
+            mime_type=mime_type,
+            model=model,
+            system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
+            response_format=response_format,
+            api_key=api_key,
+            pdf_cache_entry=pdf_cache_entry,
+            page_numbers=page_numbers,
+        ),
+        validate_payload=_validate_subpart_explainer_payload,
+        operation_label="Explainer subparte OpenRouter",
     )
-    result = _validate_subpart_explainer_payload(raw)
     desarrollo = result.get("desarrollo") or []
     total_chars = _count_payload_chars(result)
     total_subsections = _count_desarrollo_subsections(desarrollo)

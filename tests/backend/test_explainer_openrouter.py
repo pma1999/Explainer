@@ -250,6 +250,99 @@ def test_run_subpart_explainer_or_rejects_invalid_payload(monkeypatch):
         )
 
 
+def test_run_subpart_explainer_or_retries_on_payload_validation_error(monkeypatch):
+    source_path = _write_text_source()
+    attempts = {"count": 0}
+
+    def _fake_call(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return (
+                {
+                    "desarrollo": [
+                        {
+                            "titulo_seccion": 123,
+                            "explicacion_introductoria": "Contexto del bloque.",
+                            "subsecciones": [
+                                {
+                                    "titulo_subseccion": "Detalle",
+                                    "explicacion_detallada": "Explicación completa.",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                _usage(),
+            )
+        return (
+            {
+                "desarrollo": [
+                    {
+                        "titulo_seccion": "Bloque temático",
+                        "explicacion_introductoria": "Contexto del bloque.",
+                        "subsecciones": [
+                            {
+                                "titulo_subseccion": "Detalle",
+                                "explicacion_detallada": "Explicación completa.",
+                            }
+                        ],
+                    }
+                ]
+            },
+            _usage(),
+        )
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_call)
+
+    result, usage = module.run_subpart_explainer_or(
+        source_path=source_path,
+        identificacion="Prompt de prueba",
+        mime_type="text/plain",
+        api_key="sk-or-v1-test",
+    )
+
+    assert attempts["count"] == 2
+    assert usage.total_token_count == 48
+    assert result["desarrollo"][0]["titulo_seccion"] == "Bloque temático"
+
+
+def test_run_subpart_explainer_or_exhausts_validation_retries(monkeypatch):
+    source_path = _write_text_source()
+    attempts = {"count": 0}
+
+    def _fake_call(**kwargs):
+        attempts["count"] += 1
+        return (
+            {
+                "desarrollo": [
+                    {
+                        "titulo_seccion": 123,
+                        "explicacion_introductoria": "Contexto del bloque.",
+                        "subsecciones": [
+                            {
+                                "titulo_subseccion": "Detalle",
+                                "explicacion_detallada": "Explicación completa.",
+                            }
+                        ],
+                    }
+                ]
+            },
+            _usage(),
+        )
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_call)
+
+    with pytest.raises(OpenRouterError, match="titulo_seccion"):
+        module.run_subpart_explainer_or(
+            source_path=source_path,
+            identificacion="Prompt de prueba",
+            mime_type="text/plain",
+            api_key="sk-or-v1-test",
+        )
+
+    assert attempts["count"] == module.OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES + 1
+
+
 def test_run_subpart_explainer_or_falls_back_to_text_when_pdf_parse_fails(monkeypatch):
     source_path = _write_text_source("Contenido local para fallback.")
     flow: list[str] = []
