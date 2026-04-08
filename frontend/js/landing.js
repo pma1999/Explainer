@@ -66,7 +66,7 @@ export function validateExplainerProviderSelection({
   }
 
   if (provider === 'openrouter' && !hasOpenRouterKey) {
-    return 'Necesitas configurar tu API key de OpenRouter para usar MiniMax en el explainer.';
+    return 'Necesitas configurar tu API key de OpenRouter para usar Qwen en el explainer.';
   }
 
   return null;
@@ -79,9 +79,9 @@ function buildExplainerProviderHint(sourceType, provider) {
 
   if (provider === 'openrouter') {
     if (state.hasOpenRouterKey) {
-      return 'La explicación usará MiniMax vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
+      return 'La explicación usará Qwen vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
     }
-    return 'MiniMax está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
+    return 'Qwen está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
