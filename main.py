@@ -95,6 +95,9 @@ from backend.url_extraction import (
 setup_logging()
 logger = get_logger("main")
 
+# Max concurrent parts in the agent phase (prep + explainer/recorrido/resources); formatters run outside this limit.
+MAX_CONCURRENT_PARTS = 5
+
 ExplainerProvider = Literal["gemini", "openrouter"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
@@ -1267,6 +1270,8 @@ async def _process_project(
             cumulative_usage["openrouter_pdf_priming_model"] = OPENROUTER_PDF_PRIMING_MODEL
         update_project(project_id, user_id, {"usage": cumulative_usage})
 
+        usage_lock = asyncio.Lock()
+
         def _update_usage(usage_meta, phase: str = "unknown", *, cost_model: str):
             if not usage_meta:
                 return
@@ -1306,6 +1311,10 @@ async def _process_project(
                     "cumulative_cost": round(cumulative_usage["total_cost"], 6),
                 }
             )
+
+        async def _locked_apply_usage(usage_meta, phase: str = "unknown", *, cost_model: str) -> None:
+            async with usage_lock:
+                _update_usage(usage_meta, phase=phase, cost_model=cost_model)
 
         # Determine source type and get file_uri
         source_type = project.get("source_type", "pdf")
