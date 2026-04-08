@@ -9,7 +9,11 @@ parallel batch for markdown formatting. Each call uses JSON mode with a single
 and ``thinking_level="low"`` for lighter internal reasoning (lower latency/cost than ``high``).
 
 KEY RULES:
-- Content is NEVER modified — only markdown formatting is added.
+- Content is never shortened, summarized, or substantively rewritten.
+- The formatter may apply minimal surface normalization when the source contains
+  accidental anglicisms, foreign-language contamination, mojibake, or malformed
+  token fragments that break readability in Spanish. This cleanup must preserve
+  all meaning and all factual content.
 - Every call is fail-safe: if the model fails for any reason, the original
   text is preserved unchanged.
 - All text fields within a single explainer dict are formatted in ONE
@@ -94,17 +98,18 @@ FORMATTER_SYSTEM_PROMPT = (
   </role>
 
   <objectives>
-  Transformar texto plano académico o técnico en su versión Markdown óptimamente legible, preservando con fidelidad absoluta cada palabra, dato y matiz del original.
+  Transformar texto plano académico o técnico en su versión Markdown óptimamente legible, preservando con fidelidad absoluta cada dato, matiz y contenido sustantivo del original.
 
   El resultado debe sentirse como el mismo texto "bien maquetado" — más fácil de escanear, navegar y comprender visualmente — sin que el lector perciba que se añadió o perdió información alguna.
   </objectives>
 
   <quality_criteria>
   Una respuesta excelente cumple simultáneamente:
-  - **Fidelidad total:** una comparación palabra por palabra con el original no revela omisiones, paráfrasis ni adiciones de contenido.
+  - **Fidelidad sustantiva total:** no hay omisiones, resúmenes, paráfrasis de contenido ni adiciones informativas. Solo se permiten cambios de superficie estrictamente necesarios para maquetación y limpieza lingüística.
   - **Coherencia tipográfica:** las mismas categorías de información reciben el mismo tratamiento visual a lo largo de todo el texto.
   - **Proporcionalidad:** el formato aplicado es proporcional a la extensión y complejidad del texto — textos breves reciben formato ligero; textos extensos pueden beneficiarse de más estructura.
   - **Limpieza:** el cuerpo formateado no incluye metacomentarios, listas sobre cómo vas a formatear, encabezados que dupliquen el título del apartado, ni explicaciones del proceso.
+  - **Legibilidad lingüística:** si el texto contiene anglicismos accidentales, palabras sueltas en otro idioma, mojibake, transliteraciones rotas o fragmentos claramente corruptos que dificultan la lectura en español, se corrigen al español natural sin acortar ni alterar el significado.
   </quality_criteria>
 
   <context_rule>
@@ -126,6 +131,9 @@ FORMATTER_SYSTEM_PROMPT = (
   - Ante la duda entre formatear o no, prefiere la legibilidad natural sin formato excesivo.
   - Respeta la estructura argumentativa del autor: si el original presenta ideas en prosa continua, mantén la prosa; convierte a lista solo cuando el texto genuinamente enumera elementos discretos.
   - Trata el texto como un documento cuya autoría no te pertenece: tu rol es hacerlo brillar, nunca reescribirlo.
+  - Si detectas anglicismos accidentales o contaminación lingüística no intencional dentro de una frase en español, sustitúyelos por la formulación española equivalente más natural, manteniendo intacto el resto del contenido.
+  - No "mejores" el estilo ni simplifiques el razonamiento: limpia solo lo necesario para que el texto quede plenamente entendible.
+  - Conserva sin traducir nombres propios, citas, títulos de obras y términos realmente intencionales en otro idioma cuando su traducción alteraría la referencia.
   </methodological_principles>
 
   <output_format>
@@ -176,7 +184,7 @@ FORMATTER_SYSTEM_PROMPT = (
 </few_shot_examples>
 
 <task>
-Formatea en Markdown el texto proporcionado (el cuerpo tras el contexto, si existe). Preserva cada palabra y dato del original. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Rellena el campo JSON únicamente con ese cuerpo formateado.
+Formatea en Markdown el texto proporcionado (el cuerpo tras el contexto, si existe). Preserva todo el contenido sustantivo del original. Además, limpia anglicismos accidentales y artefactos lingüísticos que rompan la lectura en español, sin acortar nada ni perder información. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Rellena el campo JSON únicamente con ese cuerpo formateado.
 </task>
 
 <thinking_protocol>

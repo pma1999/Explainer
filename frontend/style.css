@@ -460,13 +460,16 @@ body {
   padding: 8px 0;
 }
 
+.input-hint,
 .youtube-input-section .input-hint {
   font-family: var(--font-ui);
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 6px;
+  line-height: 1.5;
 }
 
+.input-error,
 .youtube-input-section .input-error {
   font-family: var(--font-ui);
   font-size: 12px;
@@ -620,6 +623,69 @@ body {
 
 .form-textarea {
   line-height: 1.6;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-card {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-height: 90px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, opacity 0.2s;
+}
+
+.provider-card:hover {
+  border-color: var(--border-light);
+  transform: translateY(-1px);
+}
+
+.provider-card.selected {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-dim);
+  background: linear-gradient(180deg, rgba(250, 204, 21, 0.08), rgba(250, 204, 21, 0.02));
+}
+
+.provider-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.provider-card input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.provider-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.provider-card-title {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.provider-card-sub {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .upload-note {
@@ -2627,6 +2693,12 @@ body {
     font-size: 12px;
     padding: 10px 12px;
     gap: 5px;
+  }
+}
+
+@media (max-width: 680px) {
+  .provider-grid {
+    grid-template-columns: 1fr;
   }
 }
 

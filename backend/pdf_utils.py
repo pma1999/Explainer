@@ -2,7 +2,8 @@
 
 Provides:
 - add_page_numbers: Adds visible "— Página X / N —" watermarks to every page
-- extract_page_range: Extracts a subset of pages (with optional buffer) into a new PDF
+- extract_page_range: Extracts a subset of consecutive pages (with optional buffer)
+- extract_pages: Extracts an arbitrary ordered set of pages into a new PDF
 """
 
 from __future__ import annotations
@@ -240,6 +241,85 @@ def extract_page_range(
             "output_size_bytes": output_size,
             "num_pages": num_pages,
         }
+    )
+
+    return output_path
+
+
+def extract_pages(input_path: str, pages: list[int] | tuple[int, ...]) -> str:
+    """Extract an arbitrary ordered set of pages into a new temporary PDF.
+
+    Pages are 1-indexed and copied in the exact order provided. Repeated pages
+    are rejected because downstream cache keys assume a canonical, deduplicated
+    document for a given page set.
+
+    Args:
+        input_path: Path to the source PDF file.
+        pages: Ordered page numbers to copy (1-indexed).
+
+    Returns:
+        Path to the new temporary PDF containing exactly the requested pages.
+        Caller is responsible for deleting this file when done.
+
+    Raises:
+        FileNotFoundError: If input_path does not exist.
+        ValueError: If pages is empty, contains duplicates, or includes an
+            out-of-range page number.
+    """
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"PDF not found: {input_path}")
+    if not pages:
+        raise ValueError("At least one page must be provided")
+
+    ordered_pages = [int(page) for page in pages]
+    if len(set(ordered_pages)) != len(ordered_pages):
+        raise ValueError("Duplicate pages are not allowed in extract_pages")
+
+    reader = PdfReader(input_path)
+    total_pages = len(reader.pages)
+
+    invalid_pages = [page for page in ordered_pages if page < 1 or page > total_pages]
+    if invalid_pages:
+        raise ValueError(
+            f"Invalid page numbers for extract_pages: {invalid_pages} (total={total_pages})"
+        )
+
+    logger.info(
+        "Extracting explicit page set from PDF",
+        extra={
+            "input_path": input_path,
+            "pages_count": len(ordered_pages),
+            "first_page": ordered_pages[0],
+            "last_page": ordered_pages[-1],
+            "total_pages": total_pages,
+        },
+    )
+
+    writer = PdfWriter()
+    for page_number in ordered_pages:
+        writer.add_page(reader.pages[page_number - 1])
+
+    fd, output_path = tempfile.mkstemp(suffix="_pageset.pdf")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            writer.write(f)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        if os.path.isfile(output_path):
+            os.unlink(output_path)
+        raise
+
+    output_size = os.path.getsize(output_path)
+    logger.info(
+        "Page-set PDF created",
+        extra={
+            "output_path": output_path,
+            "output_size_bytes": output_size,
+            "num_pages": len(ordered_pages),
+        },
     )
 
     return output_path

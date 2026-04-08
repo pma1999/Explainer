@@ -10,6 +10,7 @@ import { updateApiKeyUI, showSettings } from './auth.js';
 
 let selectedFile = null;
 let currentSourceType = 'pdf';
+let currentExplainerProvider = 'gemini';
 
 export function extractYouTubeVideoId(url) {
   const patterns = [
@@ -45,6 +46,47 @@ export function isValidWebUrl(url) {
   return normalizeWebUrl(url) !== null;
 }
 
+export function isExplainerProviderSupportedForSource(sourceType, provider) {
+  if (provider === 'openrouter' && sourceType === 'youtube') return false;
+  return provider === 'gemini' || provider === 'openrouter';
+}
+
+export function validateExplainerProviderSelection({
+  sourceType,
+  provider,
+  hasGeminiKey,
+  hasOpenRouterKey,
+}) {
+  if (!hasGeminiKey) {
+    return 'Necesitas configurar tu API key de Gemini primero. Ve a Ajustes.';
+  }
+
+  if (!isExplainerProviderSupportedForSource(sourceType, provider)) {
+    return 'OpenRouter todavía no está disponible para vídeos de YouTube. Usa Gemini para esta fuente.';
+  }
+
+  if (provider === 'openrouter' && !hasOpenRouterKey) {
+    return 'Necesitas configurar tu API key de OpenRouter para usar MiniMax en el explainer.';
+  }
+
+  return null;
+}
+
+function buildExplainerProviderHint(sourceType, provider) {
+  if (!isExplainerProviderSupportedForSource(sourceType, 'openrouter')) {
+    return 'YouTube se procesa con Gemini. OpenRouter todavía no está disponible para esta fuente.';
+  }
+
+  if (provider === 'openrouter') {
+    if (state.hasOpenRouterKey) {
+      return 'La explicación usará MiniMax vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
+    }
+    return 'MiniMax está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
+  }
+
+  return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
+}
+
 export function initLanding() {
   updateApiKeyUI();
 
@@ -55,6 +97,10 @@ export function initLanding() {
   const descInput = $('project-description');
   const youtubeUrlInput = $('youtube-url');
   const webUrlInput = $('web-url');
+  const providerGemini = $('explainer-provider-gemini');
+  const providerOpenRouter = $('explainer-provider-openrouter');
+  const providerHint = $('explainer-provider-hint');
+  const providerError = $('explainer-provider-error');
 
   const tabPdf = $('tab-pdf');
   const tabYoutube = $('tab-youtube');
@@ -62,6 +108,34 @@ export function initLanding() {
   const panelPdf = $('panel-pdf');
   const panelYoutube = $('panel-youtube');
   const panelWeb = $('panel-web');
+
+  function clearProviderError() {
+    providerError.textContent = '';
+    hide(providerError);
+  }
+
+  function syncExplainerProviderUI() {
+    const openRouterSupported = isExplainerProviderSupportedForSource(currentSourceType, 'openrouter');
+    if (!openRouterSupported && currentExplainerProvider === 'openrouter') {
+      currentExplainerProvider = 'gemini';
+    }
+
+    providerGemini.checked = currentExplainerProvider === 'gemini';
+    providerOpenRouter.checked = currentExplainerProvider === 'openrouter';
+    providerOpenRouter.disabled = !openRouterSupported;
+
+    $('provider-card-gemini').classList.toggle('selected', currentExplainerProvider === 'gemini');
+    $('provider-card-openrouter').classList.toggle('selected', currentExplainerProvider === 'openrouter');
+    $('provider-card-openrouter').classList.toggle('disabled', !openRouterSupported);
+
+    providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
+    clearProviderError();
+  }
+
+  function setExplainerProvider(provider) {
+    currentExplainerProvider = provider;
+    syncExplainerProviderUI();
+  }
 
   function switchSourceType(type) {
     currentSourceType = type;
@@ -89,6 +163,7 @@ export function initLanding() {
     $('web-url-error').textContent = '';
     hide($('youtube-url-error'));
     hide($('web-url-error'));
+    syncExplainerProviderUI();
 
     validateForm();
   }
@@ -96,6 +171,12 @@ export function initLanding() {
   tabPdf.addEventListener('click', () => switchSourceType('pdf'));
   tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
   tabWeb.addEventListener('click', () => switchSourceType('web'));
+  providerGemini.addEventListener('change', () => {
+    if (providerGemini.checked) setExplainerProvider('gemini');
+  });
+  providerOpenRouter.addEventListener('change', () => {
+    if (providerOpenRouter.checked) setExplainerProvider('openrouter');
+  });
 
   function checkReady() {
     const hasName = nameInput.value.trim();
@@ -168,6 +249,8 @@ export function initLanding() {
   $('btn-go-projects').addEventListener('click', () => {
     if (window.pushRoute) window.pushRoute({ view: 'projects' });
   });
+
+  syncExplainerProviderUI();
 }
 
 function setFile(f) {
@@ -211,10 +294,20 @@ async function handleUpload() {
   const name = $('project-name').value.trim();
   const description = $('project-description').value.trim();
   const errEl = $('upload-error');
+  const providerError = $('explainer-provider-error');
   errEl.textContent = '';
+  providerError.textContent = '';
+  hide(providerError);
 
-  if (!state.hasApiKey) {
-    errEl.textContent = 'Necesitas configurar tu API key de Gemini primero. Ve a Ajustes.';
+  const providerValidationError = validateExplainerProviderSelection({
+    sourceType: currentSourceType,
+    provider: currentExplainerProvider,
+    hasGeminiKey: state.hasApiKey,
+    hasOpenRouterKey: state.hasOpenRouterKey,
+  });
+  if (providerValidationError) {
+    providerError.textContent = providerValidationError;
+    show(providerError);
     showSettings();
     return;
   }
@@ -267,7 +360,11 @@ async function handleUpload() {
     $('project-description').value = '';
     $('youtube-url').value = '';
     $('web-url').value = '';
-    await api(`/api/projects/${project.id}/process`, { method: 'POST' });
+    await api(`/api/projects/${project.id}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ explainer_provider: currentExplainerProvider }),
+    });
 
     if (window.pushRoute) window.pushRoute({ view: 'project', projectId: project.id });
 

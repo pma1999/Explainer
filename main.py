@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -69,11 +70,14 @@ from backend.agents.explainer_openrouter import (
     run_explainer_or,
     run_subpart_explainer_or,
     OPENROUTER_MODEL_AGENTS as OPENROUTER_EXPLAINER_MODEL,
+    OPENROUTER_PDF_PARSER_ENGINE,
+    OPENROUTER_PDF_PRIMING_MODEL,
 )
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
+from backend.openrouter_client import OpenRouterPdfParseCacheEntry, get_or_prime_pdf_parse_cache
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -89,6 +93,21 @@ from backend.url_extraction import (
 # Configurar logging al importar el módulo
 setup_logging()
 logger = get_logger("main")
+
+ExplainerProvider = Literal["gemini", "openrouter"]
+
+EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
+EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
+
+
+class ProcessProjectRequest(BaseModel):
+    explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI
+
+
+def _resolve_explainer_model(explainer_provider: ExplainerProvider) -> str:
+    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
+        return OPENROUTER_EXPLAINER_MODEL
+    return MODEL_AGENTS
 
 
 @asynccontextmanager
@@ -484,6 +503,58 @@ def _build_pdf_table_of_contents(segmentation: dict, num_partes: int) -> str:
     return "\n".join(toc_lines)
 
 
+def _select_openrouter_pdf_pages(
+    content_page_set: frozenset[int],
+    *,
+    start_page: int | None,
+    end_page: int | None,
+    buffer: int = 1,
+) -> tuple[int, ...]:
+    """Select the exact original-page subset that OpenRouter should see.
+
+    Selection is always constrained to substantive-content pages discovered by
+    the classifier. When no explicit page range is available, the whole
+    OCR-cached content-page set is used.
+    """
+    if not content_page_set:
+        return ()
+
+    ordered_pages = tuple(sorted(content_page_set))
+    if start_page is None or end_page is None:
+        return ordered_pages
+
+    lower = start_page - max(buffer, 0)
+    upper = end_page + max(buffer, 0)
+    return tuple(page for page in ordered_pages if lower <= page <= upper)
+
+
+def _prepare_openrouter_pdf_context(
+    *,
+    numbered_pdf_path: str,
+    content_page_set: frozenset[int],
+    api_key: str,
+    engine: str,
+) -> "OpenRouterPreparedPdfContext":
+    """Prime the incremental OCR cache over the numbered source PDF.
+
+    The cache is keyed by the numbered source document itself, not by a
+    reconstructed per-run subset PDF. This allows future executions to reuse
+    already processed pages even if the classifier adds or removes pages.
+    """
+    cache_entry = get_or_prime_pdf_parse_cache(
+        source_path=numbered_pdf_path,
+        api_key=api_key,
+        model=OPENROUTER_PDF_PRIMING_MODEL,
+        engine=engine,
+        filename="document.pdf",
+        expected_page_numbers=tuple(sorted(content_page_set)),
+    )
+    return OpenRouterPreparedPdfContext(
+        source_pdf_path=numbered_pdf_path,
+        cache_entry=cache_entry,
+    )
+
+
 def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
     toc_lines = ["TABLA DE CONTENIDOS DEL TEXTO COMPLETO:"]
     for p in segmentation["partes"]:
@@ -529,6 +600,12 @@ class PartHandoffContext:
     intent_usuario: str | None
     continuidad_previa: str | None
     vision_global_division: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class OpenRouterPreparedPdfContext:
+    source_pdf_path: str
+    cache_entry: OpenRouterPdfParseCacheEntry
 
 
 def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
@@ -1074,13 +1151,19 @@ async def _format_and_finalize_part(
         await send_event(project_id, {"type": "part_completed", "part_id": part_id})
 
 
-async def _process_project(project_id: str, user_id: str) -> None:
+async def _process_project(
+    project_id: str,
+    user_id: str,
+    explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI,
+) -> None:
     process_start_time = time.time()
     pdf_temp_path = None
     numbered_pdf_path = None
     segment_pdf_paths: list[str] = []
     pdf_total_pages: int = 0
     content_page_set: frozenset[int] = frozenset()
+    openrouter_pdf_prepare_task: asyncio.Task | None = None
+    openrouter_pdf_context: OpenRouterPreparedPdfContext | None = None
     temp_paths: list[str] = []
     web_blocks = []
     source_mime_type = "application/pdf"
@@ -1088,6 +1171,8 @@ async def _process_project(project_id: str, user_id: str) -> None:
     source_title = ""
     resolved_source_url = ""
     source_metadata: dict[str, object] = {}
+    use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
+    explainer_model = _resolve_explainer_model(explainer_provider)
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -1113,6 +1198,19 @@ async def _process_project(project_id: str, user_id: str) -> None:
             }
         )
 
+        if use_openrouter_explainer and source_type == "youtube":
+            error_msg = (
+                "OpenRouter todavía no está disponible para proyectos de YouTube. "
+                "Usa Gemini para esta fuente."
+            )
+            logger.warning(
+                "[Process] Selección OpenRouter no soportada para YouTube",
+                extra={"project_id": project_id, "source_type": source_type},
+            )
+            await send_event(project_id, {"type": "error", "message": error_msg})
+            update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+            return
+
         # Get user's API keys (BYOK) from Supabase
         api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
         if not api_key:
@@ -1121,21 +1219,41 @@ async def _process_project(project_id: str, user_id: str) -> None:
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
-        openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
+        openrouter_api_key = ""
+        if use_openrouter_explainer:
+            openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
+            if not openrouter_api_key:
+                logger.error(f"[Process] API key OpenRouter no configurada para user: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de OpenRouter configurada. "
+                            "Guárdala en Ajustes para usar MiniMax en el explainer."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key OpenRouter no configurada"})
+                return
 
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
 
         from google import genai
         client = genai.Client(api_key=api_key)
         logger.info(
-            "[Process] Enrutamiento de modelos: segmentador=%s, resto=%s",
+            "[Process] Enrutamiento de modelos: segmentador=%s, gemini_agents=%s, explainer_provider=%s, explainer_model=%s",
             MODEL_SEGMENTADOR,
             MODEL_AGENTS,
+            explainer_provider,
+            explainer_model,
         )
 
         cumulative_usage = {
             "segmentation_model": MODEL_SEGMENTADOR,
             "agents_model": MODEL_AGENTS,
+            "explainer_provider": explainer_provider,
+            "explainer_model": explainer_model,
             "prompt_tokens": 0,
             "tool_use_prompt_tokens": 0,
             "candidates_tokens": 0,
@@ -1143,6 +1261,10 @@ async def _process_project(project_id: str, user_id: str) -> None:
             "total_tokens": 0,
             "total_cost": 0.0,
         }
+        if use_openrouter_explainer:
+            cumulative_usage["openrouter_pdf_parser_engine"] = OPENROUTER_PDF_PARSER_ENGINE
+            cumulative_usage["openrouter_pdf_priming_model"] = OPENROUTER_PDF_PRIMING_MODEL
+        update_project(project_id, user_id, {"usage": cumulative_usage})
 
         def _update_usage(usage_meta, phase: str = "unknown", *, cost_model: str):
             if not usage_meta:
@@ -1362,6 +1484,25 @@ async def _process_project(project_id: str, user_id: str) -> None:
                     extra={"error_type": type(clf_err).__name__},
                 )
 
+            if use_openrouter_explainer and openrouter_api_key and content_page_set:
+                logger.info(
+                    "[Process] Preparando OCR canónico de OpenRouter sobre páginas con contenido",
+                    extra={
+                        "content_pages_count": len(content_page_set),
+                        "openrouter_model": explainer_model,
+                        "openrouter_pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+                    },
+                )
+                openrouter_pdf_prepare_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        _prepare_openrouter_pdf_context,
+                        numbered_pdf_path=numbered_pdf_path,
+                        content_page_set=content_page_set,
+                        api_key=openrouter_api_key,
+                        engine=OPENROUTER_PDF_PARSER_ENGINE,
+                    )
+                )
+
         # Fase de segmentación (con validación MECE de temas + cobertura de páginas y reintentos)
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
@@ -1573,6 +1714,27 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 extra={"toc_preview": table_of_contents[:300]}
             )
 
+        if openrouter_pdf_prepare_task is not None:
+            try:
+                openrouter_pdf_context = await openrouter_pdf_prepare_task
+                logger.info(
+                    "[Process] OCR canónico OpenRouter preparado",
+                    extra={
+                        "source_pdf_path": openrouter_pdf_context.source_pdf_path,
+                        "cache_path": openrouter_pdf_context.cache_entry.cache_path,
+                        "cache_hit": openrouter_pdf_context.cache_entry.cache_hit,
+                        "requested_pages_count": len(openrouter_pdf_context.cache_entry.expected_page_numbers),
+                        "cached_pages_count": len(openrouter_pdf_context.cache_entry.cached_page_numbers),
+                    },
+                )
+            except Exception as exc:
+                openrouter_pdf_context = None
+                logger.warning(
+                    "[Process] No se pudo preparar el OCR canónico OpenRouter; se usará el flujo local por parte: %s",
+                    exc,
+                    extra={"error_type": type(exc).__name__},
+                )
+
         partes_segmentadas: list[dict] = segmentation["partes"]
         user_intent = _strip_str(project.get("description"))
         consideraciones = _strip_str(segmentation.get("consideraciones_estudiante"))
@@ -1628,6 +1790,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
             agent_mime_type = source_mime_type
             agent_prompt = identificacion
             segment_temp_path = None
+            openrouter_page_scopes: list[tuple[int, ...]] = []
 
             nucleo_pi = _optional_int(parte, "pagina_inicio")
             nucleo_pf = _optional_int(parte, "pagina_fin")
@@ -1706,8 +1869,25 @@ async def _process_project(project_id: str, user_id: str) -> None:
                         )
                         for sp in subpartes
                     ]
+                    openrouter_page_scopes = [
+                        _select_openrouter_pdf_pages(
+                            content_page_set,
+                            start_page=_optional_int(sp, "pagina_inicio") or nucleo_pi,
+                            end_page=_optional_int(sp, "pagina_fin") or nucleo_pf,
+                            buffer=1,
+                        )
+                        for sp in subpartes
+                    ]
                 else:
                     subpart_prompts = [agent_prompt]  # fallback: whole part as single subpart
+                    openrouter_page_scopes = [
+                        _select_openrouter_pdf_pages(
+                            content_page_set,
+                            start_page=nucleo_pi,
+                            end_page=nucleo_pf,
+                            buffer=1,
+                        )
+                    ]
 
             elif is_text_source:
                 bloque_inicio = parte.get("bloque_inicio")
@@ -1803,13 +1983,41 @@ async def _process_project(project_id: str, user_id: str) -> None:
 
             # Execute all subpart explainers + recorrido + resources in parallel
             agents_start = time.time()
-            use_or = bool(openrouter_api_key) and segment_temp_path is not None
+            use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
+            use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
+            use_or = use_or_canonical or use_or_direct
             if use_or:
                 explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
-                explainer_calls = [
-                    asyncio.to_thread(explainer_fn_or, segment_temp_path, sp_prompt, OPENROUTER_EXPLAINER_MODEL, agent_mime_type, openrouter_api_key)
-                    for sp_prompt in subpart_prompts
-                ]
+                if use_or_canonical:
+                    if len(openrouter_page_scopes) != len(subpart_prompts):
+                        raise RuntimeError(
+                            "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                        )
+                    explainer_calls = [
+                        asyncio.to_thread(
+                            explainer_fn_or,
+                            openrouter_pdf_context.source_pdf_path,
+                            sp_prompt,
+                            explainer_model,
+                            "application/pdf",
+                            openrouter_api_key,
+                            openrouter_pdf_context.cache_entry,
+                            page_scope,
+                        )
+                        for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
+                    ]
+                else:
+                    explainer_calls = [
+                        asyncio.to_thread(
+                            explainer_fn_or,
+                            segment_temp_path,
+                            sp_prompt,
+                            explainer_model,
+                            agent_mime_type,
+                            openrouter_api_key,
+                        )
+                        for sp_prompt in subpart_prompts
+                    ]
             else:
                 explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
                 explainer_calls = [
@@ -1840,8 +2048,7 @@ async def _process_project(project_id: str, user_id: str) -> None:
                 else:
                     sp_data, sp_usage = sp_result
                     if sp_usage:
-                        _explainer_cost_model = OPENROUTER_EXPLAINER_MODEL if use_or else MODEL_AGENTS
-                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=_explainer_cost_model)
+                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=explainer_model)
                     subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
             # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2054,6 +2261,26 @@ async def _process_project(project_id: str, user_id: str) -> None:
         update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
+        if openrouter_pdf_prepare_task is not None:
+            try:
+                if not openrouter_pdf_prepare_task.done():
+                    openrouter_pdf_prepare_task.cancel()
+                    try:
+                        await openrouter_pdf_prepare_task
+                    except asyncio.CancelledError:
+                        pass
+                elif openrouter_pdf_context is None:
+                    prepared_context = openrouter_pdf_prepare_task.result()
+            except Exception as exc:
+                logger.debug(
+                    "[Process] Cierre del task OCR canónico OpenRouter sin contexto reutilizable",
+                    extra={
+                        "project_id": project_id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:300],
+                    },
+                )
+
         # Clean up all temporary files created during processing.
         for temp_path in dict.fromkeys(temp_paths):
             if temp_path and os.path.isfile(temp_path):
@@ -2190,14 +2417,18 @@ async def api_process_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
     background_tasks: BackgroundTasks,
+    payload: ProcessProjectRequest | None = Body(default=None),
 ):
     """Start processing a project using the user's own API key (BYOK)."""
+    explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
+    explainer_model = _resolve_explainer_model(explainer_provider)
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
         extra={
             "project_id": project_id,
             "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id,
             "endpoint": "POST /api/projects/{project_id}/process",
+            "explainer_provider": explainer_provider,
         }
     )
 
@@ -2213,9 +2444,22 @@ async def api_process_project(
         )
         raise HTTPException(status_code=400, detail=f"El proyecto ya está en estado '{project['status']}'")
 
-    if not has_user_api_key(user_id):
+    if not has_user_api_key(user_id, provider=PROVIDER_GEMINI):
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
+
+    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
+        if project.get("source_type") == "youtube":
+            raise HTTPException(
+                status_code=400,
+                detail="OpenRouter todavía no está disponible para proyectos de YouTube. Usa Gemini para esta fuente.",
+            )
+        if not has_user_api_key(user_id, provider=PROVIDER_OPENROUTER):
+            logger.warning(f"[API] Usuario sin API key OpenRouter configurada: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar MiniMax en el explainer.",
+            )
 
     logger.info(
         f"[API] Iniciando procesamiento en background",
@@ -2225,10 +2469,12 @@ async def api_process_project(
             "source_type": project.get("source_type", "pdf"),
             "segmentation_model": MODEL_SEGMENTADOR,
             "agents_model": MODEL_AGENTS,
+            "explainer_provider": explainer_provider,
+            "explainer_model": explainer_model,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id)
-    return {"ok": True, "status": "started"}
+    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider)
+    return {"ok": True, "status": "started", "explainer_provider": explainer_provider}
 
 
 @app.get("/api/projects/{project_id}/events")

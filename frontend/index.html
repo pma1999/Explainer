@@ -213,6 +213,29 @@
             <textarea id="project-description" class="form-input form-textarea" rows="3"
               placeholder="Ej: Capítulos 1, 2 y 6 del libro completo / Minutos 10-30 del vídeo / Solo el artículo completo / Dejar vacío para todo el contenido"></textarea>
           </div>
+          <div class="form-group">
+            <label class="form-label">Motor del explainer</label>
+            <div class="provider-grid" id="explainer-provider-group">
+              <label class="provider-card" id="provider-card-gemini" for="explainer-provider-gemini">
+                <input type="radio" name="explainer-provider" id="explainer-provider-gemini" value="gemini" checked />
+                <span class="provider-card-main">
+                  <span class="provider-card-title">Gemini</span>
+                  <span class="provider-card-sub">Gemini 3.1 Flash Lite</span>
+                </span>
+              </label>
+              <label class="provider-card" id="provider-card-openrouter" for="explainer-provider-openrouter">
+                <input type="radio" name="explainer-provider" id="explainer-provider-openrouter" value="openrouter" />
+                <span class="provider-card-main">
+                  <span class="provider-card-title">OpenRouter</span>
+                  <span class="provider-card-sub">MiniMax `minimax/minimax-m2.7`</span>
+                </span>
+              </label>
+            </div>
+            <p class="input-hint" id="explainer-provider-hint">
+              La explicación usará Gemini. Segmentación, recorrido, recursos y formateo siguen funcionando con Gemini.
+            </p>
+            <p class="input-error hidden" id="explainer-provider-error"></p>
+          </div>
         </div>
 
         <button class="btn-primary" id="btn-upload" disabled>
@@ -821,19 +844,20 @@
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de OpenRouter <span class="settings-badge-optional">Opcional</span></h4>
           <p class="settings-description">
-            Si la configuras, el explainer usará <strong>MiniMax (minimax/minimax-m2.7)</strong> en lugar de Gemini.
-            El resto de agentes (segmentación, recorrido, recursos) siguen usando Gemini.
+            Si la configuras, podrás elegir <strong>MiniMax (minimax/minimax-m2.7)</strong> para el explainer en cada ejecución.
+            El OCR de PDFs seguirá usando <strong>Grok</strong> y el resto de agentes (segmentación, recorrido, recursos y formateo)
+            siguen usando Gemini.
             Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
           </p>
 
           <div id="openrouter-key-not-set" class="api-key-status hidden">
             <div class="status-badge status-neutral">No configurada</div>
-            <p class="status-text">El explainer usará Gemini por defecto.</p>
+            <p class="status-text">Solo podrás usar Gemini en el explainer.</p>
           </div>
 
           <div id="openrouter-key-set" class="api-key-status hidden">
             <div class="status-badge status-success">✓ Configurada</div>
-            <p class="status-text">El explainer usará Grok vía OpenRouter.</p>
+            <p class="status-text">MiniMax queda disponible para seleccionarlo al crear el proyecto.</p>
           </div>
 
           <form id="form-openrouter-key" class="settings-form">

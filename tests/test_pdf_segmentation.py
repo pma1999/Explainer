@@ -20,7 +20,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from pypdf import PdfReader
 
-from backend.pdf_utils import add_page_numbers, extract_page_range
+from backend.pdf_utils import add_page_numbers, extract_page_range, extract_pages
 
 
 # ============================================================
@@ -454,6 +454,65 @@ def test_extract_page_range_errors():
             os.unlink(test_pdf)
 
     return all_passed
+
+
+def test_extract_pages_preserves_requested_order():
+    """extract_pages should preserve the explicit page order exactly."""
+    test_pdf = create_test_pdf(
+        5,
+        {
+            1: "Contenido página 1",
+            2: "Contenido página 2",
+            3: "Contenido página 3",
+            4: "Contenido página 4",
+            5: "Contenido página 5",
+        },
+    )
+    extracted = None
+
+    try:
+        extracted = extract_pages(test_pdf, [3, 5, 2])
+        reader = PdfReader(extracted)
+
+        assert len(reader.pages) == 3
+        assert "Test Page 3" in (reader.pages[0].extract_text() or "")
+        assert "Test Page 5" in (reader.pages[1].extract_text() or "")
+        assert "Test Page 2" in (reader.pages[2].extract_text() or "")
+    finally:
+        if os.path.isfile(test_pdf):
+            os.unlink(test_pdf)
+        if extracted and os.path.isfile(extracted):
+            os.unlink(extracted)
+
+
+def test_extract_pages_rejects_duplicates():
+    """extract_pages rejects duplicate pages to keep canonical cache inputs stable."""
+    test_pdf = create_test_pdf(3)
+    try:
+        try:
+            extract_pages(test_pdf, [1, 2, 2])
+        except ValueError as exc:
+            assert "Duplicate pages" in str(exc)
+        else:
+            raise AssertionError("extract_pages debería rechazar páginas duplicadas")
+    finally:
+        if os.path.isfile(test_pdf):
+            os.unlink(test_pdf)
+
+
+def test_select_openrouter_pdf_pages_filters_to_content_pages():
+    """The OpenRouter canonical flow must only send substantive pages."""
+    from main import _select_openrouter_pdf_pages
+
+    content_pages = frozenset({2, 3, 5, 6, 9})
+    selected = _select_openrouter_pdf_pages(
+        content_page_set=content_pages,
+        start_page=4,
+        end_page=6,
+        buffer=1,
+    )
+
+    assert selected == (3, 5, 6)
 
 
 # ============================================================

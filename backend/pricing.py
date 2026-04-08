@@ -31,6 +31,12 @@ PRICING = {
         "output_small": 0.29,  # $0.29 / 1M tokens
         "output_large": 0.29,
     },
+    "minimax/minimax-m2.7": {
+        "input_small": 0.30,   # $0.30 / 1M tokens
+        "input_large": 0.30,
+        "output_small": 1.20,  # $1.20 / 1M tokens
+        "output_large": 1.20,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

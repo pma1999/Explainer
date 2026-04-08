@@ -7,6 +7,8 @@ import {
   isValidYouTubeUrl,
   normalizeWebUrl,
   isValidWebUrl,
+  isExplainerProviderSupportedForSource,
+  validateExplainerProviderSelection,
 } from '../../frontend/js/landing.js';
 
 describe('landing.js', () => {
@@ -70,6 +72,58 @@ describe('landing.js', () => {
       expect(isValidWebUrl('')).toBe(false);
       expect(isValidWebUrl('google.com')).toBe(false);
       expect(isValidWebUrl('javascript:alert(1)')).toBe(false);
+    });
+  });
+
+  describe('isExplainerProviderSupportedForSource', () => {
+    it('allows Gemini for every source', () => {
+      expect(isExplainerProviderSupportedForSource('pdf', 'gemini')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('web', 'gemini')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('youtube', 'gemini')).toBe(true);
+    });
+
+    it('disables OpenRouter for YouTube only', () => {
+      expect(isExplainerProviderSupportedForSource('pdf', 'openrouter')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('web', 'openrouter')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('youtube', 'openrouter')).toBe(false);
+    });
+  });
+
+  describe('validateExplainerProviderSelection', () => {
+    it('requires Gemini key for any execution', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'gemini',
+        hasGeminiKey: false,
+        hasOpenRouterKey: false,
+      })).toMatch(/Gemini/i);
+    });
+
+    it('requires OpenRouter key when MiniMax is selected', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'openrouter',
+        hasGeminiKey: true,
+        hasOpenRouterKey: false,
+      })).toMatch(/OpenRouter/i);
+    });
+
+    it('rejects OpenRouter on YouTube even with both keys', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'youtube',
+        provider: 'openrouter',
+        hasGeminiKey: true,
+        hasOpenRouterKey: true,
+      })).toMatch(/YouTube/i);
+    });
+
+    it('accepts OpenRouter for web when both keys exist', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'openrouter',
+        hasGeminiKey: true,
+        hasOpenRouterKey: true,
+      })).toBeNull();
     });
   });
 });

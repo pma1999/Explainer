@@ -2,185 +2,269 @@
 from __future__ import annotations
 
 import base64
+import os
+import tempfile
 import time
-from typing import Any
+from typing import Any, Literal
+
+from pypdf import PdfReader
 
 from backend.logging_config import get_logger
-from backend.openrouter_client import OpenRouterError, OpenRouterUsage, call_openrouter_chat
-from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
+from backend.openrouter_client import (
+    OpenRouterError,
+    OpenRouterJsonSchemaResponseFormat,
+    OpenRouterPdfParseCacheEntry,
+    OpenRouterUsage,
+    build_messages_with_cached_pdf_annotations,
+    call_openrouter_chat,
+    get_or_prime_pdf_parse_cache,
+    render_pdf_page_subset_to_text,
+)
+from backend.agents.explainer_prompts import (
+    SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
+    SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
+)
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "xiaomi/mimo-v2-flash"
-
-# PDF parsing plugin (cloudflare-ai es gratis y funciona con cualquier modelo)
-_PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}}]
-
-# ---------------------------------------------------------------------------
-# System prompts para JSON mode
-# ---------------------------------------------------------------------------
-
-OR_EXPLAINER_SYSTEM_PROMPT = (
-"""<system_instruction>
-  <role>
-  Eres un **Experto Didáctico de Alto Rendimiento**, especializado en transformar contenido técnico o académico en explicaciones exhaustivas que garanticen comprensión completa.
-
-  **Tu expertise específica:**
-  - Pedagogía avanzada y teoría del aprendizaje significativo
-  - Estructuración óptima de contenido para retención y comprensión
-  - Capacidad para detectar y explicar conexiones implícitas entre conceptos
-  - Dominio en la expansión explicativa de material denso
-
-  **Principios metodológicos que guían tu trabajo:**
-  1. **Expansión obligatoria**: Tu función es AMPLIAR, nunca condensar. Cada concepto del texto principal merece desarrollo explicativo.
-  2. **Cobertura total**: No existe concepto menor. Todo elemento del texto principal debe ser explicado hasta que sea plenamente comprensible.
-  3. **Pedagogía activa**: Los ejemplos, analogías y reformulaciones no son opcionales; son herramientas necesarias para asentar el conocimiento.
-  4. **Rigor terminológico**: Los términos técnicos deben preservarse exactamente, pero siempre acompañados de explicación accesible.
-  5. **Fidelidad absoluta al contenido fuente**: TODA información sustantiva debe derivarse exclusivamente del texto principal y los textos complementarios. Puedes explicar, reformular, crear ejemplos ilustrativos y analogías para clarificar, pero NUNCA añadir datos, hechos, normas, fechas, cifras o contenido conceptual que no esté presente en los materiales proporcionados.
-  6. **Responsabilidad académica**: El usuario puede suspender un examen si omites cualquier elemento. Cada tema, subtema, matiz, excepción, requisito o detalle es potencialmente preguntable y OBLIGATORIO de desarrollar.
-  </role>
-"""
-+ CASTELLANO_ESPANIA_XML
-+ """
-
-  <output_contract>
-  Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto. No uses bloques ```json.
-
-  La forma exacta del objeto es:
-  {
-    "introduccion": "string",
-    "desarrollo": [
-      {
-        "titulo_seccion": "string",
-        "explicacion_introductoria": "string",
-        "subsecciones": [
-          {
-            "titulo_subseccion": "string",
-            "explicacion_detallada": "string"
-          }
-        ]
-      }
-    ],
-    "conclusion": "string",
-    "conexiones_contextuales": [
-      {
-        "seccion_temario_relacionada": "string",
-        "descripcion_conexion": "string"
-      }
-    ]
-  }
-
-  Reglas JSON obligatorias:
-  - Todas esas claves deben existir SIEMPRE.
-  - `conexiones_contextuales` debe ser `[]` cuando no aplique.
-  - No añadas claves extra.
-  - Cada valor debe respetar exactamente su tipo.
-  - Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
-  - `titulo_seccion` y `titulo_subseccion` son títulos breves; no los repitas dentro del cuerpo.
-  - `introduccion` y `conclusion` contienen solo sus párrafos; no incluyas los rótulos literales "Introducción" o "Conclusión".
-  - `explicacion_introductoria` y `explicacion_detallada` contienen solo el cuerpo explicativo de ese bloque, sin encabezados duplicados ni metacomentarios.
-  - Tu límite de tokens existe para ser USADO, no para ser ahorrado. Sé exhaustivo.
-  </output_contract>
-
-  <coverage_guarantee_protocol>
-  **CRÍTICO:** Si algo aparece en el texto principal, DEBE aparecer desarrollado en tu explicación. "Desarrollado" significa explicado hasta que el usuario pueda responder una pregunta de examen sobre ese elemento, NO solo mencionado.
-  </coverage_guarantee_protocol>
-
-  <source_fidelity_protocol>
-  Toda información sustantiva debe provenir de los textos proporcionados. Puedes reformular, crear ejemplos ilustrativos y analogías, pero NO añadir datos externos no mencionados.
-  </source_fidelity_protocol>
-</system_instruction>
-
-<context>
-{{TEXTO_PRINCIPAL}}
-[El contenido que debe ser explicado exhaustivamente.]
-
-{{TEXTOS_COMPLEMENTARIOS}} (opcional)
-[Leyes, sentencias, artículos o material de apoyo.]
-
-{{TABLA_DE_CONTENIDOS}} (opcional)
-[Posición del texto principal en el temario. Usar solo para Conexiones Contextuales.]
-
-{{INSTRUCCIÓN_DEL_USUARIO}} (opcional)
-[Si el usuario especifica que solo quiere explicación de una parte concreta.]
-</context>
-
-<task>
-Basándote en el contexto proporcionado, genera una explicación exhaustiva del texto principal que garantice comprensión completa. Si no hay instrucción específica, explica TODO el contenido. Mantén profundidad uniforme desde el primer hasta el último concepto y devuelve únicamente el objeto JSON descrito.
-</task>"""
+OPENROUTER_MODEL_AGENTS = "minimax/minimax-m2.7"
+OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
+OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
+OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
+    {
+        "openai/gpt-5.4-nano",
+    }
 )
 
-OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = (
-"""<system_instruction>
-  <role>
-  Eres un **Experto Didáctico de Alto Rendimiento**, especializado en transformar contenido técnico o académico en explicaciones exhaustivas que garanticen comprensión completa.
+# PDF parsing plugin (used only in the fallback path for direct file sends)
+_PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": OPENROUTER_PDF_PARSER_ENGINE}}]
 
-  **Principios metodológicos:**
-  1. **Expansión obligatoria**: Tu función es AMPLIAR, nunca condensar.
-  2. **Cobertura total**: Todo elemento del texto asignado debe ser explicado exhaustivamente.
-  3. **Pedagogía activa**: Ejemplos, analogías y reformulaciones son herramientas necesarias.
-  4. **Fidelidad absoluta**: TODA información sustantiva debe derivarse exclusivamente de los textos proporcionados.
-  5. **Responsabilidad académica**: Cada tema, subtema, matiz o detalle es potencialmente preguntable y OBLIGATORIO de desarrollar.
-  </role>
-"""
-+ CASTELLANO_ESPANIA_XML
-+ """
+# ---------------------------------------------------------------------------
+# Shared prompt base + OpenRouter JSON output contract
+# ---------------------------------------------------------------------------
 
-  <output_contract>
-  Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto.
+_FULL_JSON_OUTPUT_CONTRACT = """
 
-  La forma exacta del objeto es:
-  {
-    "desarrollo": [
-      {
-        "titulo_seccion": "string",
-        "explicacion_introductoria": "string",
-        "subsecciones": [
-          {
-            "titulo_subseccion": "string",
-            "explicacion_detallada": "string"
-          }
-        ]
-      }
-    ]
-  }
+<json_output_contract>
+Además de TODAS las instrucciones anteriores, para esta ejecución OpenRouter debes cumplir exactamente este contrato de salida:
 
-  Reglas JSON obligatorias:
-  - Devuelve SOLO la clave `desarrollo`.
-  - No añadas introducción, conclusión ni conexiones contextuales.
-  - No añadas claves extra.
-  - Cada `titulo_*` debe ser breve y no repetirse dentro del cuerpo.
-  - Cada `explicacion_*` contiene solo el cuerpo explicativo, sin encabezados duplicados ni metacomentarios.
-  - Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
-  - Tu límite de tokens existe para ser USADO. Sé exhaustivo.
-  </output_contract>
+- Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto. No uses bloques ```json.
+- Si la API te proporciona un JSON Schema, debes obedecerlo exactamente. Si no lo hace, igualmente debes producir un JSON que respete esta forma.
 
-  <coverage_guarantee_protocol>
-  **CRÍTICO:** Si algo aparece en el texto de esta subparte, DEBE aparecer desarrollado exhaustivamente. No solo mencionado.
-  </coverage_guarantee_protocol>
+Forma exacta del objeto:
+{
+  "introduccion": "string",
+  "desarrollo": [
+    {
+      "titulo_seccion": "string",
+      "explicacion_introductoria": "string",
+      "subsecciones": [
+        {
+          "titulo_subseccion": "string",
+          "explicacion_detallada": "string"
+        }
+      ]
+    }
+  ],
+  "conclusion": "string",
+  "conexiones_contextuales": [
+    {
+      "seccion_temario_relacionada": "string",
+      "descripcion_conexion": "string"
+    }
+  ]
+}
 
-  <source_fidelity_protocol>
-  Toda información sustantiva debe provenir de los textos proporcionados. Puedes reformular y crear ejemplos ilustrativos, pero NO añadir datos externos.
-  </source_fidelity_protocol>
-</system_instruction>
+Reglas JSON obligatorias:
+- Todas esas claves deben existir SIEMPRE.
+- `conexiones_contextuales` debe ser `[]` cuando no aplique.
+- No añadas claves extra.
+- Cada valor debe respetar exactamente su tipo.
+- Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
+- `titulo_seccion` y `titulo_subseccion` son títulos breves; no los repitas dentro del cuerpo.
+- `introduccion` y `conclusion` contienen solo sus párrafos; no incluyas los rótulos literales "Introducción" o "Conclusión".
+- `explicacion_introductoria` y `explicacion_detallada` contienen solo el cuerpo explicativo de ese bloque, sin encabezados duplicados ni metacomentarios.
+</json_output_contract>"""
 
-<context>
-{{TEXTO_PRINCIPAL}}
-[El contenido que debe ser explicado exhaustivamente. TODO su contenido debe ser cubierto.]
+_SUBPART_JSON_OUTPUT_CONTRACT = """
 
-{{TEXTOS_COMPLEMENTARIOS}} (opcional)
-[Material de apoyo.]
-</context>
+<json_output_contract>
+Además de TODAS las instrucciones anteriores, para esta ejecución OpenRouter debes cumplir exactamente este contrato de salida:
 
-<task>
-Basándote en el contexto proporcionado, genera el desarrollo exhaustivo de la subparte asignada. Mantén profundidad uniforme desde el primer hasta el último concepto. Sin introducción ni conclusión. Devuelve únicamente el objeto JSON descrito.
-</task>"""
+- Devuelve EXCLUSIVAMENTE un único objeto JSON válido. No escribas nada antes ni después del objeto. No uses bloques ```json.
+- Si la API te proporciona un JSON Schema, debes obedecerlo exactamente. Si no lo hace, igualmente debes producir un JSON que respete esta forma.
+
+Forma exacta del objeto:
+{
+  "desarrollo": [
+    {
+      "titulo_seccion": "string",
+      "explicacion_introductoria": "string",
+      "subsecciones": [
+        {
+          "titulo_subseccion": "string",
+          "explicacion_detallada": "string"
+        }
+      ]
+    }
+  ]
+}
+
+Reglas JSON obligatorias:
+- Devuelve SOLO la clave `desarrollo`.
+- No añadas introducción, conclusión ni conexiones contextuales.
+- No añadas claves extra.
+- Cada `titulo_*` debe ser breve y no repetirse dentro del cuerpo.
+- Cada `explicacion_*` contiene solo el cuerpo explicativo, sin encabezados duplicados ni metacomentarios.
+- Escapa correctamente comillas, saltos de línea y caracteres especiales para que el JSON sea parseable.
+</json_output_contract>"""
+
+
+def _append_json_output_contract(base_prompt: str, contract: str) -> str:
+    return f"{base_prompt}{contract}"
+
+
+OR_EXPLAINER_SYSTEM_PROMPT = _append_json_output_contract(
+    SHARED_SYSTEM_INSTRUCTION,
+    _FULL_JSON_OUTPUT_CONTRACT,
+)
+
+OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = _append_json_output_contract(
+    SHARED_SUBPART_SYSTEM_INSTRUCTION,
+    _SUBPART_JSON_OUTPUT_CONTRACT,
+)
+
+
+_SUBSECTION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Single didactic subsection of the explanation.",
+    "properties": {
+        "titulo_subseccion": {
+            "type": "string",
+            "description": "Brief subsection title in Spanish.",
+        },
+        "explicacion_detallada": {
+            "type": "string",
+            "description": "Detailed explanation body for the subsection.",
+        },
+    },
+    "required": ["titulo_subseccion", "explicacion_detallada"],
+    "additionalProperties": False,
+}
+
+_SECTION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Single top-level section of the explanation.",
+    "properties": {
+        "titulo_seccion": {
+            "type": "string",
+            "description": "Brief section title in Spanish.",
+        },
+        "explicacion_introductoria": {
+            "type": "string",
+            "description": "Introductory explanation for the section.",
+        },
+        "subsecciones": {
+            "type": "array",
+            "description": "Didactic subsections that fully develop the section.",
+            "items": _SUBSECTION_JSON_SCHEMA,
+            "minItems": 1,
+        },
+    },
+    "required": ["titulo_seccion", "explicacion_introductoria", "subsecciones"],
+    "additionalProperties": False,
+}
+
+_CONNECTION_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Cross-reference to another syllabus section when relevant.",
+    "properties": {
+        "seccion_temario_relacionada": {
+            "type": "string",
+            "description": "Related syllabus section title.",
+        },
+        "descripcion_conexion": {
+            "type": "string",
+            "description": "Why this connection matters for understanding.",
+        },
+    },
+    "required": ["seccion_temario_relacionada", "descripcion_conexion"],
+    "additionalProperties": False,
+}
+
+OR_EXPLAINER_JSON_SCHEMA = OpenRouterJsonSchemaResponseFormat(
+    name="full_explainer",
+    strict=True,
+    schema={
+        "type": "object",
+        "description": "Complete explainer output for a syllabus part.",
+        "properties": {
+            "introduccion": {
+                "type": "string",
+                "description": "Introductory text for the part.",
+            },
+            "desarrollo": {
+                "type": "array",
+                "description": "Full didactic development of the content.",
+                "items": _SECTION_JSON_SCHEMA,
+                "minItems": 1,
+            },
+            "conclusion": {
+                "type": "string",
+                "description": "Closing summary for the part.",
+            },
+            "conexiones_contextuales": {
+                "type": "array",
+                "description": "Optional contextual links to other syllabus sections.",
+                "items": _CONNECTION_JSON_SCHEMA,
+            },
+        },
+        "required": ["introduccion", "desarrollo", "conclusion", "conexiones_contextuales"],
+        "additionalProperties": False,
+    },
+)
+
+OR_SUBPART_EXPLAINER_JSON_SCHEMA = OpenRouterJsonSchemaResponseFormat(
+    name="subpart_explainer",
+    strict=True,
+    schema={
+        "type": "object",
+        "description": "Explainer output for a single segmented subpart.",
+        "properties": {
+            "desarrollo": {
+                "type": "array",
+                "description": "Didactic development for the assigned subpart.",
+                "items": _SECTION_JSON_SCHEMA,
+                "minItems": 1,
+            },
+        },
+        "required": ["desarrollo"],
+        "additionalProperties": False,
+    },
 )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_openrouter_model_name(model: str) -> str:
+    return (model or "").strip().lower()
+
+
+def _supports_openrouter_structured_outputs(model: str) -> bool:
+    return _normalize_openrouter_model_name(model) in OPENROUTER_STRUCTURED_OUTPUT_MODELS
+
+
+def _resolve_openrouter_response_format(
+    *,
+    model: str,
+    json_schema: OpenRouterJsonSchemaResponseFormat,
+) -> Literal["json_object"] | OpenRouterJsonSchemaResponseFormat:
+    if _supports_openrouter_structured_outputs(model):
+        return json_schema
+    return "json_object"
+
 
 def _require_object(value: Any, *, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
@@ -307,6 +391,174 @@ def _count_payload_chars(payload: dict[str, Any]) -> int:
 
     return total
 
+
+def _is_pdf_parse_failure(exc: OpenRouterError) -> bool:
+    message = str(exc)
+    return "Failed to parse document.pdf" in message or "Failed to parse" in message
+
+
+def _extract_pdf_text_to_temp(source_path: str) -> str:
+    reader = PdfReader(source_path)
+    chunks: list[str] = []
+    for index, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if not text:
+            continue
+        chunks.append(f"=== PAGE {index} ===\n{text}")
+
+    if not chunks:
+        raise OpenRouterError(
+            "OpenRouter fallback failed: no se pudo extraer texto util del PDF local."
+        )
+
+    fd, temp_path = tempfile.mkstemp(suffix="_openrouter_pdf_fallback.txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(chunks))
+    return temp_path
+
+
+def _build_inline_text_messages(ocr_text: str, identificacion: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"{ocr_text}\n\n{identificacion}",
+                }
+            ],
+        }
+    ]
+
+
+def _call_openrouter_json_with_pdf_fallback(
+    *,
+    source_path: str,
+    identificacion: str,
+    mime_type: str,
+    model: str,
+    system_prompt: str,
+    response_format: Literal["json_object"] | OpenRouterJsonSchemaResponseFormat,
+    api_key: str,
+    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    page_numbers: tuple[int, ...] | None = None,
+) -> tuple[dict[str, Any], OpenRouterUsage]:
+    try:
+        if mime_type == "application/pdf":
+            cache_entry = pdf_cache_entry or get_or_prime_pdf_parse_cache(
+                source_path=source_path,
+                api_key=api_key,
+                model=OPENROUTER_PDF_PRIMING_MODEL,
+                engine=OPENROUTER_PDF_PARSER_ENGINE,
+                filename="document.pdf",
+                expected_page_numbers=page_numbers,
+            )
+            cached_page_numbers = getattr(cache_entry, "cached_page_numbers", ())
+            logger.info(
+                "Usando cache de parseo OpenRouter para PDF",
+                extra={
+                    "source_path": source_path,
+                    "model": model,
+                    "pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+                    "pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
+                    "cache_hit": cache_entry.cache_hit,
+                    "cache_path": cache_entry.cache_path,
+                    "cached_pages_count": len(cached_page_numbers),
+                },
+            )
+            requested_pages = page_numbers or cached_page_numbers
+            if requested_pages and cache_entry.page_index:
+                ocr_text = render_pdf_page_subset_to_text(
+                    cache_entry=cache_entry,
+                    page_numbers=requested_pages,
+                )
+                inline_messages = _build_inline_text_messages(ocr_text, identificacion)
+                return call_openrouter_chat(
+                    messages=inline_messages,
+                    model=model,
+                    system_prompt=system_prompt,
+                    api_key=api_key,
+                    response_format=response_format,
+                    plugins=None,
+                    enable_response_healing=True,
+                    reasoning={"effort": "xhigh", "exclude": True},
+                )
+            if cache_entry.assistant_message is not None and cache_entry.assistant_message.annotations:
+                messages = build_messages_with_cached_pdf_annotations(
+                    source_path=source_path,
+                    cache_entry=cache_entry,
+                    user_text=identificacion,
+                    filename="document.pdf",
+                )
+                return call_openrouter_chat(
+                    messages=messages,
+                    model=model,
+                    system_prompt=system_prompt,
+                    api_key=api_key,
+                    response_format=response_format,
+                    plugins=None,
+                    enable_response_healing=True,
+                    reasoning={"effort": "xhigh", "exclude": True},
+                )
+            raise OpenRouterError(
+                "El cache OCR del PDF no contiene páginas reutilizables ni annotations completas."
+            )
+
+        content, plugins = _build_content(source_path, identificacion, mime_type)
+        messages = [{"role": "user", "content": content}]
+        return call_openrouter_chat(
+            messages=messages,
+            model=model,
+            system_prompt=system_prompt,
+            api_key=api_key,
+            response_format=response_format,
+            plugins=plugins,
+            enable_response_healing=True,
+            reasoning={"effort": "xhigh", "exclude": True},
+        )
+    except OpenRouterError as exc:
+        if mime_type == "application/pdf":
+            if _is_pdf_parse_failure(exc):
+                logger.warning(
+                    "OpenRouter no pudo parsear el PDF con cache OCR; activando fallback a texto local",
+                    extra={
+                        "source_path": source_path,
+                        "model": model,
+                        "pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
+                    },
+                )
+            elif "annotations" not in str(exc).lower():
+                raise
+        else:
+            raise
+
+        fallback_text_path = _extract_pdf_text_to_temp(source_path)
+        try:
+            fallback_content, fallback_plugins = _build_content(
+                fallback_text_path,
+                identificacion,
+                "text/plain",
+            )
+            fallback_messages = [{"role": "user", "content": fallback_content}]
+            return call_openrouter_chat(
+                messages=fallback_messages,
+                model=model,
+                system_prompt=system_prompt,
+                api_key=api_key,
+                response_format=response_format,
+                plugins=fallback_plugins,
+                enable_response_healing=True,
+                reasoning={"effort": "xhigh", "exclude": True},
+            )
+        finally:
+            try:
+                os.unlink(fallback_text_path)
+            except OSError:
+                logger.warning(
+                    "No se pudo eliminar el archivo temporal del fallback OpenRouter",
+                    extra={"fallback_text_path": fallback_text_path},
+                )
+
 def _build_content(source_path: str, identificacion: str, mime_type: str) -> tuple[list[dict], list[dict] | None]:
     """
     Construye el array de content y la lista de plugins para OpenRouter.
@@ -348,6 +600,8 @@ def run_explainer_or(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
+    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
     start = time.time()
@@ -361,19 +615,21 @@ def run_explainer_or(
             "model": model,
         },
     )
+    response_format = _resolve_openrouter_response_format(
+        model=model,
+        json_schema=OR_EXPLAINER_JSON_SCHEMA,
+    )
 
-    content, plugins = _build_content(source_path, identificacion, mime_type)
-    messages = [{"role": "user", "content": content}]
-
-    raw, usage = call_openrouter_chat(
-        messages=messages,
+    raw, usage = _call_openrouter_json_with_pdf_fallback(
+        source_path=source_path,
+        identificacion=identificacion,
+        mime_type=mime_type,
         model=model,
         system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
+        response_format=response_format,
         api_key=api_key,
-        response_format="json_object",
-        plugins=plugins,
-        enable_response_healing=True,
-        reasoning={"effort": "xhigh", "exclude": True},
+        pdf_cache_entry=pdf_cache_entry,
+        page_numbers=page_numbers,
     )
 
     result = _validate_full_explainer_payload(raw)
@@ -407,6 +663,8 @@ def run_subpart_explainer_or(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
+    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer de subparte vía OpenRouter — retorna solo `desarrollo` estructurado."""
     start = time.time()
@@ -420,19 +678,21 @@ def run_subpart_explainer_or(
             "model": model,
         },
     )
+    response_format = _resolve_openrouter_response_format(
+        model=model,
+        json_schema=OR_SUBPART_EXPLAINER_JSON_SCHEMA,
+    )
 
-    content, plugins = _build_content(source_path, identificacion, mime_type)
-    messages = [{"role": "user", "content": content}]
-
-    raw, usage = call_openrouter_chat(
-        messages=messages,
+    raw, usage = _call_openrouter_json_with_pdf_fallback(
+        source_path=source_path,
+        identificacion=identificacion,
+        mime_type=mime_type,
         model=model,
         system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
+        response_format=response_format,
         api_key=api_key,
-        response_format="json_object",
-        plugins=plugins,
-        enable_response_healing=True,
-        reasoning={"effort": "xhigh", "exclude": True},
+        pdf_cache_entry=pdf_cache_entry,
+        page_numbers=page_numbers,
     )
 
     result = _validate_subpart_explainer_payload(raw)
