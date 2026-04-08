@@ -28,10 +28,21 @@ def _make_response(*, status_code: int, payload: dict | None = None, text: str |
     return response
 
 
-def _success_payload(content: str, *, annotations: list[dict] | None = None) -> dict:
+def _success_payload(
+    content: str,
+    *,
+    annotations: list[dict] | None = None,
+    cost: float | None = None,
+) -> dict:
     message = {"content": content}
     if annotations is not None:
         message["annotations"] = annotations
+    usage: dict = {
+        "prompt_tokens": 13,
+        "completion_tokens": 8,
+    }
+    if cost is not None:
+        usage["cost"] = cost
     return {
         "choices": [
             {
@@ -39,11 +50,51 @@ def _success_payload(content: str, *, annotations: list[dict] | None = None) -> 
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
-            "prompt_tokens": 13,
-            "completion_tokens": 8,
-        },
+        "usage": usage,
     }
+
+
+def test_call_openrouter_chat_parses_usage_cost_into_usage_object(monkeypatch):
+    def _fake_post(url, headers, json, timeout):
+        return _make_response(
+            status_code=200,
+            payload=_success_payload(
+                "texto plano",
+                cost=0.00014,
+            ),
+        )
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+    )
+
+    assert getattr(usage, "cost_usd") == 0.00014
+
+
+def test_call_openrouter_chat_sets_cost_usd_none_when_missing(monkeypatch):
+    def _fake_post(url, headers, json, timeout):
+        return _make_response(
+            status_code=200,
+            payload=_success_payload("texto plano"),
+        )
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+    )
+
+    assert getattr(usage, "cost_usd", None) is None
 
 
 def _pdf_annotations_with_marked_pages(*pages: int) -> list[dict]:
