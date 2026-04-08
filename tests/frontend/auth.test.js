@@ -9,7 +9,7 @@ import * as storageModule from '../../frontend/js/storage.js';
 
 describe('auth.js', () => {
   beforeEach(() => {
-    state.user = null;
+    state.user = { id: 'user-123' };
     state.hasApiKey = false;
     state.apiKeyStatus = 'loading';
     vi.mocked(global.fetch).mockReset();
@@ -56,7 +56,6 @@ describe('auth.js', () => {
     });
 
     it('calls setCachedApiKeyStatus with userId and result', async () => {
-      state.user = { id: 'user-123' };
       vi.spyOn(apiModule, 'api').mockResolvedValue({ has_api_key: true });
 
       await refreshApiKeyStatus();
