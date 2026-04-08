@@ -25,14 +25,16 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 
 ### Modelo de Seguridad
 
-| Aspecto | Implementación |
-|---------|----------------|
-| **Almacenamiento** | API keys encriptadas en Supabase (Postgres), nunca en texto plano |
-| **Encriptación** | AES-128-CBC + HMAC-SHA256 vía Fernet |
-| **Clave de encriptación** | Derivada por usuario: `SHA256(MASTER_KEY + user_id)` |
-| **Acceso** | Row Level Security (RLS): cada usuario solo accede a sus propias keys |
-| **Transmisión** | HTTPS/TLS 1.3 en todo momento |
-| **Logs** | Solo versiones enmascaradas (`AIza...XXXX`, `sk-or-...XXXX`) |
+
+| Aspecto                   | Implementación                                                        |
+| ------------------------- | --------------------------------------------------------------------- |
+| **Almacenamiento**        | API keys encriptadas en Supabase (Postgres), nunca en texto plano     |
+| **Encriptación**          | AES-128-CBC + HMAC-SHA256 vía Fernet                                  |
+| **Clave de encriptación** | Derivada por usuario: `SHA256(MASTER_KEY + user_id)`                  |
+| **Acceso**                | Row Level Security (RLS): cada usuario solo accede a sus propias keys |
+| **Transmisión**           | HTTPS/TLS 1.3 en todo momento                                         |
+| **Logs**                  | Solo versiones enmascaradas (`AIza...XXXX`, `sk-or-...XXXX`)          |
+
 
 ### Flujo de Seguridad
 
@@ -81,23 +83,26 @@ La app usa Supabase para usuarios, proyectos y almacenamiento de PDFs.
 
 1. Entra en [supabase.com](https://supabase.com) y crea un proyecto.
 2. En **Project Settings → API** anota:
-   - **Project URL** → `SUPABASE_URL`
-   - **anon public** → `SUPABASE_ANON_KEY` (frontend)
-   - **service_role** → `SUPABASE_SERVICE_ROLE_KEY` (backend)
-   - **JWT Secret** → `SUPABASE_JWT_SECRET`
+  - **Project URL** → `SUPABASE_URL`
+  - **anon public** → `SUPABASE_ANON_KEY` (frontend)
+  - **service_role** → `SUPABASE_SERVICE_ROLE_KEY` (backend)
+  - **JWT Secret** → `SUPABASE_JWT_SECRET`
 
 ### 2. Ejecutar las migraciones
 
 En el **SQL Editor** de Supabase, ejecuta en orden:
 
-1. **`supabase/migrations/20260222100000_initial_explainer.sql`**
-   - Crea la tabla `projects`, RLS y el bucket `project-pdfs`
-
-2. **`supabase/migrations/20260222120000_user_api_keys.sql`**
-   - Crea la tabla `user_api_keys` para almacenar API keys encriptadas por usuario (BYOK)
-   - Aplica políticas RLS estrictas para aislamiento por usuario
+1. `**supabase/migrations/20260222100000_initial_explainer.sql`**
+  - Crea la tabla `projects`, RLS y el bucket `project-pdfs`
+2. `**supabase/migrations/20260222120000_user_api_keys.sql`**
+  - Crea la tabla `user_api_keys` para almacenar API keys encriptadas por usuario (BYOK)
+  - Aplica políticas RLS estrictas para aislamiento por usuario
+3. `**supabase/migrations/20260408120000_openrouter_pdf_ocr_cache.sql**`
+  - Crea la tabla `openrouter_pdf_ocr_cache` (caché del OCR de OpenRouter por hash de PDF + motor), para que el backend no repita trabajo tras scale-to-zero en Koyeb.
 
 Si el bucket no se crea por SQL, créalo manualmente en **Storage → New bucket** con nombre `project-pdfs` (privado).
+
+**Caché OCR (opcional):** Con `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` ya configurados en el backend, el modo por defecto (`OPENROUTER_OCR_CACHE_BACKEND=auto`) persiste el caché en Postgres. No hace falta un secret nuevo. Para forzar solo disco local, define `OPENROUTER_OCR_CACHE_BACKEND=disk`.
 
 ### 3. URLs de redirección (Auth)
 
@@ -111,6 +116,7 @@ En **Authentication → URL Configuration**:
 ## Despliegue a Koyeb (Backend)
 
 Koyeb ofrece un plan **Starter gratuito** con:
+
 - 1 Web Service gratuito (suficiente para esta app)
 - Scale-to-zero (la app se detiene tras ~5 min de inactividad)
 - Autoscaling (se reinicia automáticamente al recibir tráfico)
@@ -119,16 +125,18 @@ Koyeb ofrece un plan **Starter gratuito** con:
 ### Paso 1: Instalar Koyeb CLI
 
 **macOS/Linux:**
+
 ```bash
 brew install koyeb/tap/koyeb
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 iwr https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.ps1 -useb | iex
 ```
 
-**O descarga desde:** https://github.com/koyeb/koyeb-cli/releases
+**O descarga desde:** [https://github.com/koyeb/koyeb-cli/releases](https://github.com/koyeb/koyeb-cli/releases)
 
 ### Paso 2: Login en Koyeb
 
@@ -141,36 +149,41 @@ Se abrirá el navegador para autenticación con GitHub.
 ### Paso 3: Crear el Servicio
 
 Opción A: **Desde el archivo koyeb.yaml** (recomendado)
+
 ```bash
 koyeb service create -f koyeb.yaml
 ```
 
 Opción B: **Desde el dashboard web**
-1. Ve a https://app.koyeb.com
+
+1. Ve a [https://app.koyeb.com](https://app.koyeb.com)
 2. Click "Create Service"
 3. Selecciona tu repositorio GitHub
 4. Selecciona **Dockerfile** como builder
 5. Configura:
-   - **Instance**: Free (0.1 vCPU, 512MB RAM)
-   - **Region**: Frankfurt (fra)
-   - **Scaling**: Autoscaling 0-1 instances
-   - **Port**: 8080
-   - **Health Check**: Puerto 8080, path `/api/settings/api-key/status`
+  - **Instance**: Free (0.1 vCPU, 512MB RAM)
+  - **Region**: Frankfurt (fra)
+  - **Scaling**: Autoscaling 0-1 instances
+  - **Port**: 8080
+  - **Health Check**: Puerto 8080, path `/api/settings/api-key/status`
 
 ### Paso 4: Configurar Secrets
 
 En el dashboard de Koyeb (tu servicio → Settings → Environment Variables):
 
-| Secret | Descripción |
-|--------|-------------|
-| `APP_ENCRYPTION_KEY` | Clave maestra para encriptar API keys. **Generar con:** `openssl rand -base64 32`. Obligatoria en producción. |
-| `SUPABASE_URL` | URL del proyecto Supabase |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key de Supabase |
-| `SUPABASE_JWT_SECRET` | JWT secret de Supabase |
-| `FRONTEND_URL` | URL del frontend en Vercel (para CORS) |
-| `ENVIRONMENT` | `production` |
+
+| Secret                      | Descripción                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `APP_ENCRYPTION_KEY`        | Clave maestra para encriptar API keys. **Generar con:** `openssl rand -base64 32`. Obligatoria en producción. |
+| `SUPABASE_URL`              | URL del proyecto Supabase                                                                                     |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key de Supabase                                                                                  |
+| `SUPABASE_JWT_SECRET`       | JWT secret de Supabase                                                                                        |
+| `FRONTEND_URL`              | URL del frontend en Vercel (para CORS)                                                                        |
+| `ENVIRONMENT`               | `production`                                                                                                  |
+
 
 **O vía CLI:**
+
 ```bash
 # APP_ENCRYPTION_KEY: genera con "openssl rand -base64 32" y pega el valor
 koyeb secret create APP_ENCRYPTION_KEY --value "tu-clave-generada"
@@ -191,6 +204,7 @@ koyeb service update explainer/explainer \
 ### Paso 5: Deploy
 
 El servicio se desplegará automáticamente. La URL será:
+
 ```
 https://[nombre-servicio]-[org].koyeb.app
 ```
@@ -206,6 +220,7 @@ koyeb service get explainer/explainer
 ```
 
 Prueba el health check:
+
 ```bash
 curl https://tu-app.koyeb.app/api/settings/api-key/status
 ```
@@ -233,6 +248,7 @@ vercel --prod
 ```
 
 Sigue las instrucciones:
+
 - Project name: `explainer` (o el que prefieras)
 - **Root Directory**: deja el raíz del repo (no solo `./frontend`) para que el build pueda ejecutar `npm run build`.
 
@@ -241,11 +257,10 @@ Sigue las instrucciones:
 En el dashboard de Vercel (tu proyecto → Settings):
 
 1. **Build & Development**
-   - **Build Command**: `npm run build` (genera `frontend/config.js` desde las variables de entorno).
-
+  - **Build Command**: `npm run build` (genera `frontend/config.js` desde las variables de entorno).
 2. **Environment Variables** (Settings → Environment Variables). Añade:
-   - `EXPLAINER_SUPABASE_URL` = tu Project URL de Supabase (ej: `https://xxx.supabase.co`)
-   - `EXPLAINER_SUPABASE_ANON_KEY` = clave **anon** de Supabase (Project Settings → API)
+  - `EXPLAINER_SUPABASE_URL` = tu Project URL de Supabase (ej: `https://xxx.supabase.co`)
+  - `EXPLAINER_SUPABASE_ANON_KEY` = clave **anon** de Supabase (Project Settings → API)
 
 Tras cada deploy, el script `scripts/generate-config.js` crea `frontend/config.js` con esas variables, así el frontend carga Supabase sin errores de MIME ni 404. En local, copia `frontend/config.example.js` a `frontend/config.js` y rellena los valores (o usa env en tu entorno).
 
@@ -268,15 +283,13 @@ El archivo `vercel.json` ya tiene configurada la URL de Koyeb. Si cambia, actual
 ### Test Funcional
 
 1. **Configurar API keys (BYOK)**:
-   - Ve a "Ajustes" y guarda tu API key de Gemini
-   - Si quieres usar MiniMax en el explainer, guarda además tu API key de OpenRouter
-   - Verifica que el estado muestra "Configurada"
-   - Recarga la página y confirma que persiste (sincronización multi-dispositivo)
-
+  - Ve a "Ajustes" y guarda tu API key de Gemini
+  - Si quieres usar MiniMax en el explainer, guarda además tu API key de OpenRouter
+  - Verifica que el estado muestra "Configurada"
+  - Recarga la página y confirma que persiste (sincronización multi-dispositivo)
 2. **Seguridad API keys**:
-   - Verifica que la API key nunca aparece en la interfaz después de guardar
-   - Los logs solo muestran versión enmascarada (`AIza...XXXX`)
-
+  - Verifica que la API key nunca aparece en la interfaz después de guardar
+  - Los logs solo muestran versión enmascarada (`AIza...XXXX`)
 3. **Crear proyecto**: Sube un PDF y verifica que procesa correctamente
 4. Procesamiento completo: segmentación, explicaciones, recorrido, recursos
 5. Verificar que SSE muestra progreso en tiempo real
@@ -364,6 +377,7 @@ vercel --prod
 ### "Failed to fetch"
 
 Verifica en Vercel:
+
 1. Los rewrites en `vercel.json` apuntan a la URL correcta de Koyeb
 2. Koyeb está corriendo (revisa el dashboard)
 
@@ -381,13 +395,15 @@ Verifica que `FRONTEND_URL` en los secrets de Koyeb coincida exactamente con tu 
 
 ## Costos
 
-| Servicio | Costo |
-|----------|-------|
-| Koyeb (Starter - scale-to-zero) | **$0/mes** |
-| Vercel (Hobby) | **$0/mes** |
-| Gemini API | **Paga cada usuario** (tú no pagas) |
-| OpenRouter API | **Opcional; paga cada usuario** |
-| **Total** | **$0/mes** |
+
+| Servicio                        | Costo                               |
+| ------------------------------- | ----------------------------------- |
+| Koyeb (Starter - scale-to-zero) | **$0/mes**                          |
+| Vercel (Hobby)                  | **$0/mes**                          |
+| Gemini API                      | **Paga cada usuario** (tú no pagas) |
+| OpenRouter API                  | **Opcional; paga cada usuario**     |
+| **Total**                       | **$0/mes**                          |
+
 
 **Nota**: Koyeb cobra por segundo de uso después del free tier, pero con scale-to-zero y uso personal/development, el costo será $0.
 
@@ -398,3 +414,4 @@ Verifica que `FRONTEND_URL` en los secrets de Koyeb coincida exactamente con tu 
 - [Koyeb Docs](https://www.koyeb.com/docs)
 - [Vercel Docs](https://vercel.com/docs)
 - [Gemini API Docs](https://ai.google.dev/docs)
+

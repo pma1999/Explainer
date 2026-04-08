@@ -18,6 +18,7 @@ import requests
 from filelock import FileLock
 from pypdf import PdfReader
 
+from backend import supabase_ocr_cache
 from backend.logging_config import get_logger
 from backend.pdf_utils import extract_pages
 
@@ -75,13 +76,6 @@ class OpenRouterChatResult:
     content: str | dict[str, Any]
     usage: OpenRouterUsage
     assistant_message: OpenRouterAssistantMessage
-
-
-@dataclass(frozen=True, slots=True)
-class OpenRouterJsonSchemaResponseFormat:
-    name: str
-    schema: dict[str, Any]
-    strict: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +236,28 @@ def _default_pdf_cache_dir() -> Path:
     if env_value:
         return Path(env_value)
     return Path.cwd() / "data" / "openrouter_pdf_cache"
+
+
+def _ocr_cache_backend_for_call(cache_dir: str | None) -> str:
+    """Return ``disk`` or ``supabase``. Explicit ``cache_dir`` forces local disk (e.g. tests)."""
+    if cache_dir is not None:
+        return "disk"
+    raw = os.environ.get("OPENROUTER_OCR_CACHE_BACKEND", "auto").strip().lower()
+    if raw in ("", "auto"):
+        if os.environ.get("SUPABASE_URL", "").strip() and os.environ.get(
+            "SUPABASE_SERVICE_ROLE_KEY", ""
+        ).strip():
+            return "supabase"
+        return "disk"
+    if raw == "disk":
+        return "disk"
+    if raw == "supabase":
+        return "supabase"
+    logger.warning(
+        "OPENROUTER_OCR_CACHE_BACKEND inválido %r; usando disk",
+        raw,
+    )
+    return "disk"
 
 
 def _ensure_cache_dir(cache_dir: Path) -> None:
@@ -588,6 +604,36 @@ def _build_pdf_page_index(
     return tuple(normalized_pages)
 
 
+def _pdf_cache_payload_dict(
+    *,
+    source_sha256: str,
+    engine: str,
+    assistant_message: OpenRouterAssistantMessage | None,
+    document_page_count: int | None,
+    page_index: tuple[OpenRouterPdfParsedPage, ...],
+) -> dict[str, Any]:
+    return {
+        "version": _PDF_CACHE_VERSION,
+        "source_sha256": source_sha256,
+        "engine": engine,
+        "assistant_message": _assistant_message_to_dict(assistant_message),
+        "document_page_count": document_page_count,
+        "page_index": _serialize_page_index(page_index),
+    }
+
+
+def _load_pdf_parse_cache_from_mapping(
+    cached: dict[str, Any],
+) -> tuple[OpenRouterAssistantMessage | None, tuple[OpenRouterPdfParsedPage, ...], int | None]:
+    assistant_message = _assistant_message_from_dict(cached.get("assistant_message"))
+    page_index = _page_index_from_serialized(cached.get("page_index"))
+    document_page_count = cached.get("document_page_count")
+    if not isinstance(document_page_count, int) or document_page_count < 1:
+        document_page_count = None
+
+    return assistant_message, page_index, document_page_count
+
+
 def _write_pdf_parse_cache(
     *,
     cache_path: Path,
@@ -597,14 +643,13 @@ def _write_pdf_parse_cache(
     document_page_count: int | None,
     page_index: tuple[OpenRouterPdfParsedPage, ...],
 ) -> None:
-    serialized = {
-        "version": _PDF_CACHE_VERSION,
-        "source_sha256": source_sha256,
-        "engine": engine,
-        "assistant_message": _assistant_message_to_dict(assistant_message),
-        "document_page_count": document_page_count,
-        "page_index": _serialize_page_index(page_index),
-    }
+    serialized = _pdf_cache_payload_dict(
+        source_sha256=source_sha256,
+        engine=engine,
+        assistant_message=assistant_message,
+        document_page_count=document_page_count,
+        page_index=page_index,
+    )
 
     fd, tmp_path = tempfile.mkstemp(
         suffix=".tmp",
@@ -625,14 +670,9 @@ def _load_pdf_parse_cache(
 ) -> tuple[OpenRouterAssistantMessage | None, tuple[OpenRouterPdfParsedPage, ...], int | None]:
     with open(cache_path, "r", encoding="utf-8") as f:
         cached = json.load(f)
-
-    assistant_message = _assistant_message_from_dict(cached.get("assistant_message"))
-    page_index = _page_index_from_serialized(cached.get("page_index"))
-    document_page_count = cached.get("document_page_count")
-    if not isinstance(document_page_count, int) or document_page_count < 1:
-        document_page_count = None
-
-    return assistant_message, page_index, document_page_count
+    if not isinstance(cached, dict):
+        raise ValueError("La raíz del cache debe ser un objeto JSON.")
+    return _load_pdf_parse_cache_from_mapping(cached)
 
 
 def _prime_pdf_page_group(
@@ -1167,12 +1207,20 @@ def get_or_prime_pdf_parse_cache(
     """
     Carga el cache OCR incremental de un PDF o completa solo las páginas faltantes.
     El cache se indexa por SHA-256 del documento fuente + engine de parseo.
+
+    Persistencia: con ``OPENROUTER_OCR_CACHE_BACKEND=auto`` (por defecto) y variables
+    ``SUPABASE_URL`` + ``SUPABASE_SERVICE_ROLE_KEY``, el cache se guarda en Postgres
+    (tabla ``openrouter_pdf_ocr_cache``) y sobrevive a reinicios del contenedor.
+    Si se pasa ``cache_dir``, se fuerza almacenamiento en disco. Si Supabase falla,
+    se degrada al directorio local (``OPENROUTER_PDF_CACHE_DIR`` o
+    ``data/openrouter_pdf_cache``).
     """
     if not os.path.isfile(source_path):
         raise OpenRouterError(f"PDF no encontrado para cache de parseo: {source_path}")
 
     source_sha256 = _sha256_file(source_path)
     normalized_expected_pages = _normalize_expected_page_numbers(expected_page_numbers)
+    backend = _ocr_cache_backend_for_call(cache_dir)
     resolved_cache_dir = Path(cache_dir) if cache_dir else _default_pdf_cache_dir()
     _ensure_cache_dir(resolved_cache_dir)
     cache_path = _pdf_cache_path(source_sha256, engine, resolved_cache_dir)
@@ -1180,26 +1228,111 @@ def get_or_prime_pdf_parse_cache(
     cache_file_lock = _pdf_cache_file_lock(cache_path)
     file_name = filename or os.path.basename(source_path) or "document.pdf"
 
-    with cache_file_lock:
-        with cache_lock:
+    disk_fallback = False
+    conflict_attempts = 0
+    max_conflicts = supabase_ocr_cache.MAX_WRITE_ATTEMPTS
+
+    with cache_lock:
+        while True:
             assistant_message: OpenRouterAssistantMessage | None = None
             page_index: tuple[OpenRouterPdfParsedPage, ...] = ()
             document_page_count: int | None = None
+            row_version: int | None = None
+            storage_ref = str(cache_path)
+            use_supabase = backend == "supabase" and not disk_fallback
+            loaded_from_supabase = False
 
-            if cache_path.is_file():
+            if use_supabase:
                 try:
-                    assistant_message, page_index, document_page_count = _load_pdf_parse_cache(cache_path)
-                    if not page_index and assistant_message and assistant_message.annotations:
+                    payload, row_version = supabase_ocr_cache.fetch_cache(source_sha256, engine)
+                    if payload is not None:
                         try:
-                            page_index = _build_pdf_page_index(
-                                annotations=assistant_message.annotations,
-                                expected_page_numbers=normalized_expected_pages,
+                            assistant_message, page_index, document_page_count = (
+                                _load_pdf_parse_cache_from_mapping(payload)
                             )
-                        except OpenRouterError:
-                            if normalized_expected_pages:
-                                raise
+                        except (TypeError, ValueError, OpenRouterError) as exc:
+                            logger.warning(
+                                "Payload de cache OCR Supabase inválido; se ignorará",
+                                extra={"engine": engine, "error": str(exc)},
+                            )
+                            assistant_message = None
                             page_index = ()
+                            document_page_count = None
+                            row_version = None
                         else:
+                            loaded_from_supabase = True
+                            storage_ref = supabase_ocr_cache.supabase_cache_uri(
+                                source_sha256, engine
+                            )
+                except Exception as exc:
+                    logger.warning(
+                        "Cache OCR Supabase no disponible; usando disco local: %s",
+                        exc,
+                        extra={"error_type": type(exc).__name__},
+                    )
+                    disk_fallback = True
+                    use_supabase = False
+                    row_version = None
+
+            if not loaded_from_supabase and (not use_supabase):
+                if cache_path.is_file():
+                    try:
+                        assistant_message, page_index, document_page_count = _load_pdf_parse_cache(
+                            cache_path
+                        )
+                        storage_ref = str(cache_path)
+                    except (OSError, json.JSONDecodeError, TypeError, ValueError, OpenRouterError) as exc:
+                        logger.warning(
+                            "Cache de parseo OpenRouter inválida; se regenerará",
+                            extra={
+                                "cache_path": str(cache_path),
+                                "engine": engine,
+                                "error": str(exc),
+                            },
+                        )
+                        assistant_message = None
+                        page_index = ()
+                        document_page_count = None
+
+            if not page_index and assistant_message and assistant_message.annotations:
+                try:
+                    page_index = _build_pdf_page_index(
+                        annotations=assistant_message.annotations,
+                        expected_page_numbers=normalized_expected_pages,
+                    )
+                except OpenRouterError:
+                    if normalized_expected_pages:
+                        raise
+                    page_index = ()
+                else:
+                    rebuild_payload = _pdf_cache_payload_dict(
+                        source_sha256=source_sha256,
+                        engine=engine,
+                        assistant_message=assistant_message,
+                        document_page_count=document_page_count,
+                        page_index=page_index,
+                    )
+                    if use_supabase:
+                        ok, new_rv = supabase_ocr_cache.try_write_cache(
+                            source_sha256,
+                            engine,
+                            rebuild_payload,
+                            row_version,
+                        )
+                        if not ok:
+                            conflict_attempts += 1
+                            if conflict_attempts >= max_conflicts:
+                                logger.warning(
+                                    "Demasiados conflictos al persistir índice OCR reconstruido; "
+                                    "usando disco local"
+                                )
+                                disk_fallback = True
+                                continue
+                            time.sleep(min(0.05 * (2 ** min(conflict_attempts, 6)), 1.0))
+                            continue
+                        row_version = new_rv
+                    else:
+                        with cache_file_lock:
                             _write_pdf_parse_cache(
                                 cache_path=cache_path,
                                 source_sha256=source_sha256,
@@ -1208,18 +1341,6 @@ def get_or_prime_pdf_parse_cache(
                                 document_page_count=document_page_count,
                                 page_index=page_index,
                             )
-                except (OSError, json.JSONDecodeError, TypeError, ValueError, OpenRouterError) as exc:
-                    logger.warning(
-                        "Cache de parseo OpenRouter inválida; se regenerará",
-                        extra={
-                            "cache_path": str(cache_path),
-                            "engine": engine,
-                            "error": str(exc),
-                        },
-                    )
-                    assistant_message = None
-                    page_index = ()
-                    document_page_count = None
 
             effective_expected_pages = normalized_expected_pages
             if not effective_expected_pages:
@@ -1240,7 +1361,7 @@ def get_or_prime_pdf_parse_cache(
                     source_sha256=source_sha256,
                     engine=engine,
                     assistant_message=assistant_message,
-                    cache_path=str(cache_path),
+                    cache_path=storage_ref,
                     cache_hit=True,
                     expected_page_numbers=effective_expected_pages,
                     cached_page_numbers=cached_page_numbers,
@@ -1251,7 +1372,7 @@ def get_or_prime_pdf_parse_cache(
                 logger.info(
                     "Completando cache OCR incremental con páginas faltantes",
                     extra={
-                        "cache_path": str(cache_path),
+                        "cache_ref": storage_ref,
                         "engine": engine,
                         "requested_pages_count": len(effective_expected_pages),
                         "cached_pages_count": len(cached_page_numbers),
@@ -1272,20 +1393,46 @@ def get_or_prime_pdf_parse_cache(
                     page_index = _merge_page_indexes(page_index, primed_pages)
 
                 cached_page_numbers = _page_numbers_from_index(page_index)
-                _write_pdf_parse_cache(
-                    cache_path=cache_path,
+                prime_payload = _pdf_cache_payload_dict(
                     source_sha256=source_sha256,
                     engine=engine,
                     assistant_message=assistant_message,
                     document_page_count=document_page_count,
                     page_index=page_index,
                 )
+                if use_supabase:
+                    ok, _ = supabase_ocr_cache.try_write_cache(
+                        source_sha256,
+                        engine,
+                        prime_payload,
+                        row_version,
+                    )
+                    if not ok:
+                        conflict_attempts += 1
+                        if conflict_attempts >= max_conflicts:
+                            logger.warning(
+                                "Demasiados conflictos al escribir cache OCR Supabase; usando solo disco para esta ejecución"
+                            )
+                            disk_fallback = True
+                            continue
+                        time.sleep(min(0.05 * (2 ** min(conflict_attempts, 6)), 1.0))
+                        continue
+                else:
+                    with cache_file_lock:
+                        _write_pdf_parse_cache(
+                            cache_path=cache_path,
+                            source_sha256=source_sha256,
+                            engine=engine,
+                            assistant_message=assistant_message,
+                            document_page_count=document_page_count,
+                            page_index=page_index,
+                        )
 
             return OpenRouterPdfParseCacheEntry(
                 source_sha256=source_sha256,
                 engine=engine,
                 assistant_message=assistant_message,
-                cache_path=str(cache_path),
+                cache_path=storage_ref,
                 cache_hit=not missing_pages,
                 expected_page_numbers=effective_expected_pages,
                 cached_page_numbers=cached_page_numbers,
