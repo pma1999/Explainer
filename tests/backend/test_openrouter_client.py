@@ -32,7 +32,7 @@ def _success_payload(
     content: str,
     *,
     annotations: list[dict] | None = None,
-    cost: float | None = None,
+    cost: object | None = None,
 ) -> dict:
     message = {"content": content}
     if annotations is not None:
@@ -94,6 +94,64 @@ def test_call_openrouter_chat_sets_cost_usd_none_when_missing(monkeypatch):
         response_format="text",
     )
 
+    assert getattr(usage, "cost_usd", None) is None
+
+
+@pytest.mark.parametrize(
+    ("raw_cost", "expected"),
+    [
+        (True, None),
+        (float("inf"), None),
+        (float("nan"), None),
+        (" 1e-6 ", 0.000001),
+        ("nan", None),
+        ("inf", None),
+    ],
+)
+def test_call_openrouter_chat_hardens_usage_cost_parsing(monkeypatch, raw_cost, expected):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: _make_response(
+            status_code=200,
+            payload=_success_payload("texto plano", cost=raw_cost),
+        ),
+    )
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+        max_retries=1,
+    )
+
+    assert getattr(usage, "cost_usd", None) == expected
+
+
+@pytest.mark.parametrize("usage_value", [None, [], "oops", 123, True])
+def test_call_openrouter_chat_treats_non_dict_usage_as_empty_dict(monkeypatch, usage_value):
+    payload = _success_payload("texto plano", cost=0.00014)
+    payload["usage"] = usage_value
+
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: _make_response(status_code=200, payload=payload),
+    )
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+        max_retries=1,
+    )
+
+    assert usage.prompt_token_count == 0
+    assert usage.candidates_token_count == 0
     assert getattr(usage, "cost_usd", None) is None
 
 

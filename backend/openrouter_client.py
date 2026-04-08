@@ -1001,6 +1001,8 @@ def call_openrouter_chat_full(
             finish_reason = choice.get("finish_reason", "unknown")
 
             usage_raw = data.get("usage", {})
+            if not isinstance(usage_raw, dict):
+                usage_raw = {}
             raw_cost = usage_raw.get("cost")
             cost_usd: float | None = None
             if isinstance(raw_cost, bool):
