@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -24,6 +25,9 @@ logger = get_logger("backend.openrouter_client")
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_RESPONSE_HEALING_PLUGIN = {"id": "response-healing"}
+_OPENROUTER_COST_NUMBER_RE = re.compile(
+    r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+)
 _PDF_PAGE_MARKER_RE = re.compile(r"— Página\s+(\d+)\s*/\s*(\d+)\s+—")
 _PDF_CACHE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 _PDF_CACHE_LOCKS_GUARD = threading.Lock()
@@ -33,12 +37,19 @@ _PDF_CACHE_VERSION = 2
 class OpenRouterUsage:
     """Wrapper de usage con atributos compatibles con Gemini para _update_usage."""
 
-    def __init__(self, prompt_tokens: int, completion_tokens: int):
+    def __init__(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        cost_usd: float | None = None,
+    ):
         self.prompt_token_count = prompt_tokens
         self.candidates_token_count = completion_tokens
         self.thoughts_token_count = 0
         self.tool_use_prompt_token_count = 0
         self.total_token_count = prompt_tokens + completion_tokens
+        self.cost_usd = cost_usd
 
 
 class OpenRouterError(Exception):
@@ -993,9 +1004,65 @@ def call_openrouter_chat_full(
             finish_reason = choice.get("finish_reason", "unknown")
 
             usage_raw = data.get("usage", {})
+            if not isinstance(usage_raw, dict):
+                usage_raw = {}
+
+            def _parse_usage_token_count(raw: Any) -> int:
+                if isinstance(raw, bool):
+                    return 0
+
+                candidate: float | None
+                if isinstance(raw, int):
+                    candidate = float(raw)
+                elif isinstance(raw, float):
+                    candidate = raw
+                elif isinstance(raw, str):
+                    normalized = raw.strip()
+                    if not normalized or not _OPENROUTER_COST_NUMBER_RE.fullmatch(normalized):
+                        return 0
+                    try:
+                        candidate = float(normalized)
+                    except ValueError:
+                        return 0
+                else:
+                    return 0
+
+                if not math.isfinite(candidate):
+                    return 0
+
+                if candidate < 0:
+                    candidate = 0.0
+
+                try:
+                    coerced = int(candidate)
+                except (OverflowError, ValueError):
+                    return 0
+                return max(coerced, 0)
+
+            raw_cost = usage_raw.get("cost")
+            cost_usd: float | None = None
+            if isinstance(raw_cost, bool):
+                cost_usd = None
+            elif isinstance(raw_cost, (int, float)):
+                candidate = float(raw_cost)
+                if math.isfinite(candidate) and candidate >= 0:
+                    cost_usd = round(candidate, 6)
+            elif isinstance(raw_cost, str):
+                normalized = raw_cost.strip()
+                if normalized and _OPENROUTER_COST_NUMBER_RE.fullmatch(normalized):
+                    try:
+                        candidate = float(normalized)
+                    except ValueError:
+                        cost_usd = None
+                    else:
+                        if math.isfinite(candidate) and candidate >= 0:
+                            cost_usd = round(candidate, 6)
             usage = OpenRouterUsage(
-                prompt_tokens=usage_raw.get("prompt_tokens", 0),
-                completion_tokens=usage_raw.get("completion_tokens", 0),
+                prompt_tokens=_parse_usage_token_count(usage_raw.get("prompt_tokens", 0)),
+                completion_tokens=_parse_usage_token_count(
+                    usage_raw.get("completion_tokens", 0)
+                ),
+                cost_usd=cost_usd,
             )
 
             if not content_text:

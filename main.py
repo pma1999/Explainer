@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import os
 import time
 from contextlib import asynccontextmanager
@@ -1279,7 +1280,17 @@ async def _process_project(
             cumulative_usage["candidates_tokens"] += c
             cumulative_usage["thoughts_tokens"] += t
             cumulative_usage["total_tokens"] += tt
-            cost = calculate_cost(cost_model, usage_meta)
+            raw_cost_usd = getattr(usage_meta, "cost_usd", None)
+            if (
+                isinstance(raw_cost_usd, (int, float))
+                and math.isfinite(raw_cost_usd)
+                and raw_cost_usd >= 0
+            ):
+                cost = round(float(raw_cost_usd), 6)
+                cost_source = "openrouter_real"
+            else:
+                cost = calculate_cost(cost_model, usage_meta)
+                cost_source = "estimated_pricing"
             cumulative_usage["total_cost"] += cost
             update_project(project_id, user_id, {"usage": cumulative_usage})
 
@@ -1288,6 +1299,7 @@ async def _process_project(
                 extra={
                     "phase": phase,
                     "cost_model": cost_model,
+                    "cost_source": cost_source,
                     "tokens_this_call": tt,
                     "cost_this_call": round(cost, 6),
                     "cumulative_total": cumulative_usage["total_tokens"],
