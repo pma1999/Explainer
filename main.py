@@ -1,6 +1,7 @@
 """Explainer API con autenticación Supabase y persistencia en Postgres + Storage."""
 
 import asyncio
+import concurrent.futures
 import json
 import math
 import os
@@ -116,9 +117,21 @@ def _resolve_explainer_model(explainer_provider: ExplainerProvider) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("[Startup] Explainer API iniciada - Persistencia en Supabase")
-    yield
-    logger.info("[Shutdown] Cerrando aplicación")
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=64,
+        thread_name_prefix="explainer-worker",
+    )
+    loop = asyncio.get_event_loop()
+    loop.set_default_executor(executor)
+    logger.info(
+        "[Startup] Explainer API iniciada - Persistencia en Supabase "
+        "(ThreadPoolExecutor max_workers=64)"
+    )
+    try:
+        yield
+    finally:
+        executor.shutdown(wait=False)
+        logger.info("[Shutdown] Cerrando aplicación y ThreadPoolExecutor")
 
 
 app = FastAPI(title="Explainer API", lifespan=lifespan)
@@ -1268,7 +1281,7 @@ async def _process_project(
         if use_openrouter_explainer:
             cumulative_usage["openrouter_pdf_parser_engine"] = OPENROUTER_PDF_PARSER_ENGINE
             cumulative_usage["openrouter_pdf_priming_model"] = OPENROUTER_PDF_PRIMING_MODEL
-        update_project(project_id, user_id, {"usage": cumulative_usage})
+        await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
 
         usage_lock = asyncio.Lock()
 
@@ -1297,7 +1310,6 @@ async def _process_project(
                 cost = calculate_cost(cost_model, usage_meta)
                 cost_source = "estimated_pricing"
             cumulative_usage["total_cost"] += cost
-            update_project(project_id, user_id, {"usage": cumulative_usage})
 
             logger.debug(
                 f"[Process] Uso de tokens actualizado - fase: {phase}",
@@ -1315,6 +1327,7 @@ async def _process_project(
         async def _locked_apply_usage(usage_meta, phase: str = "unknown", *, cost_model: str) -> None:
             async with usage_lock:
                 _update_usage(usage_meta, phase=phase, cost_model=cost_model)
+                await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
 
         # Determine source type and get file_uri
         source_type = project.get("source_type", "pdf")
@@ -1805,7 +1818,7 @@ async def _process_project(
                 )
 
             partes_contenido[str(part_id)]["status"] = "processing"
-            update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+            await asyncio.to_thread(update_project, project_id, user_id, {"partes_contenido": partes_contenido})
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
             async with part_semaphore:
@@ -2106,6 +2119,7 @@ async def _process_project(
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
                     if usage_res:
                         _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=MODEL_AGENTS)
+                    await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
                     await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
                 # Store explainer (assembled) and notify
