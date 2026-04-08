@@ -33,13 +33,15 @@ def _success_payload(
     *,
     annotations: list[dict] | None = None,
     cost: object | None = None,
+    prompt_tokens: object = 13,
+    completion_tokens: object = 8,
 ) -> dict:
     message = {"content": content}
     if annotations is not None:
         message["annotations"] = annotations
     usage: dict = {
-        "prompt_tokens": 13,
-        "completion_tokens": 8,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
     }
     if cost is not None:
         usage["cost"] = cost
@@ -97,6 +99,50 @@ def test_call_openrouter_chat_sets_cost_usd_none_when_missing(monkeypatch):
     assert getattr(usage, "cost_usd", None) is None
 
 
+def test_call_openrouter_chat_sets_cost_usd_none_when_negative_numeric(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: _make_response(
+            status_code=200,
+            payload=_success_payload("texto plano", cost=-0.01),
+        ),
+    )
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+        max_retries=1,
+    )
+
+    assert getattr(usage, "cost_usd", None) is None
+
+
+def test_call_openrouter_chat_sets_cost_usd_none_when_negative_string(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: _make_response(
+            status_code=200,
+            payload=_success_payload("texto plano", cost=" -0.01 "),
+        ),
+    )
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+        max_retries=1,
+    )
+
+    assert getattr(usage, "cost_usd", None) is None
+
+
 @pytest.mark.parametrize(
     ("raw_cost", "expected"),
     [
@@ -128,6 +174,34 @@ def test_call_openrouter_chat_hardens_usage_cost_parsing(monkeypatch, raw_cost, 
     )
 
     assert getattr(usage, "cost_usd", None) == expected
+
+
+def test_call_openrouter_chat_parses_string_tokens_to_int(monkeypatch):
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: _make_response(
+            status_code=200,
+            payload=_success_payload(
+                "texto plano",
+                prompt_tokens="13",
+                completion_tokens="8",
+            ),
+        ),
+    )
+
+    _, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve texto",
+        api_key="sk-or-v1-test",
+        response_format="text",
+        max_retries=1,
+    )
+
+    assert usage.prompt_token_count == 13
+    assert usage.candidates_token_count == 8
+    assert usage.total_token_count == 21
 
 
 @pytest.mark.parametrize("usage_value", [None, [], "oops", 123, True])
