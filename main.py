@@ -1383,7 +1383,7 @@ async def _process_project(
                 resolved_source_url = source_metadata.get("resolved_url") or source_url
 
             if extraction_usage:
-                _update_usage(extraction_usage, phase="web_extraction", cost_model=MODEL_AGENTS)
+                await _locked_apply_usage(extraction_usage, phase="web_extraction", cost_model=MODEL_AGENTS)
                 await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             web_blocks = await asyncio.to_thread(build_text_blocks, source_text)
@@ -1483,7 +1483,7 @@ async def _process_project(
                     pdf_total_pages,
                     MODEL_CLASSIFIER,
                 )
-                _update_usage(clf_usage, phase="page_classifier", cost_model=MODEL_CLASSIFIER)
+                await _locked_apply_usage(clf_usage, phase="page_classifier", cost_model=MODEL_CLASSIFIER)
                 await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
                 clf_cost = calculate_cost(MODEL_CLASSIFIER, clf_usage)
                 logger.info(
@@ -1575,7 +1575,7 @@ async def _process_project(
                 source_kind,
             )
             phase = "segmentation" if seg_attempt == 0 else f"segmentation_retry_{seg_attempt}"
-            _update_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
+            await _locked_apply_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             tema_report = validate_tema_partition(segmentation)
@@ -1760,11 +1760,16 @@ async def _process_project(
         user_intent = _strip_str(project.get("description"))
         consideraciones = _strip_str(segmentation.get("consideraciones_estudiante"))
 
-        # Procesar cada parte
+        # Procesar cada parte (hasta MAX_CONCURRENT_PARTS en la fase de agentes a la vez).
         logger.info(f"[Process] Comenzando procesamiento de {num_partes} partes")
-        formatter_tasks: list[asyncio.Task] = []
+        part_semaphore = asyncio.Semaphore(MAX_CONCURRENT_PARTS)
 
-        for parte in partes_segmentadas:
+        # SSE events may interleave per part_id; clients key off part_id (see spec 2026-04-08).
+        async def process_one_parte(parte: dict) -> tuple[asyncio.Task, list[str], list[str]]:
+            """Run agent phase under part_semaphore; return formatter Task and temp paths to merge."""
+            local_segment_pdf_paths: list[str] = []
+            local_temp_paths: list[str] = []
+
             part_id = parte["numero"]
             identificacion = parte["identificacion"]
 
@@ -1789,7 +1794,6 @@ async def _process_project(
 
             # Establecer contexto para esta parte
             with LogContext(project_id=project_id, user_id=user_id, part_id=part_id):
-                part_start = time.time()
                 logger.info(
                     f"[Process] Procesando parte {part_id}/{num_partes}: {parte.get('titulo', 'Sin título')}",
                     extra={
@@ -1804,336 +1808,347 @@ async def _process_project(
             update_project(project_id, user_id, {"partes_contenido": partes_contenido})
             await send_event(project_id, {"type": "part_started", "part_id": part_id})
 
-            # For PDF: extract sub-PDF with relevant pages and upload it
-            # For Web: upload only the exact text blocks for this part
-            # For YouTube: use the full file_uri as before
-            agent_file_uri = file_uri
-            agent_mime_type = source_mime_type
-            agent_prompt = identificacion
-            segment_temp_path = None
-            openrouter_page_scopes: list[tuple[int, ...]] = []
+            async with part_semaphore:
+                part_start = time.time()
 
-            nucleo_pi = _optional_int(parte, "pagina_inicio")
-            nucleo_pf = _optional_int(parte, "pagina_fin")
+                # For PDF: extract sub-PDF with relevant pages and upload it
+                # For Web: upload only the exact text blocks for this part
+                # For YouTube: use the full file_uri as before
+                agent_file_uri = file_uri
+                agent_mime_type = source_mime_type
+                agent_prompt = identificacion
+                segment_temp_path = None
+                openrouter_page_scopes: list[tuple[int, ...]] = []
 
-            if is_pdf_source and numbered_pdf_path:
-                pagina_inicio = parte.get("pagina_inicio")
-                pagina_fin = parte.get("pagina_fin")
-                subpdf_buffered_ok = False
+                nucleo_pi = _optional_int(parte, "pagina_inicio")
+                nucleo_pf = _optional_int(parte, "pagina_fin")
 
-                if pagina_inicio and pagina_fin:
-                    try:
-                        # Extract sub-PDF with buffer pages
-                        logger.info(
-                            f"[Process] Extrayendo páginas {pagina_inicio}-{pagina_fin} (±1 buffer) para parte {part_id}",
-                            extra={"pagina_inicio": pagina_inicio, "pagina_fin": pagina_fin}
-                        )
-                        segment_temp_path = await asyncio.to_thread(
-                            extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
-                        )
-                        segment_pdf_paths.append(segment_temp_path)
-                        temp_paths.append(segment_temp_path)
+                if is_pdf_source and numbered_pdf_path:
+                    pagina_inicio = parte.get("pagina_inicio")
+                    pagina_fin = parte.get("pagina_fin")
+                    subpdf_buffered_ok = False
 
-                        # Upload sub-PDF to Gemini
-                        seg_upload_start = time.time()
-                        segment_uploaded = await asyncio.to_thread(
-                            lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
-                        )
-                        seg_upload_duration = (time.time() - seg_upload_start) * 1000
-                        agent_file_uri = segment_uploaded.uri
-                        agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
-                        subpdf_buffered_ok = True
+                    if pagina_inicio and pagina_fin:
+                        try:
+                            # Extract sub-PDF with buffer pages
+                            logger.info(
+                                f"[Process] Extrayendo páginas {pagina_inicio}-{pagina_fin} (±1 buffer) para parte {part_id}",
+                                extra={"pagina_inicio": pagina_inicio, "pagina_fin": pagina_fin}
+                            )
+                            segment_temp_path = await asyncio.to_thread(
+                                extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
+                            )
+                            local_segment_pdf_paths.append(segment_temp_path)
+                            local_temp_paths.append(segment_temp_path)
 
-                        logger.info(
-                            f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
-                            extra={
-                                "segment_uri": agent_file_uri,
-                                "seg_upload_duration_ms": int(seg_upload_duration),
-                            }
-                        )
-                    except Exception as seg_err:
-                        # Fallback: use full PDF if sub-PDF extraction fails
+                            # Upload sub-PDF to Gemini
+                            seg_upload_start = time.time()
+                            segment_uploaded = await asyncio.to_thread(
+                                lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
+                            )
+                            seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                            agent_file_uri = segment_uploaded.uri
+                            agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
+                            subpdf_buffered_ok = True
+
+                            logger.info(
+                                f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
+                                extra={
+                                    "segment_uri": agent_file_uri,
+                                    "seg_upload_duration_ms": int(seg_upload_duration),
+                                }
+                            )
+                        except Exception as seg_err:
+                            # Fallback: use full PDF if sub-PDF extraction fails
+                            logger.warning(
+                                f"[Process] Error extrayendo sub-PDF para parte {part_id}, usando PDF completo: {seg_err}",
+                                extra={"error_type": type(seg_err).__name__}
+                            )
+                            agent_file_uri = file_uri
+                    else:
                         logger.warning(
-                            f"[Process] Error extrayendo sub-PDF para parte {part_id}, usando PDF completo: {seg_err}",
-                            extra={"error_type": type(seg_err).__name__}
+                            f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
                         )
-                        agent_file_uri = file_uri
-                else:
-                    logger.warning(
-                        f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
+
+                    pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = (
+                        "subpdf_buffered" if subpdf_buffered_ok else "full_document"
+                    )
+                    # Build part-level prompt (for recorrido and resources)
+                    agent_prompt = _build_pdf_agent_prompt(
+                        table_of_contents,
+                        identificacion,
+                        part_id,
+                        num_partes,
+                        handoff,
+                        pdf_scope_mode=pdf_scope_mode,
+                        nucleo_inicio=nucleo_pi,
+                        nucleo_fin=nucleo_pf,
                     )
 
-                pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = (
-                    "subpdf_buffered" if subpdf_buffered_ok else "full_document"
-                )
-                # Build part-level prompt (for recorrido and resources)
-                agent_prompt = _build_pdf_agent_prompt(
-                    table_of_contents,
-                    identificacion,
-                    part_id,
-                    num_partes,
-                    handoff,
-                    pdf_scope_mode=pdf_scope_mode,
-                    nucleo_inicio=nucleo_pi,
-                    nucleo_fin=nucleo_pf,
-                )
+                    # Build subpart-level prompts (for explainer)
+                    subpartes = parte.get("subpartes") or []
+                    if subpartes:
+                        subpart_prompts = [
+                            _build_subpart_pdf_prompt(
+                                table_of_contents, parte, sp, subpartes,
+                                part_id, num_partes, handoff,
+                                pdf_scope_mode=pdf_scope_mode,
+                                nucleo_inicio=nucleo_pi, nucleo_fin=nucleo_pf,
+                            )
+                            for sp in subpartes
+                        ]
+                        openrouter_page_scopes = [
+                            _select_openrouter_pdf_pages(
+                                content_page_set,
+                                start_page=_optional_int(sp, "pagina_inicio") or nucleo_pi,
+                                end_page=_optional_int(sp, "pagina_fin") or nucleo_pf,
+                                buffer=1,
+                            )
+                            for sp in subpartes
+                        ]
+                    else:
+                        subpart_prompts = [agent_prompt]  # fallback: whole part as single subpart
+                        openrouter_page_scopes = [
+                            _select_openrouter_pdf_pages(
+                                content_page_set,
+                                start_page=nucleo_pi,
+                                end_page=nucleo_pf,
+                                buffer=1,
+                            )
+                        ]
 
-                # Build subpart-level prompts (for explainer)
-                subpartes = parte.get("subpartes") or []
-                if subpartes:
-                    subpart_prompts = [
-                        _build_subpart_pdf_prompt(
-                            table_of_contents, parte, sp, subpartes,
-                            part_id, num_partes, handoff,
-                            pdf_scope_mode=pdf_scope_mode,
-                            nucleo_inicio=nucleo_pi, nucleo_fin=nucleo_pf,
+                elif is_text_source:
+                    bloque_inicio = parte.get("bloque_inicio")
+                    bloque_fin = parte.get("bloque_fin")
+                    if bloque_inicio is None or bloque_fin is None:
+                        raise WebExtractionError(
+                            f"La parte {part_id} no incluye bloque_inicio/bloque_fin válidos. "
+                            "Se aborta para no procesar texto fuera de rango."
                         )
-                        for sp in subpartes
-                    ]
-                    openrouter_page_scopes = [
-                        _select_openrouter_pdf_pages(
-                            content_page_set,
-                            start_page=_optional_int(sp, "pagina_inicio") or nucleo_pi,
-                            end_page=_optional_int(sp, "pagina_fin") or nucleo_pf,
-                            buffer=1,
-                        )
-                        for sp in subpartes
-                    ]
-                else:
-                    subpart_prompts = [agent_prompt]  # fallback: whole part as single subpart
-                    openrouter_page_scopes = [
-                        _select_openrouter_pdf_pages(
-                            content_page_set,
-                            start_page=nucleo_pi,
-                            end_page=nucleo_pf,
-                            buffer=1,
-                        )
-                    ]
 
-            elif is_text_source:
-                bloque_inicio = parte.get("bloque_inicio")
-                bloque_fin = parte.get("bloque_fin")
-                if bloque_inicio is None or bloque_fin is None:
-                    raise WebExtractionError(
-                        f"La parte {part_id} no incluye bloque_inicio/bloque_fin válidos. "
-                        "Se aborta para no procesar texto fuera de rango."
+                    selected_blocks = await asyncio.to_thread(slice_block_range, web_blocks, int(bloque_inicio), int(bloque_fin))
+                    part_document = await asyncio.to_thread(
+                        render_block_marked_document,
+                        title=source_title or project.get("name") or "Texto web",
+                        source_url=resolved_source_url or project.get("source_url") or "",
+                        blocks=selected_blocks,
                     )
+                    segment_temp_path = await asyncio.to_thread(write_text_document_temp, part_document)
+                    local_temp_paths.append(segment_temp_path)
 
-                selected_blocks = await asyncio.to_thread(slice_block_range, web_blocks, int(bloque_inicio), int(bloque_fin))
-                part_document = await asyncio.to_thread(
-                    render_block_marked_document,
-                    title=source_title or project.get("name") or "Texto web",
-                    source_url=resolved_source_url or project.get("source_url") or "",
-                    blocks=selected_blocks,
-                )
-                segment_temp_path = await asyncio.to_thread(write_text_document_temp, part_document)
-                temp_paths.append(segment_temp_path)
-
-                seg_upload_start = time.time()
-                segment_uploaded = await asyncio.to_thread(
-                    lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
-                )
-                seg_upload_duration = (time.time() - seg_upload_start) * 1000
-                agent_file_uri = segment_uploaded.uri
-                agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "text/plain"
-
-                logger.info(
-                    f"[Process] Segmento textual parte {part_id} subido en {int(seg_upload_duration)}ms",
-                    extra={
-                        "segment_uri": agent_file_uri,
-                        "seg_upload_duration_ms": int(seg_upload_duration),
-                        "bloque_inicio": bloque_inicio,
-                        "bloque_fin": bloque_fin,
-                    }
-                )
-
-                # Build part-level prompt (for recorrido and resources)
-                agent_prompt = _build_text_agent_prompt(
-                    table_of_contents,
-                    identificacion,
-                    part_id,
-                    num_partes,
-                    handoff,
-                    bloque_inicio=int(bloque_inicio),
-                    bloque_fin=int(bloque_fin),
-                )
-
-                # Build subpart-level prompts (for explainer)
-                subpartes = parte.get("subpartes") or []
-                if subpartes:
-                    subpart_prompts = [
-                        _build_subpart_text_prompt(
-                            table_of_contents, parte, sp, subpartes,
-                            part_id, num_partes, handoff,
-                            bloque_inicio=int(bloque_inicio), bloque_fin=int(bloque_fin),
-                        )
-                        for sp in subpartes
-                    ]
-                else:
-                    subpart_prompts = [agent_prompt]
-
-            elif is_youtube_source:
-                agent_prompt = _build_youtube_agent_prompt(
-                    table_of_contents,
-                    identificacion,
-                    part_id,
-                    num_partes,
-                    handoff,
-                )
-
-                # Build subpart-level prompts (for explainer)
-                subpartes = parte.get("subpartes") or []
-                if subpartes:
-                    subpart_prompts = [
-                        _build_subpart_youtube_prompt(
-                            table_of_contents, parte, sp, subpartes,
-                            part_id, num_partes, handoff,
-                        )
-                        for sp in subpartes
-                    ]
-                else:
-                    subpart_prompts = [agent_prompt]
-
-            num_subparts = len(subpart_prompts)
-            use_subpart_explainer = bool(parte.get("subpartes"))
-
-            logger.info(
-                f"[Process] Parte {part_id}: {num_subparts} subparte(s) — ejecutando agentes en paralelo",
-                extra={"part_id": part_id, "num_subparts": num_subparts}
-            )
-
-            # Execute all subpart explainers + recorrido + resources in parallel
-            agents_start = time.time()
-            use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
-            use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
-            use_or = use_or_canonical or use_or_direct
-            if use_or:
-                explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
-                if use_or_canonical:
-                    if len(openrouter_page_scopes) != len(subpart_prompts):
-                        raise RuntimeError(
-                            "Las páginas OpenRouter no coinciden con el número de subprompts generados."
-                        )
-                    explainer_calls = [
-                        asyncio.to_thread(
-                            explainer_fn_or,
-                            openrouter_pdf_context.source_pdf_path,
-                            sp_prompt,
-                            explainer_model,
-                            "application/pdf",
-                            openrouter_api_key,
-                            openrouter_pdf_context.cache_entry,
-                            page_scope,
-                        )
-                        for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
-                    ]
-                else:
-                    explainer_calls = [
-                        asyncio.to_thread(
-                            explainer_fn_or,
-                            segment_temp_path,
-                            sp_prompt,
-                            explainer_model,
-                            agent_mime_type,
-                            openrouter_api_key,
-                        )
-                        for sp_prompt in subpart_prompts
-                    ]
-            else:
-                explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
-                explainer_calls = [
-                    asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
-                    for sp_prompt in subpart_prompts
-                ]
-            results = await asyncio.gather(
-                *explainer_calls,
-                asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
-                asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
-                return_exceptions=True,
-            )
-            agents_duration = (time.time() - agents_start) * 1000
-
-            # Split results: first N are subpart explainers, then recorrido, then resources
-            subpart_results = results[:num_subparts]
-            recorrido_result = results[num_subparts]
-            resources_result = results[num_subparts + 1]
-
-            # Process subpart explainer results
-            subpart_desarrollos: list[list[dict]] = []
-            for i, sp_result in enumerate(subpart_results):
-                if isinstance(sp_result, Exception):
-                    logger.error(
-                        f"[Process] Error en explainer subparte {i+1}/{num_subparts} de parte {part_id}: {str(sp_result)}",
-                        extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
+                    seg_upload_start = time.time()
+                    segment_uploaded = await asyncio.to_thread(
+                        lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
                     )
-                else:
-                    sp_data, sp_usage = sp_result
-                    if sp_usage:
-                        _update_usage(sp_usage, phase=f"part_{part_id}_explainer_sp{i+1}", cost_model=explainer_model)
-                    subpart_desarrollos.append(sp_data.get("desarrollo") or [])
+                    seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                    agent_file_uri = segment_uploaded.uri
+                    agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "text/plain"
 
-            # Assemble: intro/conclusion/conexiones from segmentador + subpart results
-            if use_subpart_explainer:
-                assembled_explainer = _assemble_part_explainer(parte, subpart_desarrollos)
-            else:
-                # Fallback: no subparts — use the full explainer output as-is.
-                # Both Gemini and OpenRouter now return the same structured shape.
-                if subpart_results and not isinstance(subpart_results[0], Exception):
-                    assembled_explainer = subpart_results[0][0]
-                else:
-                    assembled_explainer = {"error": "All explainer calls failed"}
-
-            # Process recorrido and resources results
-            recorrido_data, usage_rec = recorrido_result if not isinstance(recorrido_result, Exception) else (recorrido_result, None)
-            resources_data, usage_res = resources_result if not isinstance(resources_result, Exception) else (resources_result, None)
-
-            if usage_rec:
-                _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
-            if usage_res:
-                _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=MODEL_AGENTS)
-            await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
-
-            # Store explainer (assembled) and notify
-            if isinstance(assembled_explainer, dict) and "error" in assembled_explainer:
-                partes_contenido[str(part_id)]["explainer"] = assembled_explainer
-            else:
-                partes_contenido[str(part_id)]["explainer"] = assembled_explainer
-            await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": "explainer"})
-
-            # Store recorrido and resources
-            for result, agent_name in [
-                (recorrido_data, "recorrido"),
-                (resources_data, "resources"),
-            ]:
-                if isinstance(result, Exception):
-                    logger.error(
-                        f"[Process] Error en agente {agent_name} para parte {part_id}: {str(result)}",
+                    logger.info(
+                        f"[Process] Segmento textual parte {part_id} subido en {int(seg_upload_duration)}ms",
                         extra={
-                            "part_id": part_id,
-                            "agent": agent_name,
-                            "error_type": type(result).__name__,
-                            "error_message": str(result)[:500],
+                            "segment_uri": agent_file_uri,
+                            "seg_upload_duration_ms": int(seg_upload_duration),
+                            "bloque_inicio": bloque_inicio,
+                            "bloque_fin": bloque_fin,
                         }
                     )
-                    partes_contenido[str(part_id)][agent_name] = {"error": str(result)}
-                else:
-                    logger.debug(f"[Process] Agente {agent_name} completado para parte {part_id}")
-                    partes_contenido[str(part_id)][agent_name] = result
-                await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": agent_name})
 
-            agents_elapsed_ms = int((time.time() - part_start) * 1000)
-            logger.info(
-                f"[Process] Agentes de parte {part_id} completados en {agents_elapsed_ms}ms "
-                f"({num_subparts} subparte(s), agentes: {int(agents_duration)}ms) — iniciando formatter en background",
-                extra={
-                    "part_id": part_id,
-                    "num_subparts": num_subparts,
-                    "agents_elapsed_ms": agents_elapsed_ms,
-                    "agents_duration_ms": int(agents_duration),
-                    "cumulative_tokens": cumulative_usage["total_tokens"],
-                    "cumulative_cost": round(cumulative_usage["total_cost"], 6),
-                }
-            )
+                    # Build part-level prompt (for recorrido and resources)
+                    agent_prompt = _build_text_agent_prompt(
+                        table_of_contents,
+                        identificacion,
+                        part_id,
+                        num_partes,
+                        handoff,
+                        bloque_inicio=int(bloque_inicio),
+                        bloque_fin=int(bloque_fin),
+                    )
+
+                    # Build subpart-level prompts (for explainer)
+                    subpartes = parte.get("subpartes") or []
+                    if subpartes:
+                        subpart_prompts = [
+                            _build_subpart_text_prompt(
+                                table_of_contents, parte, sp, subpartes,
+                                part_id, num_partes, handoff,
+                                bloque_inicio=int(bloque_inicio), bloque_fin=int(bloque_fin),
+                            )
+                            for sp in subpartes
+                        ]
+                    else:
+                        subpart_prompts = [agent_prompt]
+
+                elif is_youtube_source:
+                    agent_prompt = _build_youtube_agent_prompt(
+                        table_of_contents,
+                        identificacion,
+                        part_id,
+                        num_partes,
+                        handoff,
+                    )
+
+                    # Build subpart-level prompts (for explainer)
+                    subpartes = parte.get("subpartes") or []
+                    if subpartes:
+                        subpart_prompts = [
+                            _build_subpart_youtube_prompt(
+                                table_of_contents, parte, sp, subpartes,
+                                part_id, num_partes, handoff,
+                            )
+                            for sp in subpartes
+                        ]
+                    else:
+                        subpart_prompts = [agent_prompt]
+
+                num_subparts = len(subpart_prompts)
+                use_subpart_explainer = bool(parte.get("subpartes"))
+
+                logger.info(
+                    f"[Process] Parte {part_id}: {num_subparts} subparte(s) — ejecutando agentes en paralelo",
+                    extra={"part_id": part_id, "num_subparts": num_subparts}
+                )
+
+                # Execute all subpart explainers + recorrido + resources in parallel
+                agents_start = time.time()
+                use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
+                use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
+                use_or = use_or_canonical or use_or_direct
+                if use_or:
+                    explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
+                    if use_or_canonical:
+                        if len(openrouter_page_scopes) != len(subpart_prompts):
+                            raise RuntimeError(
+                                "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                            )
+                        explainer_calls = [
+                            asyncio.to_thread(
+                                explainer_fn_or,
+                                openrouter_pdf_context.source_pdf_path,
+                                sp_prompt,
+                                explainer_model,
+                                "application/pdf",
+                                openrouter_api_key,
+                                openrouter_pdf_context.cache_entry,
+                                page_scope,
+                            )
+                            for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
+                        ]
+                    else:
+                        explainer_calls = [
+                            asyncio.to_thread(
+                                explainer_fn_or,
+                                segment_temp_path,
+                                sp_prompt,
+                                explainer_model,
+                                agent_mime_type,
+                                openrouter_api_key,
+                            )
+                            for sp_prompt in subpart_prompts
+                        ]
+                else:
+                    explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
+                    explainer_calls = [
+                        asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
+                        for sp_prompt in subpart_prompts
+                    ]
+                results = await asyncio.gather(
+                    *explainer_calls,
+                    asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
+                    asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
+                    return_exceptions=True,
+                )
+                agents_duration = (time.time() - agents_start) * 1000
+
+                # Split results: first N are subpart explainers, then recorrido, then resources
+                subpart_results = results[:num_subparts]
+                recorrido_result = results[num_subparts]
+                resources_result = results[num_subparts + 1]
+
+                # Process subpart explainer results
+                subpart_desarrollos: list[list[dict]] = []
+                for i, sp_result in enumerate(subpart_results):
+                    if isinstance(sp_result, Exception):
+                        logger.error(
+                            f"[Process] Error en explainer subparte {i+1}/{num_subparts} de parte {part_id}: {str(sp_result)}",
+                            extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
+                        )
+                    else:
+                        sp_data, _ = sp_result
+                        subpart_desarrollos.append(sp_data.get("desarrollo") or [])
+
+                # Assemble: intro/conclusion/conexiones from segmentador + subpart results
+                if use_subpart_explainer:
+                    assembled_explainer = _assemble_part_explainer(parte, subpart_desarrollos)
+                else:
+                    # Fallback: no subparts — use the full explainer output as-is.
+                    # Both Gemini and OpenRouter now return the same structured shape.
+                    if subpart_results and not isinstance(subpart_results[0], Exception):
+                        assembled_explainer = subpart_results[0][0]
+                    else:
+                        assembled_explainer = {"error": "All explainer calls failed"}
+
+                # Process recorrido and resources results
+                recorrido_data, usage_rec = recorrido_result if not isinstance(recorrido_result, Exception) else (recorrido_result, None)
+                resources_data, usage_res = resources_result if not isinstance(resources_result, Exception) else (resources_result, None)
+
+                async with usage_lock:
+                    for i, sp_result in enumerate(subpart_results):
+                        if not isinstance(sp_result, Exception):
+                            sp_data, sp_usage = sp_result
+                            if sp_usage:
+                                _update_usage(
+                                    sp_usage,
+                                    phase=f"part_{part_id}_explainer_sp{i+1}",
+                                    cost_model=explainer_model,
+                                )
+                    if usage_rec:
+                        _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
+                    if usage_res:
+                        _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=MODEL_AGENTS)
+                    await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
+
+                # Store explainer (assembled) and notify
+                if isinstance(assembled_explainer, dict) and "error" in assembled_explainer:
+                    partes_contenido[str(part_id)]["explainer"] = assembled_explainer
+                else:
+                    partes_contenido[str(part_id)]["explainer"] = assembled_explainer
+                await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": "explainer"})
+
+                # Store recorrido and resources
+                for result, agent_name in [
+                    (recorrido_data, "recorrido"),
+                    (resources_data, "resources"),
+                ]:
+                    if isinstance(result, Exception):
+                        logger.error(
+                            f"[Process] Error en agente {agent_name} para parte {part_id}: {str(result)}",
+                            extra={
+                                "part_id": part_id,
+                                "agent": agent_name,
+                                "error_type": type(result).__name__,
+                                "error_message": str(result)[:500],
+                            }
+                        )
+                        partes_contenido[str(part_id)][agent_name] = {"error": str(result)}
+                    else:
+                        logger.debug(f"[Process] Agente {agent_name} completado para parte {part_id}")
+                        partes_contenido[str(part_id)][agent_name] = result
+                    await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": agent_name})
+
+                agents_elapsed_ms = int((time.time() - part_start) * 1000)
+                logger.info(
+                    f"[Process] Agentes de parte {part_id} completados en {agents_elapsed_ms}ms "
+                    f"({num_subparts} subparte(s), agentes: {int(agents_duration)}ms) — iniciando formatter en background",
+                    extra={
+                        "part_id": part_id,
+                        "num_subparts": num_subparts,
+                        "agents_elapsed_ms": agents_elapsed_ms,
+                        "agents_duration_ms": int(agents_duration),
+                        "cumulative_tokens": cumulative_usage["total_tokens"],
+                        "cumulative_cost": round(cumulative_usage["total_cost"], 6),
+                    }
+                )
 
             # Fire the formatter as a background task so the next section's agents
             # can start immediately without waiting for this formatting pass.
@@ -2149,7 +2164,16 @@ async def _process_project(
                     partes_contenido,
                 )
             )
+            return formatter_task, local_segment_pdf_paths, local_temp_paths
+
+        part_results = await asyncio.gather(
+            *[process_one_parte(p) for p in partes_segmentadas],
+        )
+        formatter_tasks: list[asyncio.Task] = []
+        for formatter_task, seg_paths, tmp_paths in part_results:
             formatter_tasks.append(formatter_task)
+            segment_pdf_paths.extend(seg_paths)
+            temp_paths.extend(tmp_paths)
 
         # Esperar a que todos los formatters terminen antes de marcar el proyecto como completado.
         # Los formatter_tasks ya se están ejecutando en paralelo con los agentes de secciones
