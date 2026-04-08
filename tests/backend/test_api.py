@@ -220,3 +220,65 @@ class TestCreateProject:
             assert r.json()["share_token"] == "tok-xyz"
         finally:
             app.dependency_overrides.pop(get_current_user_id, None)
+
+
+class TestProcessProject:
+    """POST /api/projects/{project_id}/process - provider selection is explicit per execution."""
+
+    def test_defaults_to_gemini_when_body_is_missing(self, auth_client):
+        scheduled: dict = {}
+
+        async def _fake_process(project_id, user_id, explainer_provider="gemini"):
+            scheduled.update({
+                "project_id": project_id,
+                "user_id": user_id,
+                "explainer_provider": explainer_provider,
+            })
+
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
+                with patch("main._process_project", new=_fake_process):
+                    r = auth_client.post(
+                        "/api/projects/proj-1/process",
+                        headers={"Authorization": "Bearer fake-token"},
+                    )
+
+        assert r.status_code == 200
+        assert r.json()["explainer_provider"] == "gemini"
+        assert scheduled["explainer_provider"] == "gemini"
+
+    def test_requires_openrouter_key_when_openrouter_is_selected(self, auth_client):
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            with patch(
+                "main.has_user_api_key",
+                side_effect=lambda uid, provider="google_gemini": provider != "openrouter",
+            ):
+                r = auth_client.post(
+                    "/api/projects/proj-1/process",
+                    headers={"Authorization": "Bearer fake-token"},
+                    json={"explainer_provider": "openrouter"},
+                )
+
+        assert r.status_code == 400
+        assert "OpenRouter" in r.json()["detail"]
+
+    def test_rejects_openrouter_for_youtube_projects(self, auth_client):
+        with patch(
+            "main.get_project",
+            return_value={"id": "yt-1", "name": "Vídeo", "status": "pending", "source_type": "youtube"},
+        ):
+            with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
+                r = auth_client.post(
+                    "/api/projects/yt-1/process",
+                    headers={"Authorization": "Bearer fake-token"},
+                    json={"explainer_provider": "openrouter"},
+                )
+
+        assert r.status_code == 400
+        assert "YouTube" in r.json()["detail"]

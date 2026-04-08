@@ -9,7 +9,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │  SUPABASE — Auth + Postgres + Storage                       │
 │  ├── Usuarios, proyectos, PDFs                              │
-│  └── 🔐 API Keys encriptadas por usuario (BYOK)            │
+│  └── 🔐 API Keys encriptadas por usuario (Gemini/OpenRouter)│
 ├─────────────────────────────────────────────────────────────┤
 │  KOYEB (Backend API) — $0                                   │
 │  └── criminal-leoline-pma00-1cbf79ad.koyeb.app             │
@@ -21,7 +21,7 @@
 
 ## 🔐 Seguridad API Keys (BYOK - Bring Your Own Key)
 
-Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporciona y controla su propia API key de Gemini:
+Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporciona y controla sus propias API keys de Gemini y, opcionalmente, OpenRouter:
 
 ### Modelo de Seguridad
 
@@ -32,21 +32,21 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 | **Clave de encriptación** | Derivada por usuario: `SHA256(MASTER_KEY + user_id)` |
 | **Acceso** | Row Level Security (RLS): cada usuario solo accede a sus propias keys |
 | **Transmisión** | HTTPS/TLS 1.3 en todo momento |
-| **Logs** | Solo versiones enmascaradas (`AIza...XXXX`) |
+| **Logs** | Solo versiones enmascaradas (`AIza...XXXX`, `sk-or-...XXXX`) |
 
 ### Flujo de Seguridad
 
 1. **Usuario configura su API key** → Frontend envía al backend vía HTTPS + JWT
 2. **Backend encripta** → Usa Fernet con clave derivada del `user_id`
 3. **Almacenamiento** → Se guarda en Supabase con RLS (solo el propietario puede acceder)
-4. **Procesamiento** → El backend desencripta temporalmente en memoria para llamar a Gemini
+4. **Procesamiento** → El backend desencripta temporalmente en memoria para llamar al proveedor/modelo seleccionado
 5. **Nunca se expone** → La API key en texto plano nunca se envía al frontend ni se registra en logs
 
 ### Ventajas BYOK
 
 - **Multi-dispositivo**: La API key del usuario está disponible en todos sus dispositivos
 - **Segregación total**: Un usuario no puede acceder a las keys de otro (RLS a nivel de BD)
-- **Compliance**: Cada usuario es responsable de su propia cuota y facturación con Google
+- **Compliance**: Cada usuario es responsable de su propia cuota y facturación con Google y/o OpenRouter
 - **Sin riesgo de fuga**: Incluso si la BD se compromete, las keys están encriptadas
 
 ## Requisitos
@@ -59,7 +59,7 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 
 ### 1. Variables de Entorno de Seguridad
 
-**APP_ENCRYPTION_KEY** es obligatoria en producción. Se usa para encriptar las API keys de Gemini de los usuarios (BYOK). La aplicación **no arrancará** si en `ENVIRONMENT=production` la clave está ausente o coincide con valores conocidos débiles.
+**APP_ENCRYPTION_KEY** es obligatoria en producción. Se usa para encriptar las API keys de Gemini y OpenRouter de los usuarios (BYOK). La aplicación **no arrancará** si en `ENVIRONMENT=production` la clave está ausente o coincide con valores conocidos débiles.
 
 Genera una clave segura con:
 
@@ -267,8 +267,9 @@ El archivo `vercel.json` ya tiene configurada la URL de Koyeb. Si cambia, actual
 
 ### Test Funcional
 
-1. **Configurar API key (BYOK)**:
+1. **Configurar API keys (BYOK)**:
    - Ve a "Ajustes" y guarda tu API key de Gemini
+   - Si quieres usar MiniMax en el explainer, guarda además tu API key de OpenRouter
    - Verifica que el estado muestra "Configurada"
    - Recarga la página y confirma que persiste (sincronización multi-dispositivo)
 
@@ -385,6 +386,7 @@ Verifica que `FRONTEND_URL` en los secrets de Koyeb coincida exactamente con tu 
 | Koyeb (Starter - scale-to-zero) | **$0/mes** |
 | Vercel (Hobby) | **$0/mes** |
 | Gemini API | **Paga cada usuario** (tú no pagas) |
+| OpenRouter API | **Opcional; paga cada usuario** |
 | **Total** | **$0/mes** |
 
 **Nota**: Koyeb cobra por segundo de uso después del free tier, pero con scale-to-zero y uso personal/development, el costo será $0.

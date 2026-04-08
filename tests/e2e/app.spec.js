@@ -96,6 +96,7 @@ test.describe('Explainer App', () => {
   test('submits a public web URL from the landing form', async ({ page }) => {
     let createBody = '';
     let processCalled = false;
+    let processBody = null;
 
     await page.route('**/api/projects', async (route) => {
       if (route.request().method() === 'POST') {
@@ -126,6 +127,7 @@ test.describe('Explainer App', () => {
 
     await page.route('**/api/projects/web-1/process**', async (route) => {
       processCalled = true;
+      processBody = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -157,6 +159,7 @@ test.describe('Explainer App', () => {
     await page.locator('#btn-upload').click();
 
     await expect.poll(() => processCalled).toBe(true);
+    expect(processBody).toEqual({ explainer_provider: 'gemini' });
     expect(createBody).toContain('name="web_url"');
     expect(createBody).toContain('https://example.com/article');
   });

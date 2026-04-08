@@ -1,12 +1,13 @@
 # Explainer — Estudio Académico con IA
 
-Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta PDFs, genera explicaciones exhaustivas, recorridos anotados y mapas de recursos.
+Aplicación full-stack para estudiar textos académicos con IA. Segmenta PDFs, genera explicaciones exhaustivas, recorridos anotados y mapas de recursos.
 
 ## ✨ Características
 
-- **🔑 BYOK (Bring Your Own Key)**: Cada usuario almacena su API key de Gemini encriptada en Supabase, disponible en todos sus dispositivos
+- **🔑 BYOK (Bring Your Own Key)**: Cada usuario almacena sus API keys de Gemini y OpenRouter encriptadas en Supabase, disponibles en todos sus dispositivos
 - **📄 Procesamiento de PDFs**: Upload y análisis automático con Gemini File API
 - **🤖 4 Agentes IA**: Segmentador, Explainer, Recorrido Anotado y Recursos
+- **🧠 Selector por ejecución**: El usuario elige en frontend si el explainer usa Gemini o MiniMax vía OpenRouter
 - **📊 Progreso en tiempo real**: Server-Sent Events (SSE) para ver el avance
 - **💰 Tracking de costos**: Cálculo automático de tokens y costos por proyecto
 - **🎨 UI/UX elegante**: Tema "Scholarly Forge" con diseño dark academic
@@ -14,11 +15,11 @@ Aplicación full-stack para estudiar textos académicos con Gemini AI. Segmenta 
 ## 🏗️ Arquitectura
 
 ```
-Frontend (Vercel)          Backend (Koyeb)            Supabase              Gemini API
+Frontend (Vercel)          Backend (Koyeb)            Supabase          Gemini + OpenRouter
 ┌─────────────┐            ┌───────────────┐        ┌──────────────┐       ┌────────────┐
 │  HTML/CSS   │  HTTPS     │  FastAPI      │        │  PostgreSQL  │       │  Google    │
-│  Vanilla JS │◄──────────►│  BYOK Auth    │◄──────►│  Auth        │◄─────►│  Gemini    │
-│             │   SSE      │               │        │  Storage     │       │  File API  │
+│  Vanilla JS │◄──────────►│  BYOK Auth    │◄──────►│  Auth        │◄─────►│  Model APIs│
+│             │   SSE      │               │        │  Storage     │       │  (select)  │
 └─────────────┘            └───────────────┘        └──────────────┘       └────────────┘
 ```
 
@@ -86,12 +87,12 @@ explainer/
 ├── DEPLOY.md                  # Guía de despliegue
 │
 ├── backend/
-│   ├── crypto.py             # Encriptación de API key (BYOK)
+│   ├── crypto.py             # Encriptación de API keys (BYOK)
 │   ├── sse_manager.py        # Server-Sent Events
 │   ├── rate_limit.py         # Rate limiting
 │   ├── middleware.py         # Security headers
 │   ├── pricing.py            # Cálculo de costos
-│   └── agents/               # 4 agentes Gemini
+│   └── agents/               # Agentes Gemini + explainer OpenRouter
 │       ├── segmentador.py
 │       ├── explainer.py
 │       ├── recorrido.py
@@ -105,7 +106,7 @@ explainer/
 
 ## 🔒 Seguridad
 
-- **Encriptación**: API key de Gemini encriptada con AES (clave de aplicación)
+- **Encriptación**: API keys de Gemini y OpenRouter encriptadas con AES (clave de aplicación)
 - **Headers**: CSP, X-Frame-Options, HSTS, Referrer-Policy
 - **XSS**: Escaping de HTML en salida
 - **Rate limiting**: Límite por IP en creación de proyectos
@@ -118,6 +119,7 @@ explainer/
 | Koyeb / Fly.io (Hobby) | **$0/mes** |
 | Vercel (Hobby) | **$0/mes** |
 | Gemini API | **Paga cada usuario con su propia key** |
+| OpenRouter API | **Opcional; paga cada usuario con su propia key** |
 
 ## 🛠️ Tecnologías
 
