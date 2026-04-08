@@ -33,12 +33,19 @@ _PDF_CACHE_VERSION = 2
 class OpenRouterUsage:
     """Wrapper de usage con atributos compatibles con Gemini para _update_usage."""
 
-    def __init__(self, prompt_tokens: int, completion_tokens: int):
+    def __init__(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        cost_usd: float | None = None,
+    ):
         self.prompt_token_count = prompt_tokens
         self.candidates_token_count = completion_tokens
         self.thoughts_token_count = 0
         self.tool_use_prompt_token_count = 0
         self.total_token_count = prompt_tokens + completion_tokens
+        self.cost_usd = cost_usd
 
 
 class OpenRouterError(Exception):
@@ -993,9 +1000,15 @@ def call_openrouter_chat_full(
             finish_reason = choice.get("finish_reason", "unknown")
 
             usage_raw = data.get("usage", {})
+            raw_cost = usage_raw.get("cost")
+            if isinstance(raw_cost, (int, float)):
+                cost_usd = round(float(raw_cost), 6)
+            else:
+                cost_usd = None
             usage = OpenRouterUsage(
                 prompt_tokens=usage_raw.get("prompt_tokens", 0),
                 completion_tokens=usage_raw.get("completion_tokens", 0),
+                cost_usd=cost_usd,
             )
 
             if not content_text:
