@@ -30,6 +30,8 @@ logger = get_logger("backend.agents.explainer_openrouter")
 OPENROUTER_MODEL_AGENTS = "qwen/qwen3.6-plus"
 OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
 OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
+# OpenRouter API: sampling temperature (0–2).
+OPENROUTER_EXPLAINER_TEMPERATURE = 0.7
 OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES = 2
 OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
@@ -521,6 +523,7 @@ def _call_openrouter_json_with_pdf_fallback(
                     plugins=None,
                     enable_response_healing=True,
                     reasoning={"effort": "xhigh", "exclude": True},
+                    temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 )
             if cache_entry.assistant_message is not None and cache_entry.assistant_message.annotations:
                 messages = build_messages_with_cached_pdf_annotations(
@@ -538,6 +541,7 @@ def _call_openrouter_json_with_pdf_fallback(
                     plugins=None,
                     enable_response_healing=True,
                     reasoning={"effort": "xhigh", "exclude": True},
+                    temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 )
             raise OpenRouterError(
                 "El cache OCR del PDF no contiene páginas reutilizables ni annotations completas."
@@ -554,6 +558,7 @@ def _call_openrouter_json_with_pdf_fallback(
             plugins=plugins,
             enable_response_healing=True,
             reasoning={"effort": "xhigh", "exclude": True},
+            temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
         )
     except OpenRouterError as exc:
         if mime_type == "application/pdf":
@@ -588,6 +593,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 plugins=fallback_plugins,
                 enable_response_healing=True,
                 reasoning={"effort": "xhigh", "exclude": True},
+                temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
             )
         finally:
             try:

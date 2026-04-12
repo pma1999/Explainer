@@ -841,6 +841,7 @@ def call_openrouter_chat_full(
     enable_response_healing: bool = False,
     reasoning: dict | None = None,
     max_retries: int = 5,
+    temperature: float | None = None,
 ) -> OpenRouterChatResult:
     """
     Igual que `call_openrouter_chat`, pero preserva el mensaje del asistente
@@ -861,6 +862,8 @@ def call_openrouter_chat_full(
             *messages,
         ],
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
 
     uses_json_mode = response_format != "text"
     if response_format == "json_object":
@@ -1484,6 +1487,7 @@ def call_openrouter_chat(
     enable_response_healing: bool = False,
     reasoning: dict | None = None,
     max_retries: int = 5,
+    temperature: float | None = None,
 ) -> tuple[str | dict[str, Any], OpenRouterUsage]:
     """
     Llama a OpenRouter /chat/completions.
@@ -1500,5 +1504,6 @@ def call_openrouter_chat(
         enable_response_healing=enable_response_healing,
         reasoning=reasoning,
         max_retries=max_retries,
+        temperature=temperature,
     )
     return result.content, result.usage
