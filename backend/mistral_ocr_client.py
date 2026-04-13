@@ -139,7 +139,7 @@ def _fetch_missing_pages_once(
     expected_page_numbers: tuple[int, ...],
     filename: str,
 ) -> PdfOcrBuildResult:
-    client = Mistral(api_key=api_key)
+    client = Mistral(api_key=api_key, timeout_ms=300_000)  # 5 min — large PDFs need time to upload + process
     uploaded = None
     try:
         with open(source_path, "rb") as handle:
