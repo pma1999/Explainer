@@ -45,6 +45,7 @@ from backend.supabase_data import (
     get_user_api_key_status,
     PROVIDER_GEMINI,
     PROVIDER_OPENROUTER,
+    PROVIDER_MISTRAL,
 )
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
@@ -83,6 +84,12 @@ from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
+from backend.mistral_ocr_client import (
+    MISTRAL_OCR_ENGINE,
+    MISTRAL_OCR_MODEL,
+    get_or_prime_mistral_pdf_ocr_cache,
+)
+from backend.pdf_ocr_cache import PdfOcrCacheEntry
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -585,6 +592,34 @@ def _prepare_openrouter_pdf_context(
     )
 
 
+def _prepare_mistral_pdf_ocr_context(
+    *,
+    numbered_pdf_path: str,
+    content_page_set: frozenset[int],
+    api_key: str,
+    engine: str,
+) -> "PreparedPdfOcrContext":
+    """Prepare Mistral native OCR cache for the content pages of the numbered source PDF.
+
+    The cache is keyed by the numbered source document itself, not by a
+    reconstructed per-run subset PDF. This allows future executions to reuse
+    already processed pages even if the classifier adds or removes pages.
+    """
+    cache_entry = get_or_prime_mistral_pdf_ocr_cache(
+        source_path=numbered_pdf_path,
+        api_key=api_key,
+        model=MISTRAL_OCR_MODEL,
+        engine=engine,
+        filename="document.pdf",
+        expected_page_numbers=tuple(sorted(content_page_set)),
+    )
+    return PreparedPdfOcrContext(
+        source_pdf_path=numbered_pdf_path,
+        cache_entry=cache_entry,
+        ocr_model=MISTRAL_OCR_MODEL,
+    )
+
+
 def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
     toc_lines = ["TABLA DE CONTENIDOS DEL TEXTO COMPLETO:"]
     for p in segmentation["partes"]:
@@ -637,6 +672,13 @@ class OpenRouterPreparedPdfContext:
     source_pdf_path: str
     cache_entry: OpenRouterPdfParseCacheEntry
     priming_model: str = OPENROUTER_PDF_PRIMING_MODEL
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPdfOcrContext:
+    source_pdf_path: str
+    cache_entry: PdfOcrCacheEntry
+    ocr_model: str = MISTRAL_OCR_MODEL
 
 
 def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
@@ -1277,6 +1319,8 @@ async def _process_project(
     content_page_set: frozenset[int] = frozenset()
     openrouter_pdf_prepare_task: asyncio.Task | None = None
     openrouter_pdf_context: OpenRouterPreparedPdfContext | None = None
+    mistral_pdf_prepare_task: asyncio.Task | None = None
+    mistral_pdf_context: PreparedPdfOcrContext | None = None
     temp_paths: list[str] = []
     web_blocks = []
     source_mime_type = "application/pdf"
@@ -1333,6 +1377,7 @@ async def _process_project(
             return
 
         openrouter_api_key = ""
+        mistral_api_key = ""
         if use_openrouter_explainer:
             openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
             if not openrouter_api_key:
@@ -1349,6 +1394,7 @@ async def _process_project(
                 )
                 update_project(project_id, user_id, {"status": "error", "error_message": "API key OpenRouter no configurada"})
                 return
+            mistral_api_key = get_user_api_key(user_id, provider=PROVIDER_MISTRAL) or ""
 
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
 
@@ -1614,23 +1660,21 @@ async def _process_project(
                     extra={"error_type": type(clf_err).__name__},
                 )
 
-            if use_openrouter_explainer and openrouter_api_key and content_page_set:
+            if use_openrouter_explainer and mistral_api_key and content_page_set and source_type == "pdf":
                 logger.info(
-                    "[Process] Preparando OCR canónico de OpenRouter sobre páginas con contenido",
+                    "[Process] Preparando OCR canónico de Mistral sobre páginas con contenido",
                     extra={
                         "content_pages_count": len(content_page_set),
-                        "openrouter_model": explainer_model,
-                        "openrouter_pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
-                        "openrouter_pdf_priming_fallback_model": OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+                        "mistral_ocr_engine": MISTRAL_OCR_ENGINE,
                     },
                 )
-                openrouter_pdf_prepare_task = asyncio.create_task(
+                mistral_pdf_prepare_task = asyncio.create_task(
                     asyncio.to_thread(
-                        _prepare_openrouter_pdf_context,
+                        _prepare_mistral_pdf_ocr_context,
                         numbered_pdf_path=numbered_pdf_path,
                         content_page_set=content_page_set,
-                        api_key=openrouter_api_key,
-                        engine=OPENROUTER_PDF_PARSER_ENGINE,
+                        api_key=mistral_api_key,
+                        engine=MISTRAL_OCR_ENGINE,
                     )
                 )
 
@@ -1845,25 +1889,31 @@ async def _process_project(
                 extra={"toc_preview": table_of_contents[:300]}
             )
 
-        if openrouter_pdf_prepare_task is not None:
+        if mistral_pdf_prepare_task is not None:
             try:
-                openrouter_pdf_context = await openrouter_pdf_prepare_task
-                cumulative_usage["openrouter_pdf_priming_model"] = openrouter_pdf_context.priming_model
+                mistral_pdf_context = await mistral_pdf_prepare_task
+                diagnostic_artifact_path = getattr(
+                    mistral_pdf_context.cache_entry,
+                    "diagnostic_artifact_path",
+                    None,
+                )
+                if diagnostic_artifact_path:
+                    logger.info(
+                        "[Process] OCR artefacto de páginas no resueltas: %s",
+                        diagnostic_artifact_path,
+                        extra={"diagnostic_artifact_path": diagnostic_artifact_path},
+                    )
                 logger.info(
-                    "[Process] OCR canónico OpenRouter preparado",
+                    "[Process] OCR canónico de Mistral preparado",
                     extra={
-                        "source_pdf_path": openrouter_pdf_context.source_pdf_path,
-                        "priming_model": openrouter_pdf_context.priming_model,
-                        "cache_path": openrouter_pdf_context.cache_entry.cache_path,
-                        "cache_hit": openrouter_pdf_context.cache_entry.cache_hit,
-                        "requested_pages_count": len(openrouter_pdf_context.cache_entry.expected_page_numbers),
-                        "cached_pages_count": len(openrouter_pdf_context.cache_entry.cached_page_numbers),
+                        "cache_hit": mistral_pdf_context.cache_entry.cache_hit,
+                        "cached_pages_count": len(mistral_pdf_context.cache_entry.cached_page_numbers),
                     },
                 )
             except Exception as exc:
-                openrouter_pdf_context = None
+                mistral_pdf_context = None
                 logger.warning(
-                    "[Process] No se pudo preparar el OCR canónico OpenRouter; se usará el flujo local por parte: %s",
+                    "[Process] No se pudo preparar el OCR canónico de Mistral; se usará el flujo local por parte: %s",
                     exc,
                     extra={"error_type": type(exc).__name__},
                 )
@@ -2123,7 +2173,7 @@ async def _process_project(
 
                 # Execute all subpart explainers + recorrido + resources in parallel
                 agents_start = time.time()
-                use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
+                use_or_canonical = use_openrouter_explainer and is_pdf_source and mistral_pdf_context is not None
                 use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
                 use_or = use_or_canonical or use_or_direct
                 if use_subpart_explainer:
@@ -2133,8 +2183,8 @@ async def _process_project(
                     def _make_audited_subpart_task(idx: int):
                         sp_prompt = subpart_prompts[idx]
                         subparte = subpartes[idx] if idx < len(subpartes) else None
-                        canonical_source_path = openrouter_pdf_context.source_pdf_path if use_or_canonical else None
-                        canonical_cache_entry = openrouter_pdf_context.cache_entry if use_or_canonical else None
+                        canonical_source_path = mistral_pdf_context.source_pdf_path if use_or_canonical else None
+                        canonical_cache_entry = mistral_pdf_context.cache_entry if use_or_canonical else None
                         canonical_page_scope = tuple(openrouter_page_scopes[idx]) if use_or_canonical else ()
 
                         async def _audited():
@@ -2203,12 +2253,12 @@ async def _process_project(
                         parallel_explainer = [
                             asyncio.to_thread(
                                 explainer_fn_or,
-                                openrouter_pdf_context.source_pdf_path,
+                                mistral_pdf_context.source_pdf_path,
                                 sp_prompt,
                                 explainer_model,
                                 "application/pdf",
                                 openrouter_api_key,
-                                openrouter_pdf_context.cache_entry,
+                                mistral_pdf_context.cache_entry,
                                 page_scope,
                             )
                             for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
@@ -2505,19 +2555,19 @@ async def _process_project(
         update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
-        if openrouter_pdf_prepare_task is not None:
+        if mistral_pdf_prepare_task is not None:
             try:
-                if not openrouter_pdf_prepare_task.done():
-                    openrouter_pdf_prepare_task.cancel()
+                if not mistral_pdf_prepare_task.done():
+                    mistral_pdf_prepare_task.cancel()
                     try:
-                        await openrouter_pdf_prepare_task
+                        await mistral_pdf_prepare_task
                     except asyncio.CancelledError:
                         pass
-                elif openrouter_pdf_context is None:
-                    prepared_context = openrouter_pdf_prepare_task.result()
+                elif mistral_pdf_context is None:
+                    prepared_context = mistral_pdf_prepare_task.result()
             except Exception as exc:
                 logger.debug(
-                    "[Process] Cierre del task OCR canónico OpenRouter sin contexto reutilizable",
+                    "[Process] Cierre del task OCR canónico Mistral sin contexto reutilizable",
                     extra={
                         "project_id": project_id,
                         "error_type": type(exc).__name__,

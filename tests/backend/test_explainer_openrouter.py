@@ -637,3 +637,56 @@ def test_run_subpart_explainer_or_uses_all_cached_pages_when_no_subset_is_given(
     assert usage.total_token_count == 48
     assert result["desarrollo"][0]["titulo_seccion"] == "Bloque temático"
     assert captured_call["response_format"] == "json_object"
+
+
+from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrParsedPage
+
+
+def test_run_subpart_explainer_or_uses_cached_mistral_page_subset(monkeypatch):
+    source_path = _write_text_source()
+    captured: dict = {}
+
+    def _fake_chat(**kwargs):
+        captured.update(kwargs)
+        return (
+            {
+                "desarrollo": [
+                    {
+                        "titulo_seccion": "Bloque",
+                        "explicacion_introductoria": "Contexto",
+                        "subsecciones": [
+                            {
+                                "titulo_subseccion": "Detalle",
+                                "explicacion_detallada": "Explicación",
+                            }
+                        ],
+                    }
+                ]
+            },
+            _usage(),
+        )
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_chat)
+
+    cache_entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(2,),
+        cached_page_numbers=(2,),
+        page_index=(PdfOcrParsedPage(page_number=2, markdown="Texto OCR página 2"),),
+    )
+
+    module.run_subpart_explainer_or(
+        source_path=source_path,
+        identificacion="Prompt de prueba",
+        mime_type="application/pdf",
+        api_key="sk-or-v1-test",
+        pdf_cache_entry=cache_entry,
+        page_numbers=(2,),
+    )
+
+    inline_text = captured["messages"][0]["content"][0]["text"]
+    assert "Texto OCR página 2" in inline_text
+    assert "Prompt de prueba" in inline_text

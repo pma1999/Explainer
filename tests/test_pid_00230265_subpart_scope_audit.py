@@ -19,7 +19,6 @@ def main() -> None:
     from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
     from backend.agents.page_classifier import run_page_classifier
     from backend.agents.explainer_openrouter import (
-        OPENROUTER_PDF_PARSER_ENGINE,
         run_subpart_explainer_or,
     )
     from backend.gemini_model_routing import MODEL_CLASSIFIER, MODEL_SEGMENTADOR
@@ -27,11 +26,12 @@ def main() -> None:
     from backend.pdf_utils import add_page_numbers, extract_page_range
     from backend.subpart_scope import build_subpart_scope_summary
     from backend.subpart_scope_auditor import run_subpart_scope_auditor
+    from backend.mistral_ocr_client import MISTRAL_OCR_ENGINE
     from main import (
         _build_content_pages_prefix,
         _build_pdf_table_of_contents,
         _build_subpart_pdf_prompt,
-        _prepare_openrouter_pdf_context,
+        _prepare_mistral_pdf_ocr_context,
         _select_openrouter_pdf_pages,
         PartHandoffContext,
     )
@@ -39,7 +39,7 @@ def main() -> None:
     from pypdf import PdfReader
 
     api_key = os.environ["GEMINI_API_KEY"].strip()
-    openrouter_key = os.environ["OPENROUTER_API_KEY"].strip()
+    mistral_key = os.environ["MISTRAL_API_KEY"].strip()
     pdf_path = os.path.join(PROJECT_ROOT, "PID_00230265.pdf")
     numbered = add_page_numbers(pdf_path)
     total_pages = len(PdfReader(numbered).pages)
@@ -56,16 +56,27 @@ def main() -> None:
     try:
         # Mirror main.py: prepare canonical OCR once, but degrade to local per-part PDFs if it fails.
         try:
-            or_pdf_ctx = _prepare_openrouter_pdf_context(
+            or_pdf_ctx = _prepare_mistral_pdf_ocr_context(
                 numbered_pdf_path=numbered,
                 content_page_set=content_page_set,
-                api_key=openrouter_key,
-                engine=OPENROUTER_PDF_PARSER_ENGINE,
+                api_key=mistral_key,
+                engine=MISTRAL_OCR_ENGINE,
             )
+            diagnostic_artifact_path = getattr(
+                or_pdf_ctx.cache_entry,
+                "diagnostic_artifact_path",
+                None,
+            )
+            if diagnostic_artifact_path:
+                print(
+                    f"[INFO] OCR unresolved-page artifact: {diagnostic_artifact_path}",
+                    file=sys.stderr,
+                )
+            print(f"[INFO] Cached pages: {or_pdf_ctx.cache_entry.cached_page_numbers}", file=sys.stderr)
         except Exception as exc:
             or_pdf_ctx = None
             print(
-                f"[WARN] No se pudo preparar el OCR canónico OpenRouter; se usará el flujo local por parte: {exc}",
+                f"[WARN] No se pudo preparar el OCR canónico de Mistral; se usará el flujo local por parte: {exc}",
                 file=sys.stderr,
             )
 

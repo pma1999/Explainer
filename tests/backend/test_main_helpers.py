@@ -148,6 +148,34 @@ def test_prepare_openrouter_pdf_context_keeps_actual_priming_model(monkeypatch):
     assert context.priming_model == m.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL
 
 
+def test_prepare_openrouter_pdf_context_exposes_diagnostic_artifact_path(monkeypatch):
+    import main as m
+
+    fake_cache_entry = SimpleNamespace(
+        cache_hit=False,
+        cache_path="cache.json",
+        expected_page_numbers=(1, 3),
+        cached_page_numbers=(1, 3),
+        diagnostic_artifact_path="cache.json.missing-pages.json",
+    )
+
+    monkeypatch.setattr(
+        m,
+        "prime_pdf_parse_cache_with_fallback",
+        lambda **kwargs: (fake_cache_entry, m.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL),
+    )
+
+    context = m._prepare_openrouter_pdf_context(
+        numbered_pdf_path="document-numbered.pdf",
+        content_page_set=frozenset({1, 3}),
+        api_key="sk-or-v1-test",
+        engine="mistral-ocr",
+    )
+
+    assert context.cache_entry.diagnostic_artifact_path == "cache.json.missing-pages.json"
+    assert context.priming_model == m.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL
+
+
 def _scope_handoff():
     import main as m
 
@@ -229,3 +257,33 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
     assert "Burocracia" in prompt
     assert "Tomás de Aquino" in prompt
     assert "Consejos" in prompt
+
+
+def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch):
+    import main as m
+
+    captured: dict = {}
+    fake_cache_entry = SimpleNamespace(
+        cache_hit=False,
+        cache_path="cache.json",
+        expected_page_numbers=(1, 3),
+        cached_page_numbers=(1, 3),
+        page_index=(),
+    )
+
+    def _fake_get_or_prime(**kwargs):
+        captured.update(kwargs)
+        return fake_cache_entry
+
+    monkeypatch.setattr(m, "get_or_prime_mistral_pdf_ocr_cache", _fake_get_or_prime)
+
+    context = m._prepare_mistral_pdf_ocr_context(
+        numbered_pdf_path="document-numbered.pdf",
+        content_page_set=frozenset({3, 1}),
+        api_key="mistral-test-key",
+        engine="mistral-native",
+    )
+
+    assert captured["expected_page_numbers"] == (1, 3)
+    assert context.source_pdf_path == "document-numbered.pdf"
+    assert context.cache_entry is fake_cache_entry

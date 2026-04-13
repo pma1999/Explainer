@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import os
 import tempfile
 from pathlib import Path
@@ -87,7 +88,11 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(payload))
+        monkeypatch.setattr(
+            main,
+            "update_project",
+            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+        )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
         async def _send_event(project_id, payload):
@@ -331,7 +336,11 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
             lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(payload))
+        monkeypatch.setattr(
+            main,
+            "update_project",
+            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+        )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
         async def _send_event(project_id, payload):
@@ -443,7 +452,11 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(payload))
+        monkeypatch.setattr(
+            main,
+            "update_project",
+            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+        )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
         async def _send_event(project_id, payload):
@@ -542,6 +555,157 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
         assert usage_updates[0]["openrouter_pdf_priming_model"] == main.OPENROUTER_PDF_PRIMING_MODEL
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_records_openrouter_ocr_diagnostic_artifact_when_present(monkeypatch):
+    pdf_path = _create_multi_page_pdf(4)
+    try:
+        project = {
+            "id": "proj-openrouter-diagnostic-artifact",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+        }
+
+        timeline = []
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(
+            main,
+            "update_project",
+            lambda pid, uid, payload: timeline.append(("update_project", deepcopy(payload))),
+        )
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+
+        async def _send_event(project_id, payload):
+            timeline.append(("send_event", deepcopy(payload)))
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, project_id):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier",
+            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
+        )
+        monkeypatch.setattr(
+            main,
+            "_prepare_openrouter_pdf_context",
+            lambda **kwargs: main.OpenRouterPreparedPdfContext(
+                source_pdf_path=pdf_path,
+                cache_entry=OpenRouterPdfParseCacheEntry(
+                    source_sha256="sha256",
+                    engine="mistral-ocr",
+                    assistant_message=None,
+                    cache_path="cache.json",
+                    cache_hit=False,
+                    expected_page_numbers=(1, 2, 3, 4),
+                    cached_page_numbers=(1, 2, 3, 4),
+                    page_index=(),
+                    diagnostic_artifact_path="cache.json.missing-pages.json",
+                ),
+                priming_model=main.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+            ),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_segmentador",
+            lambda *args, **kwargs: (
+                {
+                    "analisis_texto": "Cuatro páginas",
+                    "temas_identificados": ["tema1"],
+                    "decision_num_partes": 1,
+                    "decision_justificacion": "Una parte",
+                    "partes": [_part_pdf_fields(1, "Única", 1, 4)],
+                    "consideraciones_estudiante": "Seguir el orden natural",
+                },
+                _usage(total=40),
+            ),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_explainer",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini explainer no debería ejecutarse")),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_explainer_or",
+            lambda *args, **kwargs: (
+                {
+                    "introduccion": "Intro",
+                    "desarrollo": [],
+                    "conclusion": "Cierre",
+                    "conexiones_contextuales": [],
+                },
+                _usage(total=27),
+            ),
+        )
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+
+        async def _fake_format(api_key, explainer_data):
+            return explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}
+
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        asyncio.run(
+            main._process_project(
+                "proj-openrouter-diagnostic-artifact",
+                "user-123",
+                explainer_provider="openrouter",
+            )
+        )
+
+        part_started_idx = next(
+            idx
+            for idx, (kind, payload) in enumerate(timeline)
+            if kind == "send_event" and payload.get("type") == "part_started"
+        )
+        artifact_update_indices = [
+            idx
+            for idx, (kind, payload) in enumerate(timeline)
+            if kind == "update_project"
+            and isinstance(payload.get("usage"), dict)
+            and payload["usage"].get("openrouter_pdf_ocr_diagnostic_artifact") == "cache.json.missing-pages.json"
+        ]
+        artifact_event_indices = [
+            idx
+            for idx, (kind, payload) in enumerate(timeline)
+            if kind == "send_event"
+            and payload.get("type") == "usage_update"
+            and isinstance(payload.get("usage"), dict)
+            and payload["usage"].get("openrouter_pdf_ocr_diagnostic_artifact") == "cache.json.missing-pages.json"
+        ]
+
+        assert artifact_update_indices
+        assert artifact_event_indices
+        assert artifact_update_indices[0] < part_started_idx
+        assert artifact_event_indices[0] < part_started_idx
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
@@ -917,6 +1081,100 @@ def test_process_project_pdf_openrouter_retry_reuses_cache_and_includes_rewrite_
         assert "REESCRIBE desde cero el campo `desarrollo`." in retry_prompt
         assert formatter_calls["count"] == 1
         assert not any("Error inesperado al formatear parte" in message for message in caplog.messages)
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_context(monkeypatch):
+    pdf_path = _create_multi_page_pdf(5)
+    try:
+        project = {
+            "id": "proj-openrouter-mistral-backfill",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+        }
+
+        prepare_calls = []
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: (
+                "AIzaFakeKey"
+                if provider == main.PROVIDER_GEMINI
+                else "sk-or-v1-test"
+                if provider == main.PROVIDER_OPENROUTER
+                else "mistral-test-key"
+            ),
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+        async def _send_event(*args, **kwargs):
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, *args, **kwargs):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+        monkeypatch.setattr(main, "upload_file_with_retry", lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"))
+        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 4, 5]), _usage(), {}))
+        monkeypatch.setattr(
+            main,
+            "_prepare_mistral_pdf_ocr_context",
+            lambda **kwargs: prepare_calls.append(kwargs) or main.PreparedPdfOcrContext(
+                source_pdf_path=pdf_path,
+                cache_entry=SimpleNamespace(
+                    cache_hit=False,
+                    cache_path="cache.json",
+                    expected_page_numbers=(1, 2, 4, 5),
+                    cached_page_numbers=(1, 2, 4, 5),
+                    page_index=(),
+                ),
+            ),
+        )
+        monkeypatch.setattr(main, "run_segmentador", lambda *args, **kwargs: ({
+            "analisis_texto": "Cinco páginas",
+            "temas_identificados": ["tema1"],
+            "decision_num_partes": 1,
+            "decision_justificacion": "Una parte",
+            "partes": [{
+                "numero": 1,
+                "titulo": "Única",
+                "contenido": "Contenido único",
+                "identificacion": "Páginas 1-5",
+                "pagina_inicio": 1,
+                "pagina_fin": 5,
+                "temas_cubiertos": ["tema1"],
+                "extension_estimada": "media",
+                "complejidad": "media",
+                "expansion_prevista": "alta",
+                "subpartes": [],
+            }],
+            "consideraciones_estudiante": "Orden natural",
+        }, _usage(total=20)))
+        monkeypatch.setattr(main, "run_explainer_or", lambda *args, **kwargs: ({"introduccion": "", "desarrollo": [], "conclusion": "", "conexiones_contextuales": []}, _usage()))
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        async def _fake_format(*args, **kwargs):
+            return (
+                {"introduccion": "", "desarrollo": [], "conclusion": "", "conexiones_contextuales": []},
+                {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0},
+            )
+
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        asyncio.run(main._process_project("proj-openrouter-mistral-backfill", "user-123", explainer_provider="openrouter"))
+
+        assert prepare_calls[0]["content_page_set"] == frozenset({1, 2, 4, 5})
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)

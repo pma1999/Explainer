@@ -445,6 +445,7 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
 
 PROVIDER_GEMINI = "google_gemini"
 PROVIDER_OPENROUTER = "openrouter"
+PROVIDER_MISTRAL = "mistral"
 
 
 def has_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:

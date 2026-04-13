@@ -20,6 +20,8 @@ from backend.openrouter_client import (
     get_or_prime_pdf_parse_cache,
     render_pdf_page_subset_to_text,
 )
+from backend.mistral_ocr_client import MISTRAL_OCR_ENGINE, MISTRAL_OCR_MODEL
+from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_text as render_mistral_pdf_page_subset
 from backend.agents.explainer_prompts import (
     SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
     SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
@@ -520,104 +522,32 @@ def _call_openrouter_json_with_pdf_fallback(
     system_prompt: str,
     response_format: Literal["json_object"] | OpenRouterJsonSchemaResponseFormat,
     api_key: str,
-    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     try:
-        if mime_type == "application/pdf":
-            priming_model_used = OPENROUTER_PDF_PRIMING_MODEL
-            if pdf_cache_entry is None:
-                cache_entry, priming_model_used = prime_pdf_parse_cache_with_fallback(
-                    source_path=source_path,
-                    api_key=api_key,
-                    engine=OPENROUTER_PDF_PARSER_ENGINE,
-                    filename="document.pdf",
-                    expected_page_numbers=page_numbers,
-                )
-            else:
-                cache_entry = pdf_cache_entry
-            cached_page_numbers = getattr(cache_entry, "cached_page_numbers", ())
-            logger.info(
-                "Usando cache de parseo OpenRouter para PDF",
-                extra={
-                    "source_path": source_path,
-                    "model": model,
-                    "pdf_priming_model": priming_model_used,
-                    "pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
-                    "cache_hit": cache_entry.cache_hit,
-                    "cache_path": cache_entry.cache_path,
-                    "cached_pages_count": len(cached_page_numbers),
-                },
+        if mime_type == "application/pdf" and pdf_cache_entry is not None:
+            requested_pages = page_numbers or pdf_cache_entry.cached_page_numbers
+            ocr_text = render_mistral_pdf_page_subset(
+                cache_entry=pdf_cache_entry,
+                page_numbers=requested_pages,
             )
-            requested_pages = page_numbers or cached_page_numbers
-            if requested_pages and cache_entry.page_index:
-                ocr_text = render_pdf_page_subset_to_text(
-                    cache_entry=cache_entry,
-                    page_numbers=requested_pages,
-                )
-                inline_messages = _build_inline_text_messages(ocr_text, identificacion)
-                return call_openrouter_chat(
-                    messages=inline_messages,
-                    model=model,
-                    system_prompt=system_prompt,
-                    api_key=api_key,
-                    response_format=response_format,
-                    plugins=None,
-                    enable_response_healing=True,
-                    reasoning={"effort": "xhigh", "exclude": True},
-                    temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
-                )
-            if cache_entry.assistant_message is not None and cache_entry.assistant_message.annotations:
-                messages = build_messages_with_cached_pdf_annotations(
-                    source_path=source_path,
-                    cache_entry=cache_entry,
-                    user_text=identificacion,
-                    filename="document.pdf",
-                )
-                return call_openrouter_chat(
-                    messages=messages,
-                    model=model,
-                    system_prompt=system_prompt,
-                    api_key=api_key,
-                    response_format=response_format,
-                    plugins=None,
-                    enable_response_healing=True,
-                    reasoning={"effort": "xhigh", "exclude": True},
-                    temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
-                )
-            raise OpenRouterError(
-                "El cache OCR del PDF no contiene páginas reutilizables ni annotations completas."
+            inline_messages = _build_inline_text_messages(ocr_text, identificacion)
+            return call_openrouter_chat(
+                messages=inline_messages,
+                model=model,
+                system_prompt=system_prompt,
+                api_key=api_key,
+                response_format=response_format,
+                plugins=None,
+                enable_response_healing=True,
+                reasoning={"effort": "xhigh", "exclude": True},
+                temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
             )
+    except PdfOcrError:
+        logger.warning("La caché OCR de Mistral no pudo renderizar el subconjunto solicitado.")
 
-        content, plugins = _build_content(source_path, identificacion, mime_type)
-        messages = [{"role": "user", "content": content}]
-        return call_openrouter_chat(
-            messages=messages,
-            model=model,
-            system_prompt=system_prompt,
-            api_key=api_key,
-            response_format=response_format,
-            plugins=plugins,
-            enable_response_healing=True,
-            reasoning={"effort": "xhigh", "exclude": True},
-            temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
-        )
-    except OpenRouterError as exc:
-        if mime_type == "application/pdf":
-            if _is_pdf_parse_failure(exc):
-                logger.warning(
-                    "OpenRouter no pudo parsear el PDF con cache OCR; activando fallback a texto local",
-                    extra={
-                        "source_path": source_path,
-                        "model": model,
-                        "pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
-                    },
-                )
-            elif "annotations" not in str(exc).lower():
-                raise
-        else:
-            raise
-
+    if mime_type == "application/pdf":
         fallback_text_path = _extract_pdf_text_to_temp(source_path)
         try:
             fallback_content, fallback_plugins = _build_content(
@@ -625,9 +555,8 @@ def _call_openrouter_json_with_pdf_fallback(
                 identificacion,
                 "text/plain",
             )
-            fallback_messages = [{"role": "user", "content": fallback_content}]
             return call_openrouter_chat(
-                messages=fallback_messages,
+                messages=[{"role": "user", "content": fallback_content}],
                 model=model,
                 system_prompt=system_prompt,
                 api_key=api_key,
@@ -641,10 +570,22 @@ def _call_openrouter_json_with_pdf_fallback(
             try:
                 os.unlink(fallback_text_path)
             except OSError:
-                logger.warning(
-                    "No se pudo eliminar el archivo temporal del fallback OpenRouter",
-                    extra={"fallback_text_path": fallback_text_path},
-                )
+                logger.warning("No se pudo borrar el fallback textual temporal: %s", fallback_text_path)
+
+    # Non-PDF path (text/plain, web, etc.)
+    content, plugins = _build_content(source_path, identificacion, mime_type)
+    messages = [{"role": "user", "content": content}]
+    return call_openrouter_chat(
+        messages=messages,
+        model=model,
+        system_prompt=system_prompt,
+        api_key=api_key,
+        response_format=response_format,
+        plugins=plugins,
+        enable_response_healing=True,
+        reasoning={"effort": "xhigh", "exclude": True},
+        temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+    )
 
 def _build_content(source_path: str, identificacion: str, mime_type: str) -> tuple[list[dict], list[dict] | None]:
     """
@@ -687,7 +628,7 @@ def run_explainer_or(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
-    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
@@ -752,7 +693,7 @@ def run_subpart_explainer_or(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
-    pdf_cache_entry: OpenRouterPdfParseCacheEntry | None = None,
+    pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer de subparte vía OpenRouter — retorna solo `desarrollo` estructurado."""
