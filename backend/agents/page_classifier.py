@@ -5,7 +5,7 @@ import json
 import time
 from typing import Any
 
-from backend.gemini_model_routing import MODEL_CLASSIFIER
+from backend.gemini_model_routing import MODEL_CLASSIFIER, TEMPERATURE_PAGE_CLASSIFIER
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 
@@ -159,6 +159,75 @@ def _parse_classifier_result(result: dict[str, Any], total_pages: int) -> frozen
     return frozenset(content_pages)
 
 
+def validate_classifier_partition(
+    result: dict[str, Any],
+    total_pages: int,
+) -> tuple[bool, list[str]]:
+    """Check that rangos_contenido and rangos_no_contenido partition 1..total_pages (MECE).
+
+    Returns (is_valid, error_messages). Used for audits and tests.
+    """
+    from backend.segmentation_page_coverage import _compact_page_list
+
+    errors: list[str] = []
+    content_pages: set[int] = set()
+    non_content_pages: set[int] = set()
+
+    for label, key in (("contenido", "rangos_contenido"), ("no_contenido", "rangos_no_contenido")):
+        for r in result.get(key, []) or []:
+            if not isinstance(r, dict):
+                errors.append(f"{label}: entrada no es un objeto: {r!r}")
+                continue
+            try:
+                inicio = int(r["inicio"])
+                fin = int(r["fin"])
+            except (KeyError, TypeError, ValueError) as exc:
+                errors.append(f"{label}: rango inválido {r!r}: {exc}")
+                continue
+            if inicio > fin:
+                errors.append(f"{label}: inicio>fin ({inicio}-{fin})")
+                continue
+            for p in range(inicio, fin + 1):
+                if p < 1 or p > total_pages:
+                    errors.append(f"{label}: página {p} fuera del rango 1..{total_pages}")
+                    continue
+                if label == "contenido":
+                    content_pages.add(p)
+                else:
+                    non_content_pages.add(p)
+
+    both = content_pages & non_content_pages
+    if both:
+        errors.append(
+            "Solapamiento contenido/accesorio en páginas: "
+            f"{_compact_page_list(sorted(both))}"
+        )
+
+    all_expected = set(range(1, total_pages + 1))
+    union = content_pages | non_content_pages
+    missing = sorted(all_expected - union)
+    if missing:
+        errors.append(
+            "Páginas sin clasificar (huecos): "
+            f"{_compact_page_list(missing)}"
+        )
+    extra = sorted(union - all_expected)
+    if extra:
+        errors.append(f"Páginas fuera de 1..{total_pages}: {extra}")
+
+    reported = result.get("total_paginas")
+    if reported is not None:
+        try:
+            if int(reported) != total_pages:
+                errors.append(
+                    f"total_paginas en JSON ({reported}) != recuento pypdf ({total_pages})"
+                )
+        except (TypeError, ValueError):
+            errors.append(f"total_paginas no es entero válido: {reported!r}")
+
+    return (len(errors) == 0, errors)
+
+
 @gemini_retry(max_retries=5)
 def run_page_classifier(
     api_key: str,
@@ -166,12 +235,13 @@ def run_page_classifier(
     total_pages: int,
     model: str = MODEL_CLASSIFIER,
     mime_type: str = "application/pdf",
-) -> tuple[frozenset[int], Any]:
+) -> tuple[frozenset[int], Any, dict[str, Any]]:
     """Classify PDF pages into content vs. non-content.
 
     Calls the Gemini API with the numbered PDF and returns a frozenset of
     1-indexed page numbers that contain substantive content, plus ``usage_metadata``
-    from the response (for token/cost tracking, same pattern as ``run_segmentador``).
+    from the response (for token/cost tracking, same pattern as ``run_segmentador``),
+    and the parsed JSON object (for auditing classifier range consistency).
 
     Args:
         total_pages: Expected total page count from pypdf (used for sanity check).
@@ -204,6 +274,7 @@ def run_page_classifier(
     ]
 
     config = types.GenerateContentConfig(
+        temperature=TEMPERATURE_PAGE_CLASSIFIER,
         thinking_config=types.ThinkingConfig(thinking_level="LOW"),
         response_mime_type="application/json",
         response_schema=RESPONSE_SCHEMA,
@@ -237,4 +308,4 @@ def run_page_classifier(
         },
     )
 
-    return content_pages, response.usage_metadata
+    return content_pages, response.usage_metadata, result

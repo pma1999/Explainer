@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
-from backend.gemini_model_routing import MODEL_SEGMENTADOR
+from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTADOR
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
@@ -156,7 +156,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   2. **MECE interno y consistencia vertical**: Las subpartes de una parte deben cubrir TODOS los temas y unidades estructurales de esa parte sin solapamientos ni huecos. Los temas_cubiertos de las subpartes deben sumar exactamente los temas_cubiertos de la parte padre, sin faltantes, sin sobrantes y sin duplicados.
   3. **Rangos contiguos**: Las subpartes deben usar subrangos contiguos dentro del rango de páginas de la parte padre. No puede haber huecos ni solapamientos de páginas entre subpartes.
   4. **Granularidad adecuada**: Divide cuando haya cambios temáticos claros dentro de la parte. Si hay subsecciones explícitas, usa esas subsecciones como átomos base de las subpartes. Mínimo 1 subparte si la parte es ya suficientemente focalizada; típicamente 2-4 subpartes por parte.
-  5. **Identificación precisa**: Cada subparte necesita su propia identificación con frases textuales de inicio y fin, igual que las partes.
+  5. **Identificación precisa (obligatoria, formato anti-duplicidad)**: Cada subparte debe llevar un campo `identificacion` redactado para que un explainer **sin acceso al resto del documento** sepa exactamente qué explicar y qué no. Sigue **todas** las reglas del PASO 7 (plantilla obligatoria).
 
   **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
 
@@ -251,7 +251,12 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
     Esto solo es válido para UNA página por transición; si el solapamiento es de más de
     una página es un error.
   - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte y que ninguna subsección explícita queda repartida entre varias subpartes
-  - Cada subparte necesita identificación precisa con frases textuales de inicio y fin
+  - **FORMATO OBLIGATORIO del campo `identificacion` en cada subparte (PDF)** — redacta en un solo texto, en este orden, sin omitir secciones:
+    1) **Línea de núcleo**: «NÚCLEO SEGÚN MARCAS PDF: páginas X–Y.» donde X e Y son **exactamente** `pagina_inicio` y `pagina_fin` de esta subparte (deben coincidir con «— Página X / N —»).
+    2) **Inicio del contenido a explicar**: número y título de capítulo/sección/apartado si existen, y **cita textual entre comillas** con las primeras 8–15 palabras del primer párrafo o línea que entra en esta subparte (texto literal del PDF).
+    3) **Fin del contenido a explicar**: **cita textual entre comillas** con las últimas 8–15 palabras del tramo que pertenece a esta subparte; o, si el corte es por encabezado siguiente, indica el título del bloque siguiente que **no** entra y dónde empieza («el apartado Z comienza después de …»).
+    4) **Si `pagina_fin` de la subparte anterior = `pagina_inicio` de esta (página de transición compartida)**: añade un párrafo «PÁGINA P COMPARTIDA:» que diga con precisión qué trozo de esa página corresponde **solo** a la subparte anterior y qué trozo **solo** a esta (por ejemplo: «hasta el final del párrafo que termina “…”; a partir del encabezado “…” es la siguiente subparte»). Sin esta frontera explícita, la salida del explainer puede duplicarse.
+    5) Prohibido dejar límites vagos («hasta donde habla de X» sin citas). Prohibido asignar a dos subpartes el mismo párrafo sustantivo.
 - Para cada parte, redacta:
   - **introduccion**: contextualización pedagógica aprovechando tu visión global del documento
   - **conclusion**: síntesis integradora de las ideas clave de la parte
@@ -404,8 +409,12 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                 "identificacion": genai.types.Schema(
                                     type=genai.types.Type.STRING,
                                     description=(
-                                        "Identificación autocontenida y precisa de dónde empieza y termina "
-                                        "esta subparte en el texto original, con frases textuales de inicio y fin."
+                                        "OBLIGATORIO: texto con (1) línea «NÚCLEO SEGÚN MARCAS PDF: páginas X–Y» "
+                                        "igual a pagina_inicio/pagina_fin; (2) inicio con sección/apartado y "
+                                        "8–15 primeras palabras citadas del PDF; (3) fin con 8–15 últimas palabras citadas "
+                                        "o encabezado excluido; (4) si hay página compartida con la subparte anterior, "
+                                        "párrafo «PÁGINA P COMPARTIDA» que parta el contenido sin solapar. "
+                                        "Debe evitar toda ambigüedad para el explainer (cobertura total de la subparte, cero duplicidad con otras)."
                                     ),
                                 ),
                                 "pagina_inicio": genai.types.Schema(
@@ -564,7 +573,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   2. **MECE interno y consistencia vertical**: Las subpartes cubren TODOS los temas y unidades estructurales de la parte sin solapamientos ni huecos. Su unión debe coincidir exactamente con lo declarado por la parte padre, sin faltantes, sobrantes ni duplicados.
   3. **Rangos contiguos**: Subrangos de bloques contiguos dentro del rango de la parte padre.
   4. **Granularidad adecuada**: Si hay subsecciones explícitas, úsalas como átomos base de las subpartes. Mínimo 1 subparte si la parte es ya muy focalizada; típicamente 2-4 subpartes por parte.
-  5. **Identificación precisa**: Cada subparte necesita identificación con frases textuales de inicio y fin.
+  5. **Identificación precisa (anti-duplicidad)**: Cada subparte debe incluir `identificacion` con: línea «NÚCLEO: bloques A–B»; citas textuales de inicio y fin (8–15 palabras); y si hay transición compartida, frontera explícita para que el explainer no repita contenido de otra subparte.
 
   **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
 
@@ -840,8 +849,11 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                                 "identificacion": genai.types.Schema(
                                     type=genai.types.Type.STRING,
                                     description=(
-                                        "Identificación autocontenida y precisa de dónde empieza y termina "
-                                        "esta subparte en el texto, con frases textuales de inicio y fin."
+                                        "OBLIGATORIO: (1) línea «NÚCLEO: bloques A–B» coincidente con bloque_inicio/bloque_fin; "
+                                        "(2) inicio con sección/apartado y 8–15 primeras palabras citadas del texto; "
+                                        "(3) fin con 8–15 últimas palabras citadas o encabezado/bloque excluido; "
+                                        "(4) si un bloque o línea es compartido en la transición entre subpartes, "
+                                        "párrafo que delimite qué fragmento explica cada subparte (sin duplicar)."
                                     ),
                                 ),
                                 "bloque_inicio": genai.types.Schema(
@@ -952,6 +964,7 @@ def run_segmentador(
     system_instruction = SYSTEM_INSTRUCTION if source_kind == "pdf" else TEXT_SYSTEM_INSTRUCTION
 
     config = types.GenerateContentConfig(
+        temperature=TEMPERATURE_SEGMENTADOR,
         thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         response_mime_type="application/json",
         response_schema=response_schema,

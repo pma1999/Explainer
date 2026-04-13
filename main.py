@@ -760,22 +760,57 @@ def _pdf_scope_instructions(
     num_partes: int,
     nucleo_inicio: int | None,
     nucleo_fin: int | None,
+    nucleo_unit: Literal["parte", "subparte"] = "parte",
+    subparte_num: int | None = None,
+    subparte_total: int | None = None,
 ) -> str:
     if mode == "subpdf_buffered":
         if nucleo_inicio is not None and nucleo_fin is not None:
+            is_sp = nucleo_unit == "subparte"
+            unit_goal = "subparte" if is_sp else "parte"
+            ejecucion_line = (
+                f"Esta ejecución: Subparte {subparte_num}/{subparte_total} "
+                f"de la Parte {part_id}/{num_partes}.\n\n"
+                if (
+                    is_sp
+                    and subparte_num is not None
+                    and subparte_total is not None
+                )
+                else f"Esta ejecución: Parte {part_id}/{num_partes}.\n\n"
+            )
+            pdf_carry = (
+                "NOTA IMPORTANTE: El PDF adjunto es el recorte de **toda la parte** (±1 página de buffer), "
+                "no solo las páginas del núcleo siguiente. "
+            ) if is_sp else ""
+
+            exclusividad = ""
+            if is_sp:
+                exclusividad = (
+                    "\n\nEXCLUSIVIDAD (obligatorio):\n"
+                    "- Tu salida debe cubrir **solo** el contenido del núcleo indicado (esta subparte). "
+                    "No desarrolles temas o párrafos que, según la identificación de la subparte, correspondan "
+                    "a otra subparte de la misma parte.\n"
+                    "- Si el núcleo comparte una página con la subparte anterior o siguiente, cíñete a la sección "
+                    "«PÁGINA … COMPARTIDA» de la identificación: explica únicamente el fragmento asignado a "
+                    "**esta** subparte; no repitas ni anticipes lo que corresponde a la otra.\n"
+                    "- El buffer sirve solo para continuidad de lectura en los bordes; no conviertas páginas de buffer "
+                    "en un segundo núcleo de estudio.\n"
+                )
+
             return (
                 "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
-                "El archivo recorta el documento original e incluye el NÚCLEO de esta parte "
-                f"(páginas {nucleo_inicio}–{nucleo_fin}, según las marcas «— Página X / N —» de la segmentación) "
-                "más hasta una página de contexto a cada lado (buffer), para no perder párrafos cortados entre módulos.\n\n"
-                "- Páginas NÚCLEO: son el objetivo principal de estudio de esta parte. "
-                "Todo contenido examinable del módulo debe basarse principalmente en este intervalo.\n"
+                f"{pdf_carry}"
+                f"Objetivo de estudio (NÚCLEO de {unit_goal}): páginas {nucleo_inicio}–{nucleo_fin} "
+                f"(marcas «— Página X / N —»).\n\n"
+                f"{ejecucion_line}"
+                "- Páginas NÚCLEO: intervalo anterior; ahí está todo lo que debes explicar con plenitud.\n"
                 "- Páginas solo de CONTEXTO (buffer): úsalas solo para recuperar enunciados partidos en el corte, "
                 "coherencia entre páginas colindantes o referencias inmediatas. "
                 "No las desarrolles como bloques didácticos independientes, no les asignes peso similar al núcleo "
-                "y no inventes exigencias de estudio basadas únicamente en el buffer.\n\n"
-                f"Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo según el contrato de cobertura; "
-                "el temario de otras partes no es objeto de este procesamiento."
+                "y no inventes exigencias de estudio basadas únicamente en el buffer."
+                f"{exclusividad}"
+                f"\nParte {part_id}/{num_partes}: procesa únicamente este módulo; "
+                "el temario de otras partes no es objeto de esta ejecución."
             )
         return (
             "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
@@ -926,6 +961,12 @@ def _build_subpart_context(
         f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}."
     )
     lines.append(
+        "CONTRATO DE FOCO: limita el desarrollo al núcleo indicado en el bloque de alcance del PDF/texto "
+        "y a la identificación de esta subparte. No repitas ni expliques trozos asignados a otras subpartes; "
+        "si la identificación incluye «PÁGINA … COMPARTIDA» o equivalente para un tramo compartido, "
+        "respeta esa frontera al pie de la letra."
+    )
+    lines.append(
         "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
         "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
         "por el segmentador con visión global del documento completo."
@@ -975,12 +1016,16 @@ def _build_subpart_pdf_prompt(
     # Use subpart page range for scope instructions
     sp_pi = _optional_int(subparte, "pagina_inicio") or nucleo_inicio
     sp_pf = _optional_int(subparte, "pagina_fin") or nucleo_fin
+    sp_no = _optional_int(subparte, "numero_subparte")
     scope = _pdf_scope_instructions(
         mode=pdf_scope_mode,
         part_id=part_id,
         num_partes=num_partes,
         nucleo_inicio=sp_pi,
         nucleo_fin=sp_pf,
+        nucleo_unit="subparte",
+        subparte_num=sp_no,
+        subparte_total=len(all_subpartes),
     )
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
@@ -995,7 +1040,8 @@ def _build_subpart_pdf_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
+        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
+        f"{sp_identificacion}"
     )
 
 
@@ -1034,7 +1080,8 @@ def _build_subpart_text_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
+        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
+        f"{sp_identificacion}"
     )
 
 
@@ -1067,7 +1114,8 @@ def _build_subpart_youtube_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN PRECISA DE LA SUBPARTE (texto del segmentador):\n{sp_identificacion}"
+        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
+        f"{sp_identificacion}"
     )
 
 
@@ -1489,7 +1537,7 @@ async def _process_project(
         # Clasificador de páginas (solo para PDF): identifica qué páginas son contenido vs. accesorias
         if source_type == "pdf" and numbered_pdf_path and file_uri and pdf_total_pages > 0:
             try:
-                content_page_set, clf_usage = await asyncio.to_thread(
+                content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
                     run_page_classifier,
                     api_key,
                     file_uri,
