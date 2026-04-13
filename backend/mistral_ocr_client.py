@@ -251,6 +251,7 @@ def get_or_prime_mistral_pdf_ocr_cache(
                 if ok:
                     row_version = new_row_version
                     wrote = True
+                    storage_ref = supabase_pdf_ocr_cache.supabase_cache_uri(source_sha256, engine)
                     break
                 latest_payload, latest_row_version = supabase_pdf_ocr_cache.fetch_cache(source_sha256, engine)
                 if latest_payload is None:
