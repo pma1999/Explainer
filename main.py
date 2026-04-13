@@ -8,7 +8,8 @@ import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated, AsyncGenerator, Literal
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, AsyncGenerator, Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -89,6 +90,16 @@ from backend.url_extraction import (
     render_block_marked_document,
     slice_block_range,
     write_text_document_temp,
+)
+from backend.subpart_scope import (
+    build_subpart_negative_scope_block,
+    build_subpart_scope_contract_block,
+    build_subpart_scope_summary,
+)
+from backend.subpart_scope_auditor import (
+    MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS,
+    build_subpart_scope_retry_suffix,
+    run_subpart_scope_auditor,
 )
 
 
@@ -948,7 +959,6 @@ def _build_subpart_context(
     part_id: int,
     num_partes: int,
 ) -> str:
-    """Build the subpart-specific scope block for the explainer prompt."""
     sp_num = subparte.get("numero_subparte", 1)
     total_sp = len(all_subpartes)
     sp_titulo = subparte.get("titulo", f"Subparte {sp_num}")
@@ -956,40 +966,22 @@ def _build_subpart_context(
     sp_temas = subparte.get("temas_cubiertos", [])
 
     lines: list[str] = []
-    lines.append("ALCANCE DE LA SUBPARTE (EXPLAINER)")
-    lines.append(
-        f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}."
-    )
-    lines.append(
-        "CONTRATO DE FOCO: limita el desarrollo al núcleo indicado en el bloque de alcance del PDF/texto "
-        "y a la identificación de esta subparte. No repitas ni expliques trozos asignados a otras subpartes; "
-        "si la identificación incluye «PÁGINA … COMPARTIDA» o equivalente para un tramo compartido, "
-        "respeta esa frontera al pie de la letra."
-    )
+    lines.append("ALCANCE PEDAGÓGICO DE LA SUBPARTE")
+    lines.append(f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}.")
+    lines.append("Desarrolla SOLO el contenido asignado a esta subparte.")
+    lines.append("")
+    lines.append(f"Título: «{sp_titulo}»")
+    if sp_contenido:
+        lines.append(f"Contenido propio: {sp_contenido}")
+    if sp_temas:
+        lines.append("Temas propios a desarrollar:")
+        for i, tema in enumerate(sp_temas, 1):
+            lines.append(f"  {i}. {tema}")
     lines.append(
         "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
         "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
         "por el segmentador con visión global del documento completo."
     )
-    lines.append("")
-    lines.append(f"Título de esta subparte: «{sp_titulo}»")
-    if sp_contenido:
-        lines.append(f"Alcance: {sp_contenido}")
-    if sp_temas:
-        lines.append("Temas a desarrollar en esta subparte:")
-        for i, tema in enumerate(sp_temas, 1):
-            lines.append(f"  {i}. {tema}")
-
-    # Context about sibling subparts for continuity
-    if total_sp > 1:
-        lines.append("")
-        lines.append("Contexto de otras subpartes de esta misma parte (NO las expliques, solo para continuidad):")
-        for sp in all_subpartes:
-            sp_n = sp.get("numero_subparte", 0)
-            if sp_n != sp_num:
-                label = "anterior" if sp_n < sp_num else "siguiente"
-                lines.append(f"  - Subparte {sp_n} ({label}): {sp.get('titulo', '?')} — {sp.get('contenido', '')[:120]}")
-
     return "\n".join(lines)
 
 
@@ -1029,6 +1021,8 @@ def _build_subpart_pdf_prompt(
     )
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1040,8 +1034,11 @@ def _build_subpart_pdf_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
 
 
@@ -1069,6 +1066,8 @@ def _build_subpart_text_prompt(
     scope = _text_scope_instructions(part_id, num_partes, int(sp_bi), int(sp_bf))
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1080,8 +1079,11 @@ def _build_subpart_text_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
 
 
@@ -1103,6 +1105,8 @@ def _build_subpart_youtube_prompt(
     scope = _youtube_scope_instructions(part_id, num_partes)
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1114,9 +1118,43 @@ def _build_subpart_youtube_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
+
+
+async def _run_subpart_explainer_with_scope_audit(
+    *,
+    run_explainer_call: Callable[[str], Awaitable[tuple[dict[str, Any], Any]]],
+    initial_prompt: str,
+    audit_context_builder: Callable[[], dict[str, str]],
+    audit_api_key: str,
+    audit_model: str,
+) -> tuple[dict[str, Any], Any, list[Any]]:
+    prompt = initial_prompt
+    reviewer_usages: list[Any] = []
+
+    for _ in range(MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS):
+        result, usage = await run_explainer_call(prompt)
+        ctx = audit_context_builder()
+        report, review_usage = await asyncio.to_thread(
+            run_subpart_scope_auditor,
+            api_key=audit_api_key,
+            current_subpart_summary=ctx["current"],
+            previous_subpart_summary=ctx["previous"],
+            next_subpart_summary=ctx["next"],
+            desarrollo_payload=result,
+            model=audit_model,
+        )
+        reviewer_usages.append(review_usage)
+        if report.is_valid:
+            return result, usage, reviewer_usages
+        prompt = f"{initial_prompt}\n\n{build_subpart_scope_retry_suffix(report)}"
+
+    raise RuntimeError("El auditor de alcance de subparte agotó sus reintentos.")
 
 
 def _parse_text_source_evaluation(segmentation: dict[str, object]) -> dict[str, object]:
@@ -2075,14 +2113,78 @@ async def _process_project(
                 use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
                 use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
                 use_or = use_or_canonical or use_or_direct
-                if use_or:
-                    explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
+                if use_subpart_explainer:
+                    explainer_fn_or_sp = run_subpart_explainer_or
+                    explainer_fn_sp = run_subpart_explainer
+
+                    def _make_audited_subpart_task(idx: int):
+                        sp_prompt = subpart_prompts[idx]
+                        subparte = subpartes[idx] if idx < len(subpartes) else None
+
+                        async def _audited():
+                            def _audit_context() -> dict[str, str]:
+                                previous_sp = subpartes[idx - 1] if idx > 0 else None
+                                next_sp = subpartes[idx + 1] if idx + 1 < len(subpartes) else None
+                                return {
+                                    "current": build_subpart_scope_summary(subparte) if subparte else "",
+                                    "previous": build_subpart_scope_summary(previous_sp) if previous_sp else "",
+                                    "next": build_subpart_scope_summary(next_sp) if next_sp else "",
+                                }
+
+                            async def _call(prompt: str) -> tuple[dict[str, Any], Any]:
+                                if use_or:
+                                    if use_or_canonical:
+                                        return await asyncio.to_thread(
+                                            explainer_fn_or_sp,
+                                            openrouter_pdf_context.source_pdf_path,
+                                            prompt,
+                                            explainer_model,
+                                            "application/pdf",
+                                            openrouter_api_key,
+                                            openrouter_pdf_context.cache_entry,
+                                            openrouter_page_scopes[idx],
+                                        )
+                                    return await asyncio.to_thread(
+                                        explainer_fn_or_sp,
+                                        segment_temp_path,
+                                        prompt,
+                                        explainer_model,
+                                        agent_mime_type,
+                                        openrouter_api_key,
+                                    )
+                                return await asyncio.to_thread(
+                                    explainer_fn_sp,
+                                    api_key,
+                                    agent_file_uri,
+                                    prompt,
+                                    MODEL_AGENTS,
+                                    agent_mime_type,
+                                )
+
+                            return await _run_subpart_explainer_with_scope_audit(
+                                run_explainer_call=_call,
+                                initial_prompt=sp_prompt,
+                                audit_context_builder=_audit_context,
+                                audit_api_key=api_key,
+                                audit_model=MODEL_CLASSIFIER,
+                            )
+
+                        return _audited()
+
                     if use_or_canonical:
                         if len(openrouter_page_scopes) != len(subpart_prompts):
                             raise RuntimeError(
                                 "Las páginas OpenRouter no coinciden con el número de subprompts generados."
                             )
-                        explainer_calls = [
+                    parallel_explainer = [_make_audited_subpart_task(i) for i in range(num_subparts)]
+                elif use_or:
+                    explainer_fn_or = run_explainer_or
+                    if use_or_canonical:
+                        if len(openrouter_page_scopes) != len(subpart_prompts):
+                            raise RuntimeError(
+                                "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                            )
+                        parallel_explainer = [
                             asyncio.to_thread(
                                 explainer_fn_or,
                                 openrouter_pdf_context.source_pdf_path,
@@ -2096,7 +2198,7 @@ async def _process_project(
                             for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
                         ]
                     else:
-                        explainer_calls = [
+                        parallel_explainer = [
                             asyncio.to_thread(
                                 explainer_fn_or,
                                 segment_temp_path,
@@ -2108,13 +2210,13 @@ async def _process_project(
                             for sp_prompt in subpart_prompts
                         ]
                 else:
-                    explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
-                    explainer_calls = [
+                    explainer_fn = run_explainer
+                    parallel_explainer = [
                         asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
                         for sp_prompt in subpart_prompts
                     ]
                 results = await asyncio.gather(
-                    *explainer_calls,
+                    *parallel_explainer,
                     asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                     asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                     return_exceptions=True,
@@ -2135,7 +2237,10 @@ async def _process_project(
                             extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
                         )
                     else:
-                        sp_data, _ = sp_result
+                        if use_subpart_explainer:
+                            sp_data, _, _ = sp_result
+                        else:
+                            sp_data, _ = sp_result
                         subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
                 # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2156,13 +2261,29 @@ async def _process_project(
                 async with usage_lock:
                     for i, sp_result in enumerate(subpart_results):
                         if not isinstance(sp_result, Exception):
-                            sp_data, sp_usage = sp_result
-                            if sp_usage:
-                                _update_usage(
-                                    sp_usage,
-                                    phase=f"part_{part_id}_explainer_sp{i+1}",
-                                    cost_model=explainer_model,
-                                )
+                            if use_subpart_explainer:
+                                _sp_data, sp_usage, reviewer_usages = sp_result
+                                if sp_usage:
+                                    _update_usage(
+                                        sp_usage,
+                                        phase=f"part_{part_id}_explainer_sp{i+1}",
+                                        cost_model=explainer_model,
+                                    )
+                                for j, ru in enumerate(reviewer_usages):
+                                    if ru:
+                                        _update_usage(
+                                            ru,
+                                            phase=f"part_{part_id}_scope_audit_sp{i+1}_a{j+1}",
+                                            cost_model=MODEL_CLASSIFIER,
+                                        )
+                            else:
+                                sp_data, sp_usage = sp_result
+                                if sp_usage:
+                                    _update_usage(
+                                        sp_usage,
+                                        phase=f"part_{part_id}_explainer_sp{i+1}",
+                                        cost_model=explainer_model,
+                                    )
                     if usage_rec:
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
                     if usage_res:

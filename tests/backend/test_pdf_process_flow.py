@@ -352,7 +352,11 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
             "upload_file_with_retry",
             lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
         )
-        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage()))
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier",
+            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
+        )
         monkeypatch.setattr(
             main,
             "_prepare_openrouter_pdf_context",
@@ -460,7 +464,11 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             "upload_file_with_retry",
             lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
         )
-        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage()))
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier",
+            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
+        )
         monkeypatch.setattr(
             main,
             "_prepare_openrouter_pdf_context",
@@ -534,6 +542,154 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
         assert usage_updates[0]["openrouter_pdf_priming_model"] == main.OPENROUTER_PDF_PRIMING_MODEL
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypatch):
+    pdf_path = _create_multi_page_pdf(4)
+    try:
+        project = {
+            "id": "proj-subpart-audit",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+        }
+
+        prompts_seen = []
+        audit_attempts = {"count": 0}
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(main, "get_user_api_key", lambda uid, provider=None: "AIzaFakeKey")
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+
+        async def _send_event(project_id, payload):
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, project_id):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}))
+
+        def _fake_segmentador(*args, **kwargs):
+            base = _part_pdf_fields(1, "Única", 1, 4)
+            base["temas_cubiertos"] = ["tema1", "tema2"]
+            base["subpartes"] = [
+                {
+                    "numero_subparte": 1,
+                    "titulo": "Primera",
+                    "contenido": "Contenido inicial",
+                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 1–2.",
+                    "pagina_inicio": 1,
+                    "pagina_fin": 2,
+                    "temas_cubiertos": ["tema1"],
+                    "delimitacion_explainer": {
+                        "inicio": {"encabezado": "1.1", "ancla_texto": "primer texto"},
+                        "fin": {"ancla_texto": "fin tema uno", "encabezado_siguiente_excluido": "1.2"},
+                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
+                    },
+                },
+                {
+                    "numero_subparte": 2,
+                    "titulo": "Segunda",
+                    "contenido": "Contenido final",
+                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 3–4.",
+                    "pagina_inicio": 3,
+                    "pagina_fin": 4,
+                    "temas_cubiertos": ["tema2"],
+                    "delimitacion_explainer": {
+                        "inicio": {"encabezado": "1.2", "ancla_texto": "segundo texto"},
+                        "fin": {"ancla_texto": "fin tema dos", "encabezado_siguiente_excluido": ""},
+                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
+                    },
+                },
+            ]
+            return (
+                {
+                    "analisis_texto": "Cuatro páginas",
+                    "temas_identificados": ["tema1", "tema2"],
+                    "decision_num_partes": 1,
+                    "decision_justificacion": "Una parte",
+                    "partes": [base],
+                    "consideraciones_estudiante": "Seguir el orden natural",
+                },
+                _usage(total=40),
+            )
+
+        monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
+
+        def _fake_subpart_explainer(api_key, file_uri, agent_prompt, model, mime_type):
+            prompts_seen.append(agent_prompt)
+            return (
+                {
+                    "desarrollo": [
+                        {
+                            "titulo_seccion": "Bloque",
+                            "explicacion_introductoria": "Contexto",
+                            "subsecciones": [
+                                {"titulo_subseccion": "Detalle", "explicacion_detallada": "Texto desarrollado"}
+                            ],
+                        }
+                    ]
+                },
+                _usage(total=22),
+            )
+
+        monkeypatch.setattr(main, "run_subpart_explainer", _fake_subpart_explainer)
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "format_explainer_content", lambda api_key, explainer_data: (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}))
+
+        def _fake_auditor(**kwargs):
+            from backend.subpart_scope_auditor import SubpartScopeAuditReport
+
+            audit_attempts["count"] += 1
+            if audit_attempts["count"] == 1:
+                return (
+                    SubpartScopeAuditReport(
+                        is_valid=False,
+                        invades_previous=(),
+                        invades_next=("tema2",),
+                        missing_current=("tema1",),
+                        rationale="Invade la siguiente subparte.",
+                    ),
+                    _usage(total=7),
+                )
+            return (
+                SubpartScopeAuditReport(
+                    is_valid=True,
+                    invades_previous=(),
+                    invades_next=(),
+                    missing_current=(),
+                    rationale="OK",
+                ),
+                _usage(total=7),
+            )
+
+        monkeypatch.setattr(main, "run_subpart_scope_auditor", _fake_auditor)
+
+        asyncio.run(main._process_project("proj-subpart-audit", "user-123"))
+
+        assert len(prompts_seen) >= 2
+        assert any("<correccion_alcance_subparte>" in prompt for prompt in prompts_seen[1:])
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
