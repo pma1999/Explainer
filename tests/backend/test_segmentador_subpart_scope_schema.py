@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from google.genai import types as genai_types
+# Do not import google.genai.types here: tests/backend/test_formatter.py registers
+# MagicMocks for google.genai in sys.modules; comparing to genai_types.Type.* then
+# fails. The schema objects from segmentador carry real Type enums — assert via .name.
 
 
 def _subparte_schema():
@@ -22,24 +24,24 @@ def test_delimitacion_explainer_shape():
     schema = _subparte_schema()
     contract = schema.properties["delimitacion_explainer"]
 
-    assert contract.type == genai_types.Type.OBJECT
+    assert contract.type.name == "OBJECT"
     assert set(contract.required) == {"inicio", "fin", "transicion_compartida"}
 
     inicio = contract.properties["inicio"]
-    assert inicio.type == genai_types.Type.OBJECT
+    assert inicio.type.name == "OBJECT"
     assert set(inicio.required) == {"encabezado", "ancla_texto"}
 
     fin = contract.properties["fin"]
-    assert fin.type == genai_types.Type.OBJECT
+    assert fin.type.name == "OBJECT"
     assert set(fin.required) == {"ancla_texto", "encabezado_siguiente_excluido"}
 
     transition = contract.properties["transicion_compartida"]
-    assert transition.type == genai_types.Type.OBJECT
+    assert transition.type.name == "OBJECT"
     assert set(transition.required) == {
         "hay_transicion",
         "pagina",
         "hasta_texto_inclusive",
         "desde_texto_inclusive",
     }
-    assert transition.properties["hay_transicion"].type == genai_types.Type.BOOLEAN
-    assert transition.properties["pagina"].type == genai_types.Type.INTEGER
+    assert transition.properties["hay_transicion"].type.name == "BOOLEAN"
+    assert transition.properties["pagina"].type.name == "INTEGER"

@@ -40,6 +40,14 @@ def main() -> None:
 
     api_key = os.environ["GEMINI_API_KEY"].strip()
     mistral_key = os.environ["MISTRAL_API_KEY"].strip()
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not openrouter_key:
+        print(
+            "OPENROUTER_API_KEY no está definida: el explainer OpenRouter la necesita "
+            "(MISTRAL_API_KEY solo sirve para OCR nativo).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     pdf_path = os.path.join(PROJECT_ROOT, "PID_00230265.pdf")
     numbered = add_page_numbers(pdf_path)
     total_pages = len(PdfReader(numbered).pages)
@@ -143,7 +151,7 @@ def main() -> None:
                         source_path=numbered,
                         identificacion=prompt,
                         mime_type="application/pdf",
-                        api_key=mistral_key,
+                        api_key=openrouter_key,
                         pdf_cache_entry=or_pdf_ctx.cache_entry,
                         page_numbers=page_scope,
                     )
@@ -153,7 +161,7 @@ def main() -> None:
                         source_path=fallback_source_path,
                         identificacion=prompt,
                         mime_type="application/pdf",
-                        api_key=mistral_key,
+                        api_key=openrouter_key,
                     )
 
                 review, _ = run_subpart_scope_auditor(

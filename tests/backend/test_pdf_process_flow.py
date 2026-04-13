@@ -182,13 +182,22 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         assert explainer_calls[0]["file_uri"] != uri_full
         assert explainer_calls[1]["file_uri"] != uri_full
         assert explainer_calls[0]["file_uri"] != explainer_calls[1]["file_uri"]
-        assert explainer_calls[0]["mime_type"] == "application/pdf"
-        assert "Páginas 1-3" in explainer_calls[0]["prompt"]
-        assert "Páginas 4-10" in explainer_calls[0]["prompt"]
-        assert "Parte 1/2 [PARTE ACTUAL]" in explainer_calls[0]["prompt"]
+        assert all(c["mime_type"] == "application/pdf" for c in explainer_calls)
+
+        def _prompt_marking_current_part(total_parts: int, part_num: int) -> str:
+            return f"Parte {part_num}/{total_parts} [PARTE ACTUAL]"
+
+        part1_marker = _prompt_marking_current_part(2, 1)
+        part2_marker = _prompt_marking_current_part(2, 2)
+        part1_prompt = next(c["prompt"] for c in explainer_calls if part1_marker in c["prompt"])
+        part2_prompt = next(c["prompt"] for c in explainer_calls if part2_marker in c["prompt"])
+        assert "Páginas 1-3" in part1_prompt
+        assert "Páginas 4-10" in part2_prompt
+        assert part1_marker in part1_prompt
+        assert part2_marker in part2_prompt
 
         # Sub-PDF page counts (buffer=1): part1 pages 1–3 → 1..4 → 4 pages; part2 4–10 → 3..10 → 8 pages
-        assert segment_upload_page_counts == [4, 8]
+        assert sorted(segment_upload_page_counts) == [4, 8]
 
         assert any(p.get("status") == "completed" for p in updates)
     finally:
