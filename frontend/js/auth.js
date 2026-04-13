@@ -10,6 +10,8 @@ import {
   setCachedApiKeyStatus,
   getCachedOpenRouterKeyStatus,
   setCachedOpenRouterKeyStatus,
+  getCachedMistralKeyStatus,
+  setCachedMistralKeyStatus,
   invalidateProjectsCache,
 } from './storage.js';
 import { getPreferOffline, setPreferOffline } from './pwa.js';
@@ -35,6 +37,14 @@ export async function refreshApiKeyStatus() {
     state.openRouterKeyStatus = 'loading';
   }
 
+  const cachedMistral = getCachedMistralKeyStatus(userId);
+  if (cachedMistral !== null) {
+    state.hasMistralKey = cachedMistral;
+    state.mistralKeyStatus = cachedMistral ? 'has' : 'none';
+  } else {
+    state.mistralKeyStatus = 'loading';
+  }
+
   updateApiKeyUI();
 
   try {
@@ -47,9 +57,14 @@ export async function refreshApiKeyStatus() {
     state.hasOpenRouterKey = Boolean(status.has_openrouter_key);
     state.openRouterKeyStatus = state.hasOpenRouterKey ? 'has' : 'none';
     setCachedOpenRouterKeyStatus(userId, state.hasOpenRouterKey);
+
+    state.hasMistralKey = Boolean(status.has_mistral_key);
+    state.mistralKeyStatus = state.hasMistralKey ? 'has' : 'none';
+    setCachedMistralKeyStatus(userId, state.hasMistralKey);
   } catch (_) {
     if (cached === null && state.apiKeyStatus === 'loading') state.apiKeyStatus = 'none';
     if (cachedOR === null && state.openRouterKeyStatus === 'loading') state.openRouterKeyStatus = 'none';
+    if (cachedMistral === null && state.mistralKeyStatus === 'loading') state.mistralKeyStatus = 'none';
   }
 
   updateApiKeyUI();
@@ -205,6 +220,66 @@ export function initSettings() {
     }
   });
 
+  // ---- Mistral key ----
+
+  $('form-mistral-key').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const apiKey = $('mistral-key-input').value.trim();
+    if (!apiKey) {
+      $('mistral-key-error').textContent = 'Ingresa una API key de Mistral';
+      return;
+    }
+
+    const btn = $('btn-save-mistral-key');
+    const spinner = btn.querySelector('.spinner');
+    const btnText = btn.querySelector('.btn-text');
+
+    btn.disabled = true;
+    show(spinner);
+    btnText.textContent = 'Guardando...';
+    $('mistral-key-error').textContent = '';
+    $('mistral-key-success').textContent = '';
+
+    try {
+      const formData = new FormData();
+      formData.append('api_key', apiKey);
+
+      await api('/api/settings/api-key/mistral', {
+        method: 'POST',
+        body: formData,
+      });
+
+      state.hasMistralKey = true;
+      state.mistralKeyStatus = 'has';
+      setCachedMistralKeyStatus(state.user?.id, true);
+      $('mistral-key-input').value = '';
+      $('mistral-key-success').textContent = 'API key de Mistral guardada';
+      updateApiKeyUI();
+      toast('API key de Mistral guardada', 'success');
+    } catch (err) {
+      $('mistral-key-error').textContent = err.message;
+    } finally {
+      btn.disabled = false;
+      hide(spinner);
+      btnText.textContent = 'Guardar API Key';
+    }
+  });
+
+  $('btn-delete-mistral-key').addEventListener('click', async () => {
+    if (!confirm('¿Eliminar tu API key de Mistral guardada?')) return;
+
+    try {
+      await api('/api/settings/api-key/mistral', { method: 'DELETE' });
+      state.hasMistralKey = false;
+      state.mistralKeyStatus = 'none';
+      setCachedMistralKeyStatus(state.user?.id, false);
+      updateApiKeyUI();
+      toast('API key de Mistral eliminada', 'success');
+    } catch (err) {
+      $('mistral-key-error').textContent = err.message;
+    }
+  });
+
   syncPreferOfflineSwitchUI();
 }
 
@@ -336,6 +411,9 @@ export function hideSettings() {
   $('openrouter-key-error').textContent = '';
   $('openrouter-key-success').textContent = '';
   $('openrouter-key-input').value = '';
+  $('mistral-key-error').textContent = '';
+  $('mistral-key-success').textContent = '';
+  $('mistral-key-input').value = '';
 }
 
 export function updateApiKeyUI() {
@@ -377,5 +455,22 @@ export function updateApiKeyUI() {
     show($('openrouter-key-not-set'));
     hide($('openrouter-key-set'));
     $('btn-delete-openrouter-key').style.display = 'none';
+  }
+
+  // Mistral key UI
+  const mistralLoading = state.mistralKeyStatus === 'loading';
+
+  if (state.hasMistralKey) {
+    hide($('mistral-key-not-set'));
+    show($('mistral-key-set'));
+    $('btn-delete-mistral-key').style.display = 'inline-block';
+  } else if (mistralLoading) {
+    hide($('mistral-key-not-set'));
+    hide($('mistral-key-set'));
+    $('btn-delete-mistral-key').style.display = 'none';
+  } else {
+    show($('mistral-key-not-set'));
+    hide($('mistral-key-set'));
+    $('btn-delete-mistral-key').style.display = 'none';
   }
 }

@@ -64,3 +64,20 @@ describe('auth.js', () => {
     });
   });
 });
+
+it('refreshApiKeyStatus hydrates mistral key state from the API payload', async () => {
+  state.hasMistralKey = false;
+  state.mistralKeyStatus = 'loading';
+  vi.spyOn(storageModule, 'getCachedMistralKeyStatus').mockReturnValue(null);
+  vi.spyOn(storageModule, 'setCachedMistralKeyStatus').mockImplementation(() => {});
+  vi.spyOn(apiModule, 'api').mockResolvedValue({
+    has_api_key: true,
+    has_openrouter_key: true,
+    has_mistral_key: true,
+  });
+
+  await refreshApiKeyStatus();
+
+  expect(state.hasMistralKey).toBe(true);
+  expect(state.mistralKeyStatus).toBe('has');
+});
