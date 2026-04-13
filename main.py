@@ -185,7 +185,7 @@ def _validate_openrouter_api_key(api_key: str) -> str:
 def _validate_mistral_api_key(api_key: str) -> str:
     """Validate and normalize Mistral API key. Raises HTTPException on invalid input."""
     key = (api_key or "").strip()
-    if len(key) < 20 or any(ch.isspace() for ch in key):
+    if len(key) < 20 or len(key) > 300 or any(ch.isspace() for ch in key):
         raise HTTPException(status_code=400, detail="API key de Mistral inválida")
     return key
 
