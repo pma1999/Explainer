@@ -555,10 +555,12 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     Returns status without exposing any sensitive data.
     Backwards-compatible: always includes has_api_key / provider / updated_at for Gemini.
     Adds has_openrouter_key / openrouter_updated_at for OpenRouter.
+    Adds has_mistral_key / mistral_updated_at for Mistral.
     """
     client = _client()
     gemini_data: dict = {}
     openrouter_data: dict = {}
+    mistral_data: dict = {}
 
     try:
         rows = (
@@ -573,6 +575,8 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
                     gemini_data = row
                 elif row.get("provider") == PROVIDER_OPENROUTER:
                     openrouter_data = row
+                elif row.get("provider") == PROVIDER_MISTRAL:
+                    mistral_data = row
     except Exception as e:
         logger.error(f"[API Key Status] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
 
@@ -584,4 +588,7 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
         # OpenRouter (new fields)
         "has_openrouter_key": bool(openrouter_data),
         "openrouter_updated_at": openrouter_data.get("updated_at") or None,
+        # Mistral (new fields)
+        "has_mistral_key": bool(mistral_data),
+        "mistral_updated_at": mistral_data.get("updated_at") or None,
     }

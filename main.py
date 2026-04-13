@@ -182,6 +182,14 @@ def _validate_openrouter_api_key(api_key: str) -> str:
     return key
 
 
+def _validate_mistral_api_key(api_key: str) -> str:
+    """Validate and normalize Mistral API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if len(key) < 20 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=400, detail="API key de Mistral inválida")
+    return key
+
+
 # ---- Gemini key endpoints ----
 
 @app.post("/api/settings/api-key")
@@ -235,6 +243,34 @@ async def api_delete_openrouter_key(
     """Delete user's OpenRouter API key."""
     delete_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
     logger.info("[API Key] User %s... deleted OpenRouter key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- Mistral key endpoints ----
+
+@app.post("/api/settings/api-key/mistral")
+@api_key_rate_limit
+async def api_set_mistral_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    api_key: str = Form(...),
+):
+    """Store user's Mistral API key (BYOK)."""
+    api_key = _validate_mistral_api_key(api_key)
+    set_user_api_key(user_id, api_key, provider=PROVIDER_MISTRAL)
+    logger.info("[API Key] User %s... configured Mistral key: %s", user_id[:8], mask_api_key(api_key))
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key/mistral")
+@api_key_rate_limit
+async def api_delete_mistral_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Delete user's Mistral API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_MISTRAL)
+    logger.info("[API Key] User %s... deleted Mistral key", user_id[:8])
     return {"ok": True}
 
 
@@ -1365,6 +1401,20 @@ async def _process_project(
                 update_project(project_id, user_id, {"status": "error", "error_message": "API key OpenRouter no configurada"})
                 return
             mistral_api_key = get_user_api_key(user_id, provider=PROVIDER_MISTRAL) or ""
+            if source_type == "pdf" and not mistral_api_key:
+                logger.error(f"[Process] API key Mistral no configurada para PDF con OpenRouter: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de Mistral configurada. "
+                            "Guárdala en Ajustes para usar OCR nativo en PDFs con OpenRouter."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
+                return
 
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
 
@@ -2723,6 +2773,12 @@ async def api_process_project(
             raise HTTPException(
                 status_code=400,
                 detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar MiniMax en el explainer.",
+            )
+        if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
+            logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con OpenRouter.",
             )
 
     logger.info(

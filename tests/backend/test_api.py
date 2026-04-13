@@ -282,3 +282,66 @@ class TestProcessProject:
 
         assert r.status_code == 400
         assert "YouTube" in r.json()["detail"]
+
+
+class TestMistralApiKeys:
+    def test_status_exposes_mistral_fields(self, auth_client):
+        with patch(
+            "main.get_user_api_key_status",
+            return_value={
+                "has_api_key": True,
+                "provider": "google_gemini",
+                "updated_at": "2026-04-13T10:00:00Z",
+                "has_openrouter_key": True,
+                "openrouter_updated_at": "2026-04-13T10:00:00Z",
+                "has_mistral_key": True,
+                "mistral_updated_at": "2026-04-13T10:00:00Z",
+            },
+        ):
+            response = auth_client.get(
+                "/api/settings/api-key/status",
+                headers={"Authorization": "Bearer fake-token"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["has_mistral_key"] is True
+        assert response.json()["mistral_updated_at"] == "2026-04-13T10:00:00Z"
+
+    def test_requires_mistral_key_when_openrouter_is_selected_for_pdf(self, auth_client):
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            with patch(
+                "main.has_user_api_key",
+                side_effect=lambda uid, provider="google_gemini": provider != "mistral",
+            ):
+                response = auth_client.post(
+                    "/api/projects/proj-1/process",
+                    headers={"Authorization": "Bearer fake-token"},
+                    json={"explainer_provider": "openrouter"},
+                )
+
+        assert response.status_code == 400
+        assert "Mistral" in response.json()["detail"]
+
+    def test_does_not_require_mistral_key_for_openrouter_web_projects(self, auth_client):
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-web", "name": "Proyecto", "status": "pending", "source_type": "web"},
+        ):
+            with patch(
+                "main.has_user_api_key",
+                side_effect=lambda uid, provider="google_gemini": provider != "mistral",
+            ):
+                async def _fake_process(*args, **kwargs):
+                    return None
+
+                with patch("main._process_project", new=_fake_process):
+                    response = auth_client.post(
+                        "/api/projects/proj-web/process",
+                        headers={"Authorization": "Bearer fake-token"},
+                        json={"explainer_provider": "openrouter"},
+                    )
+
+        assert response.status_code == 200
