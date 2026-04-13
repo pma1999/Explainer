@@ -369,11 +369,6 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
         )
         monkeypatch.setattr(
             main,
-            "_prepare_openrouter_pdf_context",
-            lambda **kwargs: (_ for _ in ()).throw(AssertionError("OpenRouter OCR no debería prepararse")),
-        )
-        monkeypatch.setattr(
-            main,
             "run_segmentador",
             lambda *args, **kwargs: (
                 {

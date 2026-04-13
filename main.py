@@ -77,7 +77,6 @@ from backend.agents.explainer_openrouter import (
     OPENROUTER_PDF_PARSER_ENGINE,
     OPENROUTER_PDF_PRIMING_MODEL,
     OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
-    prime_pdf_parse_cache_with_fallback,
 )
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
@@ -565,31 +564,18 @@ def _select_openrouter_pdf_pages(
     return tuple(page for page in ordered_pages if lower <= page <= upper)
 
 
-def _prepare_openrouter_pdf_context(
-    *,
-    numbered_pdf_path: str,
-    content_page_set: frozenset[int],
-    api_key: str,
-    engine: str,
-) -> "OpenRouterPreparedPdfContext":
-    """Prime the incremental OCR cache over the numbered source PDF.
+@dataclass(frozen=True, slots=True)
+class OpenRouterPreparedPdfContext:
+    source_pdf_path: str
+    cache_entry: OpenRouterPdfParseCacheEntry
+    priming_model: str = OPENROUTER_PDF_PRIMING_MODEL
 
-    The cache is keyed by the numbered source document itself, not by a
-    reconstructed per-run subset PDF. This allows future executions to reuse
-    already processed pages even if the classifier adds or removes pages.
-    """
-    cache_entry, priming_model = prime_pdf_parse_cache_with_fallback(
-        source_path=numbered_pdf_path,
-        api_key=api_key,
-        engine=engine,
-        filename="document.pdf",
-        expected_page_numbers=tuple(sorted(content_page_set)),
-    )
-    return OpenRouterPreparedPdfContext(
-        source_pdf_path=numbered_pdf_path,
-        cache_entry=cache_entry,
-        priming_model=priming_model,
-    )
+
+@dataclass(frozen=True, slots=True)
+class PreparedPdfOcrContext:
+    source_pdf_path: str
+    cache_entry: PdfOcrCacheEntry
+    ocr_model: str = MISTRAL_OCR_MODEL
 
 
 def _prepare_mistral_pdf_ocr_context(
@@ -665,20 +651,6 @@ class PartHandoffContext:
     intent_usuario: str | None
     continuidad_previa: str | None
     vision_global_division: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class OpenRouterPreparedPdfContext:
-    source_pdf_path: str
-    cache_entry: OpenRouterPdfParseCacheEntry
-    priming_model: str = OPENROUTER_PDF_PRIMING_MODEL
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedPdfOcrContext:
-    source_pdf_path: str
-    cache_entry: PdfOcrCacheEntry
-    ocr_model: str = MISTRAL_OCR_MODEL
 
 
 def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
@@ -2562,7 +2534,7 @@ async def _process_project(
                     except asyncio.CancelledError:
                         pass
                 elif mistral_pdf_context is None:
-                    prepared_context = mistral_pdf_prepare_task.result()
+                    mistral_pdf_prepare_task.result()  # surface stored exception for logging
             except Exception as exc:
                 logger.debug(
                     "[Process] Cierre del task OCR canónico Mistral sin contexto reutilizable",
