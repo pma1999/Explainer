@@ -51,7 +51,13 @@ from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
-from backend.gemini_model_routing import MODEL_AGENTS, MODEL_CLASSIFIER, MODEL_EXPLAINER, MODEL_SEGMENTADOR
+from backend.gemini_model_routing import (
+    MODEL_AGENTS,
+    MODEL_CLASSIFIER,
+    MODEL_EXPLAINER,
+    MODEL_SEGMENTADOR,
+    MODEL_SUBPART_SCOPE_AUDITOR,
+)
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
@@ -2252,7 +2258,7 @@ async def _process_project(
                                 initial_prompt=sp_prompt,
                                 audit_context_builder=_audit_context,
                                 audit_api_key=api_key,
-                                audit_model=MODEL_CLASSIFIER,
+                                audit_model=MODEL_SUBPART_SCOPE_AUDITOR,
                             )
 
                         return _audited()
@@ -2360,7 +2366,7 @@ async def _process_project(
                                         _update_usage(
                                             ru,
                                             phase=f"part_{part_id}_scope_audit_sp{i+1}_a{j+1}",
-                                            cost_model=MODEL_CLASSIFIER,
+                                            cost_model=MODEL_SUBPART_SCOPE_AUDITOR,
                                         )
                             else:
                                 sp_data, sp_usage = sp_result
