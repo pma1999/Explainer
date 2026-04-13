@@ -257,6 +257,12 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
     3) **Fin del contenido a explicar**: **cita textual entre comillas** con las últimas 8–15 palabras del tramo que pertenece a esta subparte; o, si el corte es por encabezado siguiente, indica el título del bloque siguiente que **no** entra y dónde empieza («el apartado Z comienza después de …»).
     4) **Si `pagina_fin` de la subparte anterior = `pagina_inicio` de esta (página de transición compartida)**: añade un párrafo «PÁGINA P COMPARTIDA:» que diga con precisión qué trozo de esa página corresponde **solo** a la subparte anterior y qué trozo **solo** a esta (por ejemplo: «hasta el final del párrafo que termina “…”; a partir del encabezado “…” es la siguiente subparte»). Sin esta frontera explícita, la salida del explainer puede duplicarse.
     5) Prohibido dejar límites vagos («hasta donde habla de X» sin citas). Prohibido asignar a dos subpartes el mismo párrafo sustantivo.
+  - Además del texto `identificacion`, genera SIEMPRE `delimitacion_explainer` con la misma información en formato estructurado:
+    - `inicio.encabezado`: encabezado exacto del primer bloque que entra, o cadena vacía si no hay.
+    - `inicio.ancla_texto`: primeras 8-15 palabras literales del primer tramo que sí entra.
+    - `fin.ancla_texto`: últimas 8-15 palabras literales del último tramo que sí entra.
+    - `fin.encabezado_siguiente_excluido`: siguiente encabezado que ya no entra, o cadena vacía si no aplica.
+    - `transicion_compartida`: si hay página compartida con la subparte vecina, indica página y frontera literal; si no la hay, usa `hay_transicion=false`, `pagina=0` y cadenas vacías.
 - Para cada parte, redacta:
   - **introduccion**: contextualización pedagógica aprovechando tu visión global del documento
   - **conclusion**: síntesis integradora de las ideas clave de la parte
@@ -289,6 +295,64 @@ Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este 
 Solo tras completar todos los pasos aplicables, genera tu output estructurado en el formato especificado.
 </thinking_protocol>
 </system_instruction>"""
+
+_DELIMITACION_EXPLAINER_SCHEMA = genai.types.Schema(
+    type=genai.types.Type.OBJECT,
+    description=(
+        "Contrato estructurado de alcance para el explainer. "
+        "Es la fuente de verdad operativa para delimitar qué entra y qué no entra en la subparte."
+    ),
+    required=["inicio", "fin", "transicion_compartida"],
+    properties={
+        "inicio": genai.types.Schema(
+            type=genai.types.Type.OBJECT,
+            required=["encabezado", "ancla_texto"],
+            properties={
+                "encabezado": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Capítulo/apartado exacto donde empieza la subparte. Cadena vacía si no existe encabezado.",
+                ),
+                "ancla_texto": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Primeras 8-15 palabras literales del primer tramo que sí pertenece a la subparte.",
+                ),
+            },
+        ),
+        "fin": genai.types.Schema(
+            type=genai.types.Type.OBJECT,
+            required=["ancla_texto", "encabezado_siguiente_excluido"],
+            properties={
+                "ancla_texto": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Últimas 8-15 palabras literales del último tramo que sí pertenece a la subparte.",
+                ),
+                "encabezado_siguiente_excluido": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Título del siguiente bloque que ya NO entra en esta subparte. Cadena vacía si no aplica.",
+                ),
+            },
+        ),
+        "transicion_compartida": genai.types.Schema(
+            type=genai.types.Type.OBJECT,
+            required=["hay_transicion", "pagina", "hasta_texto_inclusive", "desde_texto_inclusive"],
+            properties={
+                "hay_transicion": genai.types.Schema(type=genai.types.Type.BOOLEAN),
+                "pagina": genai.types.Schema(
+                    type=genai.types.Type.INTEGER,
+                    description="Página compartida con subparte vecina. Usa 0 si no hay transición compartida.",
+                ),
+                "hasta_texto_inclusive": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Último texto literal que todavía pertenece a esta subparte dentro de la página compartida.",
+                ),
+                "desde_texto_inclusive": genai.types.Schema(
+                    type=genai.types.Type.STRING,
+                    description="Primer texto literal a partir del cual ya empieza la subparte siguiente en la página compartida.",
+                ),
+            },
+        ),
+    },
+)
 
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
@@ -389,6 +453,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                 "titulo",
                                 "contenido",
                                 "identificacion",
+                                "delimitacion_explainer",
                                 "pagina_inicio",
                                 "pagina_fin",
                                 "temas_cubiertos",
@@ -417,6 +482,7 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                         "Debe evitar toda ambigüedad para el explainer (cobertura total de la subparte, cero duplicidad con otras)."
                                     ),
                                 ),
+                                "delimitacion_explainer": _DELIMITACION_EXPLAINER_SCHEMA,
                                 "pagina_inicio": genai.types.Schema(
                                     type=genai.types.Type.INTEGER,
                                     description="Primera página de la subparte (según las marcas visibles del PDF).",
