@@ -30,6 +30,7 @@ logger = get_logger("backend.agents.explainer_openrouter")
 OPENROUTER_MODEL_AGENTS = "qwen/qwen3.6-plus"
 OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
 OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
+OPENROUTER_PDF_PRIMING_FALLBACK_MODEL = "google/gemini-3.1-flash-lite-preview"
 # OpenRouter API: sampling temperature (0–2).
 OPENROUTER_EXPLAINER_TEMPERATURE = 0.7
 OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES = 2
@@ -137,6 +138,44 @@ OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = _append_json_output_contract(
     SHARED_SUBPART_SYSTEM_INSTRUCTION,
     _SUBPART_JSON_OUTPUT_CONTRACT,
 )
+
+
+def prime_pdf_parse_cache_with_fallback(
+    *,
+    source_path: str,
+    api_key: str,
+    engine: str,
+    filename: str,
+    expected_page_numbers: tuple[int, ...] | None = None,
+) -> tuple[OpenRouterPdfParseCacheEntry, str]:
+    priming_models = (
+        OPENROUTER_PDF_PRIMING_MODEL,
+        OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+    )
+
+    for index, priming_model in enumerate(priming_models):
+        try:
+            cache_entry = get_or_prime_pdf_parse_cache(
+                source_path=source_path,
+                api_key=api_key,
+                model=priming_model,
+                engine=engine,
+                filename=filename,
+                expected_page_numbers=expected_page_numbers,
+            )
+            return cache_entry, priming_model
+        except OpenRouterError:
+            if index == len(priming_models) - 1:
+                raise
+            logger.warning(
+                "OpenRouter PDF priming failed with primary model; retrying fallback model",
+                extra={
+                    "source_path": source_path,
+                    "failed_priming_model": priming_model,
+                    "fallback_priming_model": OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+                    "pdf_parser_engine": engine,
+                },
+            )
 
 
 _SUBSECTION_JSON_SCHEMA: dict[str, Any] = {
@@ -486,21 +525,24 @@ def _call_openrouter_json_with_pdf_fallback(
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     try:
         if mime_type == "application/pdf":
-            cache_entry = pdf_cache_entry or get_or_prime_pdf_parse_cache(
-                source_path=source_path,
-                api_key=api_key,
-                model=OPENROUTER_PDF_PRIMING_MODEL,
-                engine=OPENROUTER_PDF_PARSER_ENGINE,
-                filename="document.pdf",
-                expected_page_numbers=page_numbers,
-            )
+            priming_model_used = OPENROUTER_PDF_PRIMING_MODEL
+            if pdf_cache_entry is None:
+                cache_entry, priming_model_used = prime_pdf_parse_cache_with_fallback(
+                    source_path=source_path,
+                    api_key=api_key,
+                    engine=OPENROUTER_PDF_PARSER_ENGINE,
+                    filename="document.pdf",
+                    expected_page_numbers=page_numbers,
+                )
+            else:
+                cache_entry = pdf_cache_entry
             cached_page_numbers = getattr(cache_entry, "cached_page_numbers", ())
             logger.info(
                 "Usando cache de parseo OpenRouter para PDF",
                 extra={
                     "source_path": source_path,
                     "model": model,
-                    "pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+                    "pdf_priming_model": priming_model_used,
                     "pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
                     "cache_hit": cache_entry.cache_hit,
                     "cache_path": cache_entry.cache_path,

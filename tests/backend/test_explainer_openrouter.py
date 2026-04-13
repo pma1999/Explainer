@@ -448,6 +448,70 @@ def test_run_subpart_explainer_or_uses_fixed_grok_model_for_pdf_priming(monkeypa
     assert captured_prime["engine"] == module.OPENROUTER_PDF_PARSER_ENGINE
 
 
+def test_run_subpart_explainer_or_retries_pdf_priming_with_gemini_fallback_model(monkeypatch):
+    source_path = _write_text_source("Contenido local para priming con fallback.")
+    priming_models: list[str] = []
+
+    def _fake_prime_cache(**kwargs):
+        priming_models.append(kwargs["model"])
+        if kwargs["model"] == module.OPENROUTER_PDF_PRIMING_MODEL:
+            raise OpenRouterError(
+                "OpenRouter devolvió HTTP 400: "
+                "{\"error\":{\"message\":\"Failed to parse document.pdf\",\"code\":400}}"
+            )
+        return SimpleNamespace(
+            cache_hit=False,
+            cache_path="cache.json",
+            page_index=("cached",),
+            cached_page_numbers=(21,),
+            assistant_message=None,
+        )
+
+    monkeypatch.setattr(module, "get_or_prime_pdf_parse_cache", _fake_prime_cache)
+    monkeypatch.setattr(
+        module,
+        "render_pdf_page_subset_to_text",
+        lambda **kwargs: "— Página 21 / 143 —\nTexto OCR de la página 21.",
+    )
+    monkeypatch.setattr(
+        module,
+        "call_openrouter_chat",
+        lambda **kwargs: (
+            {
+                "desarrollo": [
+                    {
+                        "titulo_seccion": "Bloque temático",
+                        "explicacion_introductoria": "Contexto del bloque.",
+                        "subsecciones": [
+                            {
+                                "titulo_subseccion": "Detalle",
+                                "explicacion_detallada": "Explicación completa.",
+                            }
+                        ],
+                    }
+                ]
+            },
+            _usage(),
+        ),
+    )
+
+    result, usage = module.run_subpart_explainer_or(
+        source_path=source_path,
+        identificacion="Prompt de prueba",
+        model="minimax/minimax-m2.7",
+        mime_type="application/pdf",
+        api_key="sk-or-v1-test",
+        page_numbers=(21,),
+    )
+
+    assert usage.total_token_count == 48
+    assert result["desarrollo"][0]["titulo_seccion"] == "Bloque temático"
+    assert priming_models == [
+        module.OPENROUTER_PDF_PRIMING_MODEL,
+        module.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+    ]
+
+
 def test_run_subpart_explainer_or_uses_cached_page_subset_without_resending_pdf(monkeypatch):
     source_path = _write_text_source("Contenido local para subset OCR.")
     captured_call: dict = {}

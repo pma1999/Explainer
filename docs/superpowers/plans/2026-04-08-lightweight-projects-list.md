@@ -12,26 +12,28 @@
 
 ## File map
 
-| File | Role |
-|------|------|
-| `backend/supabase_data.py` | Add `_row_to_list_summary`, `list_projects_summary`; keep `list_projects` as full-row list for `export_projects_payload` only. |
-| `main.py` | Import and call `list_projects_summary` from `api_list_projects`. |
-| `frontend/js/storage.js` | Replace naive `mergeProjects` timestamp pick with `mergePairProjects` + summary-aware merge; export if needed for tests. |
-| `tests/backend/test_api.py` or new `tests/backend/test_projects_list.py` | API test with mocked data layer. |
-| `tests/frontend/storage.test.js` | Three merge scenarios from spec. |
-| `docs/superpowers/specs/2026-04-08-lightweight-projects-list-design.md` | Set **Estado** to *Aprobado* after implementation (optional doc commit). |
 
-**Invariant (must not regress):** `export_projects_payload` in `supabase_data.py` must keep calling **`list_projects`** (full rows), not the summary function.
+| File                                                                     | Role                                                                                                                           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `backend/supabase_data.py`                                               | Add `_row_to_list_summary`, `list_projects_summary`; keep `list_projects` as full-row list for `export_projects_payload` only. |
+| `main.py`                                                                | Import and call `list_projects_summary` from `api_list_projects`.                                                              |
+| `frontend/js/storage.js`                                                 | Replace naive `mergeProjects` timestamp pick with `mergePairProjects` + summary-aware merge; export if needed for tests.       |
+| `tests/backend/test_api.py` or new `tests/backend/test_projects_list.py` | API test with mocked data layer.                                                                                               |
+| `tests/frontend/storage.test.js`                                         | Three merge scenarios from spec.                                                                                               |
+| `docs/superpowers/specs/2026-04-08-lightweight-projects-list-design.md`  | Set **Estado** to *Aprobado* after implementation (optional doc commit).                                                       |
+
+
+**Invariant (must not regress):** `export_projects_payload` in `supabase_data.py` must keep calling `**list_projects`** (full rows), not the summary function.
 
 ---
 
 ### Task 1: Backend — list summary row builder + query
 
 **Files:**
+
 - Modify: `backend/supabase_data.py` (after `_row_to_project`, before `get_project`)
 - Test: none yet (Task 2)
-
-- [ ] **Step 1: Add constants and helpers**
+- **Step 1: Add constants and helpers**
 
 Insert immediately after `_row_to_project` (after line 58, before `create_project`):
 
@@ -86,11 +88,11 @@ def list_projects_summary(user_id: str) -> list[dict[str, Any]]:
     return [_row_to_list_summary(row) for row in (r.data or [])]
 ```
 
-- [ ] **Step 2: Leave `list_projects` unchanged**
+- **Step 2: Leave `list_projects` unchanged**
 
 Confirm `list_projects` still uses `.select("*")` and `_row_to_project` — `export_projects_payload` depends on it.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add backend/supabase_data.py
@@ -102,9 +104,9 @@ git commit -m "feat(backend): add list_projects_summary without heavy project co
 ### Task 2: Wire FastAPI list endpoint
 
 **Files:**
-- Modify: `main.py` (imports + `api_list_projects`)
 
-- [ ] **Step 1: Update imports**
+- Modify: `main.py` (imports + `api_list_projects`)
+- **Step 1: Update imports**
 
 Replace `list_projects` import from `backend.supabase_data` with:
 
@@ -114,7 +116,7 @@ Replace `list_projects` import from `backend.supabase_data` with:
 
 (Remove `list_projects` from imports unless used elsewhere in `main.py` — it is not; only export uses it inside supabase_data.)
 
-- [ ] **Step 2: Change handler**
+- **Step 2: Change handler**
 
 Replace the body of `api_list_projects`:
 
@@ -124,7 +126,7 @@ async def api_list_projects(user_id: Annotated[str, Depends(get_current_user_id)
     return list_projects_summary(user_id)
 ```
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add main.py
@@ -136,9 +138,9 @@ git commit -m "feat(api): return lightweight project list for GET /api/projects"
 ### Task 3: Backend test — list endpoint contract
 
 **Files:**
-- Create: `tests/backend/test_projects_list.py`
 
-- [ ] **Step 1: Write failing test**
+- Create: `tests/backend/test_projects_list.py`
+- **Step 1: Write failing test**
 
 Create `tests/backend/test_projects_list.py`:
 
@@ -201,7 +203,7 @@ class TestListProjectsSummary:
         assert "source_text" not in data[0]
 ```
 
-- [ ] **Step 2: Run test — expect FAIL** if Task 2 not applied (import error). After Task 2, expect **PASS**.
+- **Step 2: Run test — expect FAIL** if Task 2 not applied (import error). After Task 2, expect **PASS**.
 
 Run:
 
@@ -212,7 +214,7 @@ python -m pytest tests/backend/test_projects_list.py -v
 
 Expected: `1 passed`.
 
-- [ ] **Step 3: Commit**
+- **Step 3: Commit**
 
 ```bash
 git add tests/backend/test_projects_list.py
@@ -224,10 +226,10 @@ git commit -m "test(backend): assert GET /api/projects list_summary contract"
 ### Task 4: Frontend — summary-aware `mergeProjects`
 
 **Files:**
+
 - Modify: `frontend/js/storage.js`
 - Modify: `tests/frontend/storage.test.js`
-
-- [ ] **Step 1: Add helpers and replace `mergeProjects`**
+- **Step 1: Add helpers and replace `mergeProjects`**
 
 At top of `storage.js` after imports, add:
 
@@ -292,7 +294,7 @@ export function mergeProjects(serverProjects = [], localProjects = []) {
 }
 ```
 
-- [ ] **Step 2: Add Vitest tests** — append inside `describe('mergeProjects', ...)` in `tests/frontend/storage.test.js`:
+- **Step 2: Add Vitest tests** — append inside `describe('mergeProjects', ...)` in `tests/frontend/storage.test.js`:
 
 Add tests:
 
@@ -360,7 +362,7 @@ Add tests:
 
 Add a small `describe('mergePairProjects', ...)` with one tie-breaker test if desired; optional.
 
-- [ ] **Step 3: Run Vitest**
+- **Step 3: Run Vitest**
 
 ```powershell
 cd c:\Users\PcVIP\Documents\Stuff\Explainer
@@ -369,7 +371,7 @@ npm run test -- tests/frontend/storage.test.js
 
 Expected: all tests in file **pass** (including new ones).
 
-- [ ] **Step 4: Commit**
+- **Step 4: Commit**
 
 ```bash
 git add frontend/js/storage.js tests/frontend/storage.test.js
@@ -381,13 +383,13 @@ git commit -m "fix(storage): merge list_summary server rows without losing offli
 ### Task 5: Regression sweep — callers of `/api/projects`
 
 **Files:**
-- Read-only verification: `frontend/js/storage.js` (`ensureProjectsFetched`), `frontend/js/sse.js`, `frontend/js/projects.js`
 
-- [ ] **Step 1: Confirm navigation loads full project**
+- Read-only verification: `frontend/js/storage.js` (`ensureProjectsFetched`), `frontend/js/sse.js`, `frontend/js/projects.js`
+- **Step 1: Confirm navigation loads full project**
 
 In `projects.js`, opening a project must still call `GET /api/projects/{id}` (already does per codebase grep). No code change if confirmed.
 
-- [ ] **Step 2: Run full backend + frontend unit tests**
+- **Step 2: Run full backend + frontend unit tests**
 
 ```powershell
 python -m pytest tests/backend -v
@@ -396,18 +398,17 @@ npm run test
 
 Expected: **0 failures**.
 
-- [ ] **Step 3: Commit** (only if a fix was needed; else skip)
+- **Step 3: Commit** (only if a fix was needed; else skip)
 
 ---
 
 ### Task 6: Documentation sync
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-04-08-lightweight-projects-list-design.md`
-
-- [ ] **Step 1: Set `Estado:` to `Aprobado`**
-
-- [ ] **Step 2: Commit**
+- **Step 1: Set `Estado:` to `Aprobado`**
+- **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-04-08-lightweight-projects-list-design.md
@@ -418,12 +419,14 @@ git commit -m "docs: mark lightweight list spec as approved"
 
 ## Why this prevents recurrence
 
-| Mechanism | Effect |
-|-----------|--------|
+
+| Mechanism                      | Effect                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | No heavy columns in list query | Worker does not allocate giant dicts for every project on each list request — main OOM driver removed. |
-| `list_summary` + merge rules | Backup/offline never drops `partes_contenido` when the server only sent metadata. |
-| Export unchanged | Full export still loads complete rows via `list_projects` + `select("*")`. |
-| AI pipeline untouched | No change to `MAX_CONCURRENT_PARTS` or agent threads — spec scope preserved. |
+| `list_summary` + merge rules   | Backup/offline never drops `partes_contenido` when the server only sent metadata.                      |
+| Export unchanged               | Full export still loads complete rows via `list_projects` + `select("*")`.                             |
+| AI pipeline untouched          | No change to `MAX_CONCURRENT_PARTS` or agent threads — spec scope preserved.                           |
+
 
 **Operational note:** If OOM persists after this ships, next suspects are concurrent **full** `GET /api/projects/:id` on huge JSON, or background processing memory — track separately; this plan addresses list-path OOM per spec.
 
@@ -431,15 +434,17 @@ git commit -m "docs: mark lightweight list spec as approved"
 
 ## Self-review (plan vs spec)
 
-| Spec section | Task covering it |
-|--------------|------------------|
-| 3.1 API contract (`list_summary`, exclude heavy fields) | Tasks 1–3 |
-| 3.2 `list_projects_summary` + explicit select | Task 1 |
-| 3.3 Client merge rules | Task 4 |
-| 3.4 No AI parallelism change | Implicit (no main.py pipeline edits) |
-| 4 Tests backend + frontend | Tasks 3–4 |
-| Export/import contract | Task 1 invariant + Task 5 |
-| Criterio éxito memoria | Addressed by column omission |
+
+| Spec section                                            | Task covering it                     |
+| ------------------------------------------------------- | ------------------------------------ |
+| 3.1 API contract (`list_summary`, exclude heavy fields) | Tasks 1–3                            |
+| 3.2 `list_projects_summary` + explicit select           | Task 1                               |
+| 3.3 Client merge rules                                  | Task 4                               |
+| 3.4 No AI parallelism change                            | Implicit (no main.py pipeline edits) |
+| 4 Tests backend + frontend                              | Tasks 3–4                            |
+| Export/import contract                                  | Task 1 invariant + Task 5            |
+| Criterio éxito memoria                                  | Addressed by column omission         |
+
 
 **Placeholder scan:** No TBD/TODO in steps; code blocks are complete.
 
@@ -454,7 +459,6 @@ Plan complete and saved to `docs/superpowers/plans/2026-04-08-lightweight-projec
 **Two execution options:**
 
 1. **Subagent-driven (recommended)** — Dispatch a fresh subagent per task, review between tasks, fast iteration. **REQUIRED SUB-SKILL:** `superpowers:subagent-driven-development`.
-
 2. **Inline execution** — Run tasks in this session with checkpoints. **REQUIRED SUB-SKILL:** `superpowers:executing-plans`.
 
 **Which approach?**

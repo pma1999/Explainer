@@ -75,12 +75,14 @@ from backend.agents.explainer_openrouter import (
     OPENROUTER_MODEL_AGENTS as OPENROUTER_EXPLAINER_MODEL,
     OPENROUTER_PDF_PARSER_ENGINE,
     OPENROUTER_PDF_PRIMING_MODEL,
+    OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
+    prime_pdf_parse_cache_with_fallback,
 )
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
-from backend.openrouter_client import OpenRouterPdfParseCacheEntry, get_or_prime_pdf_parse_cache
+from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -98,7 +100,7 @@ from backend.subpart_scope import (
 )
 from backend.subpart_scope_auditor import (
     MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS,
-    build_subpart_scope_retry_suffix,
+    build_subpart_scope_rewrite_brief,
     run_subpart_scope_auditor,
 )
 
@@ -569,10 +571,9 @@ def _prepare_openrouter_pdf_context(
     reconstructed per-run subset PDF. This allows future executions to reuse
     already processed pages even if the classifier adds or removes pages.
     """
-    cache_entry = get_or_prime_pdf_parse_cache(
+    cache_entry, priming_model = prime_pdf_parse_cache_with_fallback(
         source_path=numbered_pdf_path,
         api_key=api_key,
-        model=OPENROUTER_PDF_PRIMING_MODEL,
         engine=engine,
         filename="document.pdf",
         expected_page_numbers=tuple(sorted(content_page_set)),
@@ -580,6 +581,7 @@ def _prepare_openrouter_pdf_context(
     return OpenRouterPreparedPdfContext(
         source_pdf_path=numbered_pdf_path,
         cache_entry=cache_entry,
+        priming_model=priming_model,
     )
 
 
@@ -634,6 +636,7 @@ class PartHandoffContext:
 class OpenRouterPreparedPdfContext:
     source_pdf_path: str
     cache_entry: OpenRouterPdfParseCacheEntry
+    priming_model: str = OPENROUTER_PDF_PRIMING_MODEL
 
 
 def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
@@ -1152,7 +1155,14 @@ async def _run_subpart_explainer_with_scope_audit(
         reviewer_usages.append(review_usage)
         if report.is_valid:
             return result, usage, reviewer_usages
-        prompt = f"{initial_prompt}\n\n{build_subpart_scope_retry_suffix(report)}"
+        rewrite_brief = build_subpart_scope_rewrite_brief(
+            report,
+            failed_desarrollo_payload=result,
+            current_subpart_summary=ctx["current"],
+            previous_subpart_summary=ctx["previous"],
+            next_subpart_summary=ctx["next"],
+        )
+        prompt = f"{initial_prompt}\n\n{rewrite_brief}"
 
     raise RuntimeError("El auditor de alcance de subparte agotó sus reintentos.")
 
@@ -1611,6 +1621,7 @@ async def _process_project(
                         "content_pages_count": len(content_page_set),
                         "openrouter_model": explainer_model,
                         "openrouter_pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+                        "openrouter_pdf_priming_fallback_model": OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
                     },
                 )
                 openrouter_pdf_prepare_task = asyncio.create_task(
@@ -1837,10 +1848,12 @@ async def _process_project(
         if openrouter_pdf_prepare_task is not None:
             try:
                 openrouter_pdf_context = await openrouter_pdf_prepare_task
+                cumulative_usage["openrouter_pdf_priming_model"] = openrouter_pdf_context.priming_model
                 logger.info(
                     "[Process] OCR canónico OpenRouter preparado",
                     extra={
                         "source_pdf_path": openrouter_pdf_context.source_pdf_path,
+                        "priming_model": openrouter_pdf_context.priming_model,
                         "cache_path": openrouter_pdf_context.cache_entry.cache_path,
                         "cache_hit": openrouter_pdf_context.cache_entry.cache_hit,
                         "requested_pages_count": len(openrouter_pdf_context.cache_entry.expected_page_numbers),
@@ -2120,6 +2133,9 @@ async def _process_project(
                     def _make_audited_subpart_task(idx: int):
                         sp_prompt = subpart_prompts[idx]
                         subparte = subpartes[idx] if idx < len(subpartes) else None
+                        canonical_source_path = openrouter_pdf_context.source_pdf_path if use_or_canonical else None
+                        canonical_cache_entry = openrouter_pdf_context.cache_entry if use_or_canonical else None
+                        canonical_page_scope = tuple(openrouter_page_scopes[idx]) if use_or_canonical else ()
 
                         async def _audited():
                             def _audit_context() -> dict[str, str]:
@@ -2136,13 +2152,13 @@ async def _process_project(
                                     if use_or_canonical:
                                         return await asyncio.to_thread(
                                             explainer_fn_or_sp,
-                                            openrouter_pdf_context.source_pdf_path,
+                                            canonical_source_path,
                                             prompt,
                                             explainer_model,
                                             "application/pdf",
                                             openrouter_api_key,
-                                            openrouter_pdf_context.cache_entry,
-                                            openrouter_page_scopes[idx],
+                                            canonical_cache_entry,
+                                            canonical_page_scope,
                                         )
                                     return await asyncio.to_thread(
                                         explainer_fn_or_sp,

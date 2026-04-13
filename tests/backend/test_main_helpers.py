@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from types import SimpleNamespace
 
 
 def _get_helper():
@@ -115,6 +116,36 @@ def test_assemble_part_explainer_merges_segmentador_scaffold_with_subpart_desarr
     assert result["conclusion"] == "Cierre global"
     assert result["conexiones_contextuales"] == parte["conexiones_contextuales"]
     assert [section["titulo_seccion"] for section in result["desarrollo"]] == ["Sección 1", "Sección 2"]
+
+
+def test_prepare_openrouter_pdf_context_keeps_actual_priming_model(monkeypatch):
+    import main as m
+
+    captured: dict = {}
+    fake_cache_entry = SimpleNamespace(
+        cache_hit=False,
+        cache_path="cache.json",
+        expected_page_numbers=(1, 3),
+        cached_page_numbers=(1, 3),
+    )
+
+    def _fake_prime_with_fallback(**kwargs):
+        captured.update(kwargs)
+        return fake_cache_entry, "google/gemini-3.1-flash-lite-preview"
+
+    monkeypatch.setattr(m, "prime_pdf_parse_cache_with_fallback", _fake_prime_with_fallback)
+
+    context = m._prepare_openrouter_pdf_context(
+        numbered_pdf_path="document-numbered.pdf",
+        content_page_set=frozenset({3, 1}),
+        api_key="sk-or-v1-test",
+        engine="mistral-ocr",
+    )
+
+    assert captured["expected_page_numbers"] == (1, 3)
+    assert context.source_pdf_path == "document-numbered.pdf"
+    assert context.cache_entry is fake_cache_entry
+    assert context.priming_model == m.OPENROUTER_PDF_PRIMING_FALLBACK_MODEL
 
 
 def _scope_handoff():

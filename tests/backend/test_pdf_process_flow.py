@@ -547,9 +547,10 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             os.unlink(pdf_path)
 
 
-def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypatch):
+def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypatch, caplog):
     pdf_path = _create_multi_page_pdf(4)
     try:
+        caplog.set_level("WARNING", logger="main")
         project = {
             "id": "proj-subpart-audit",
             "name": "Doc PDF",
@@ -562,6 +563,7 @@ def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypa
 
         prompts_seen = []
         audit_attempts = {"count": 0}
+        formatter_calls = {"count": 0}
 
         monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
         monkeypatch.setattr(main, "get_user_api_key", lambda uid, provider=None: "AIzaFakeKey")
@@ -656,7 +658,12 @@ def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypa
         monkeypatch.setattr(main, "run_subpart_explainer", _fake_subpart_explainer)
         monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
         monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
-        monkeypatch.setattr(main, "format_explainer_content", lambda api_key, explainer_data: (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}))
+
+        async def _fake_format(api_key, explainer_data):
+            formatter_calls["count"] += 1
+            return explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}
+
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
 
         def _fake_auditor(**kwargs):
             from backend.subpart_scope_auditor import SubpartScopeAuditReport
@@ -689,7 +696,227 @@ def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypa
         asyncio.run(main._process_project("proj-subpart-audit", "user-123"))
 
         assert len(prompts_seen) >= 2
-        assert any("<correccion_alcance_subparte>" in prompt for prompt in prompts_seen[1:])
+        retry_prompt = next(prompt for prompt in prompts_seen if "<reescritura_alcance_subparte>" in prompt)
+        assert "<reescritura_alcance_subparte>" in retry_prompt
+        assert "Texto desarrollado" in retry_prompt
+        assert "Invade la siguiente subparte." in retry_prompt
+        assert "REESCRIBE desde cero el campo `desarrollo`." in retry_prompt
+        assert "SUBPARTE ACTUAL (fuente de verdad):" in retry_prompt
+        assert (
+            "SUBPARTE ANTERIOR (NO desarrollar):" in retry_prompt
+            or "SUBPARTE SIGUIENTE (NO desarrollar):" in retry_prompt
+        )
+        assert formatter_calls["count"] == 1
+        assert not any("Error inesperado al formatear parte" in message for message in caplog.messages)
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_openrouter_retry_reuses_cache_and_includes_rewrite_brief(monkeypatch, caplog):
+    pdf_path = _create_multi_page_pdf(4)
+    try:
+        caplog.set_level("WARNING", logger="main")
+        project = {
+            "id": "proj-openrouter-subpart-audit",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+        }
+
+        prompts_seen = []
+        openrouter_calls = []
+        audit_attempts = {"count": 0}
+        formatter_calls = {"count": 0}
+        shared_cache_entry = OpenRouterPdfParseCacheEntry(
+            source_sha256="sha256",
+            engine="mistral-ocr",
+            assistant_message=None,
+            cache_path="cache.json",
+            cache_hit=True,
+            expected_page_numbers=(1, 2, 3, 4),
+            cached_page_numbers=(1, 2, 3, 4),
+            page_index=(),
+        )
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+
+        async def _send_event(project_id, payload):
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, project_id):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier",
+            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
+        )
+        monkeypatch.setattr(
+            main,
+            "_prepare_openrouter_pdf_context",
+            lambda **kwargs: main.OpenRouterPreparedPdfContext(
+                source_pdf_path=pdf_path,
+                cache_entry=shared_cache_entry,
+            ),
+        )
+
+        def _fake_segmentador(*args, **kwargs):
+            base = _part_pdf_fields(1, "Única", 1, 4)
+            base["temas_cubiertos"] = ["tema1"]
+            base["subpartes"] = [
+                {
+                    "numero_subparte": 1,
+                    "titulo": "Única subparte",
+                    "contenido": "Contenido único",
+                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 1–4.",
+                    "pagina_inicio": 1,
+                    "pagina_fin": 4,
+                    "temas_cubiertos": ["tema1"],
+                    "delimitacion_explainer": {
+                        "inicio": {"encabezado": "1.1", "ancla_texto": "primer texto"},
+                        "fin": {"ancla_texto": "fin tema uno", "encabezado_siguiente_excluido": ""},
+                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
+                    },
+                }
+            ]
+            return (
+                {
+                    "analisis_texto": "Cuatro páginas",
+                    "temas_identificados": ["tema1"],
+                    "decision_num_partes": 1,
+                    "decision_justificacion": "Una parte",
+                    "partes": [base],
+                    "consideraciones_estudiante": "Seguir el orden natural",
+                },
+                _usage(total=40),
+            )
+
+        monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
+        monkeypatch.setattr(
+            main,
+            "run_subpart_explainer",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini subpart explainer no debería ejecutarse")),
+        )
+
+        def _fake_openrouter_subpart_explainer(
+            source_path,
+            agent_prompt,
+            model,
+            mime_type,
+            api_key,
+            cache_entry=None,
+            page_numbers=(),
+        ):
+            prompts_seen.append(agent_prompt)
+            openrouter_calls.append(
+                {
+                    "source_path": source_path,
+                    "model": model,
+                    "mime_type": mime_type,
+                    "cache_entry": cache_entry,
+                    "page_numbers": tuple(page_numbers),
+                }
+            )
+            return (
+                {
+                    "desarrollo": [
+                        {
+                            "titulo_seccion": "Bloque OpenRouter",
+                            "explicacion_introductoria": "Contexto OpenRouter",
+                            "subsecciones": [
+                                {
+                                    "titulo_subseccion": "Detalle OpenRouter",
+                                    "explicacion_detallada": "Texto OpenRouter previo",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                _usage(total=31),
+            )
+
+        monkeypatch.setattr(main, "run_subpart_explainer_or", _fake_openrouter_subpart_explainer)
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+
+        async def _fake_format(api_key, explainer_data):
+            formatter_calls["count"] += 1
+            return explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}
+
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        def _fake_auditor(**kwargs):
+            from backend.subpart_scope_auditor import SubpartScopeAuditReport
+
+            audit_attempts["count"] += 1
+            if audit_attempts["count"] == 1:
+                return (
+                    SubpartScopeAuditReport(
+                        is_valid=False,
+                        invades_previous=(),
+                        invades_next=("tema_ajeno",),
+                        missing_current=("tema1",),
+                        rationale="El desarrollo mezcla alcance ajeno.",
+                    ),
+                    _usage(total=9),
+                )
+            return (
+                SubpartScopeAuditReport(
+                    is_valid=True,
+                    invades_previous=(),
+                    invades_next=(),
+                    missing_current=(),
+                    rationale="OK",
+                ),
+                _usage(total=9),
+            )
+
+        monkeypatch.setattr(main, "run_subpart_scope_auditor", _fake_auditor)
+
+        asyncio.run(
+            main._process_project(
+                "proj-openrouter-subpart-audit",
+                "user-123",
+                explainer_provider="openrouter",
+            )
+        )
+
+        assert len(openrouter_calls) == 2
+        assert openrouter_calls[0]["cache_entry"] is shared_cache_entry
+        assert openrouter_calls[1]["cache_entry"] is shared_cache_entry
+        assert openrouter_calls[0]["page_numbers"] == (1, 2, 3, 4)
+        assert openrouter_calls[1]["page_numbers"] == (1, 2, 3, 4)
+        retry_prompt = prompts_seen[1]
+        assert "<reescritura_alcance_subparte>" in retry_prompt
+        assert "Texto OpenRouter previo" in retry_prompt
+        assert "El desarrollo mezcla alcance ajeno." in retry_prompt
+        assert "REESCRIBE desde cero el campo `desarrollo`." in retry_prompt
+        assert formatter_calls["count"] == 1
+        assert not any("Error inesperado al formatear parte" in message for message in caplog.messages)
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)

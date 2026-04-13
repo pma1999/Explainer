@@ -8,6 +8,13 @@ report for manual analysis.
 Usage:
     python -m tests.test_pipeline_live_neural_compare
 
+    Reuse segmentation from a prior run and only regenerate one subpart on OpenRouter
+    (e.g. compare against an older openrouter_03_subparte_01_explainer.json):
+
+    python -m tests.test_pipeline_live_neural_compare \\
+      --reuse-segmentation test_output/live_compare_neural_YYYYMMDD_HHMMSS/shared_01_segmentation.json \\
+      --only-subpart 1 --openrouter-only --openrouter-model qwen/qwen3.6-plus
+
 Optional environment overrides:
     OPENROUTER_EXPLAINER_MODEL_OVERRIDE
     GEMINI_EXPLAINER_MODEL_OVERRIDE
@@ -204,6 +211,14 @@ def _build_error_record(provider: str, exc: Exception) -> dict[str, Any]:
         "status": "error",
         "error_type": type(exc).__name__,
         "error_message": str(exc),
+    }
+
+
+def _build_skipped_record(provider: str, reason: str) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "status": "skipped",
+        "reason": reason,
     }
 
 
@@ -449,11 +464,31 @@ def main() -> None:
         action="store_true",
         help="Pass the assembled OpenRouter explainer through the formatter.",
     )
+    parser.add_argument(
+        "--only-subpart",
+        dest="only_subpart",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "If >0, run explainers only for subpart N (1-based index within the first parte), "
+            "e.g. 1 for the first subpart. Skips full-part assembly (misleading if only one slice is generated)."
+        ),
+    )
+    parser.add_argument(
+        "--openrouter-only",
+        dest="openrouter_only",
+        action="store_true",
+        help="Skip Gemini explainer calls; only run OpenRouter (Gemini still used for classifier/upload).",
+    )
     args = parser.parse_args()
 
     gemini_explainer_model = (args.gemini_model or GEMINI_EXPLAINER_MODEL).strip()
     openrouter_explainer_model = (args.openrouter_model or OPENROUTER_EXPLAINER_MODEL).strip()
     reuse_segmentation_path = (args.reuse_segmentation or "").strip()
+    only_subpart = int(args.only_subpart or 0)
+    openrouter_only = bool(args.openrouter_only)
+    skip_full_part_assembly = only_subpart > 0
 
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not gemini_api_key:
@@ -521,7 +556,7 @@ def main() -> None:
     log.info("STEP 2: Running Page Classifier")
     log.info("=" * 80)
     clf_start = time.time()
-    content_pages, clf_usage = run_page_classifier(
+    content_pages, clf_usage, _clf_raw = run_page_classifier(
         gemini_api_key,
         file_uri,
         total_pages,
@@ -633,6 +668,7 @@ def main() -> None:
     log.info("=" * 80)
     openrouter_cache_start = time.time()
     openrouter_cache: dict[str, Any]
+    cache_entry: Any = None
     try:
         cache_entry = get_or_prime_pdf_parse_cache(
             source_path=openrouter_document_pdf_path,
@@ -708,6 +744,19 @@ def main() -> None:
         ]
         log.warning("No subpartes returned by segmentador; using whole part as a single fallback subpart")
 
+    if only_subpart < 0 or (only_subpart > 0 and only_subpart > len(subpartes)):
+        log.error(
+            "--only-subpart must be 0 (all subparts) or between 1 and %d inclusive; got %d",
+            len(subpartes),
+            only_subpart,
+        )
+        sys.exit(1)
+    subpart_indices_to_run = (
+        [only_subpart] if only_subpart > 0 else list(range(1, len(subpartes) + 1))
+    )
+    if only_subpart > 0:
+        log.info("Running only subpart %d/%d (--only-subpart)", only_subpart, len(subpartes))
+
     gemini_records: list[dict[str, Any]] = []
     openrouter_records: list[dict[str, Any]] = []
     gemini_desarrollos: list[list[dict[str, Any]]] = []
@@ -722,7 +771,8 @@ def main() -> None:
     )
     log.info("=" * 80)
 
-    for sp_idx, subparte in enumerate(subpartes, start=1):
+    for sp_idx in subpart_indices_to_run:
+        subparte = subpartes[sp_idx - 1]
         log.info("-" * 60)
         log.info(
             "Subparte %d/%d: \"%s\" (pp.%s-%s)",
@@ -752,32 +802,35 @@ def main() -> None:
         log.info("Shared prompt SHA-256: %s", prompt_sha256)
 
         gemini_record: dict[str, Any]
-        gemini_start = time.time()
-        try:
-            gemini_result, gemini_usage = run_subpart_explainer(
-                gemini_api_key,
-                scope_file_uri,
-                sp_prompt,
-                gemini_explainer_model,
-                mime_type="application/pdf",
-            )
-            gemini_ms = int((time.time() - gemini_start) * 1000)
-            gemini_path = _save_json(
-                f"gemini_03_subparte_{sp_idx:02d}_explainer",
-                gemini_result,
-                output_dir,
-            )
-            gemini_record = _build_success_record(
-                provider="gemini",
-                result=gemini_result,
-                usage=gemini_usage,
-                duration_ms=gemini_ms,
-                artifact_path=gemini_path,
-            )
-            gemini_desarrollos.append(gemini_result.get("desarrollo", []))
-        except Exception as exc:
-            log.error("Gemini failed on subparte %d: %s", sp_idx, exc, exc_info=True)
-            gemini_record = _build_error_record("gemini", exc)
+        if openrouter_only:
+            gemini_record = _build_skipped_record("gemini", "openrouter_only")
+        else:
+            gemini_start = time.time()
+            try:
+                gemini_result, gemini_usage = run_subpart_explainer(
+                    gemini_api_key,
+                    scope_file_uri,
+                    sp_prompt,
+                    gemini_explainer_model,
+                    mime_type="application/pdf",
+                )
+                gemini_ms = int((time.time() - gemini_start) * 1000)
+                gemini_path = _save_json(
+                    f"gemini_03_subparte_{sp_idx:02d}_explainer",
+                    gemini_result,
+                    output_dir,
+                )
+                gemini_record = _build_success_record(
+                    provider="gemini",
+                    result=gemini_result,
+                    usage=gemini_usage,
+                    duration_ms=gemini_ms,
+                    artifact_path=gemini_path,
+                )
+                gemini_desarrollos.append(gemini_result.get("desarrollo", []))
+            except Exception as exc:
+                log.error("Gemini failed on subparte %d: %s", sp_idx, exc, exc_info=True)
+                gemini_record = _build_error_record("gemini", exc)
 
         openrouter_record: dict[str, Any]
         openrouter_start = time.time()
@@ -837,7 +890,16 @@ def main() -> None:
     assembled_summary: dict[str, Any] | None = None
     openrouter_assembled_raw_record: dict[str, Any] | None = None
     openrouter_formatter_meta: dict[str, Any] | None = None
-    if all(record.get("status") == "ok" for record in gemini_records):
+    if skip_full_part_assembly:
+        gemini_assembled_record = _build_skipped_record(
+            "gemini",
+            "Skipped full-part assembly because --only-subpart was set.",
+        )
+        openrouter_assembled_record = _build_skipped_record(
+            "openrouter",
+            "Skipped full-part assembly because --only-subpart was set.",
+        )
+    elif all(record.get("status") == "ok" for record in gemini_records):
         gemini_assembled = _assemble_part_explainer(first_parte, gemini_desarrollos)
         gemini_assembled_path = _save_json(
             "gemini_05_assembled_part_explainer",
@@ -858,7 +920,9 @@ def main() -> None:
             "reason": "Not all Gemini subparts completed successfully.",
         }
 
-    if all(record.get("status") == "ok" for record in openrouter_records):
+    if skip_full_part_assembly:
+        pass
+    elif all(record.get("status") == "ok" for record in openrouter_records):
         openrouter_assembled = _assemble_part_explainer(first_parte, openrouter_desarrollos)
         openrouter_raw_label = (
             "openrouter_05_assembled_part_explainer_raw"
@@ -939,6 +1003,11 @@ def main() -> None:
         "run_id": run_id,
         "pdf_path": pdf_path,
         "output_dir": output_dir,
+        "run_options": {
+            "only_subpart": only_subpart if only_subpart > 0 else None,
+            "openrouter_only": openrouter_only,
+            "skip_full_part_assembly": skip_full_part_assembly,
+        },
         "models": {
             "classifier": MODEL_CLASSIFIER,
             "segmentador": MODEL_SEGMENTADOR,

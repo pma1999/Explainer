@@ -35,6 +35,54 @@ def flatten_desarrollo_text(payload: dict[str, Any]) -> str:
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
+def build_subpart_scope_rewrite_brief(
+    report: SubpartScopeAuditReport,
+    *,
+    failed_desarrollo_payload: dict[str, Any],
+    current_subpart_summary: str,
+    previous_subpart_summary: str,
+    next_subpart_summary: str,
+) -> str:
+    failed_output = flatten_desarrollo_text(failed_desarrollo_payload).strip() or "(sin contenido previo)"
+
+    lines = [
+        "<reescritura_alcance_subparte>",
+        "Tu respuesta anterior NO respetó el alcance de la subparte actual.",
+        "REESCRIBE desde cero el campo `desarrollo`. No intentes parchear ni preservar frases dudosas de la salida anterior.",
+        "",
+        "SUBPARTE ACTUAL (fuente de verdad):",
+        current_subpart_summary or "(sin resumen de subparte actual)",
+    ]
+    if previous_subpart_summary:
+        lines.extend(["", "SUBPARTE ANTERIOR (NO desarrollar):", previous_subpart_summary])
+    if next_subpart_summary:
+        lines.extend(["", "SUBPARTE SIGUIENTE (NO desarrollar):", next_subpart_summary])
+
+    lines.extend(["", "RESPUESTA ANTERIOR INVÁLIDA:", failed_output, "", "ERRORES DETECTADOS POR EL AUDITOR:"])
+
+    if report.invades_previous:
+        lines.append("NO desarrolles contenido de la subparte anterior:")
+        for item in report.invades_previous:
+            lines.append(f"- {item}")
+    if report.invades_next:
+        lines.append("NO desarrolles contenido de la subparte siguiente:")
+        for item in report.invades_next:
+            lines.append(f"- {item}")
+    if report.missing_current:
+        lines.append("SÍ debes desarrollar el contenido propio que falta:")
+        for item in report.missing_current:
+            lines.append(f"- {item}")
+
+    lines.extend(
+        [
+            f"Motivo del auditor: {report.rationale}",
+            "Instrucción final: descarta la respuesta anterior y reescribe el `desarrollo` completo respetando solo el alcance de la subparte actual.",
+            "</reescritura_alcance_subparte>",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_subpart_scope_retry_suffix(report: SubpartScopeAuditReport) -> str:
     lines = [
         "<correccion_alcance_subparte>",
