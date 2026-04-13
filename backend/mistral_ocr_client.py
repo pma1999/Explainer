@@ -140,12 +140,13 @@ def _fetch_missing_pages_once(
     filename: str,
 ) -> PdfOcrBuildResult:
     client = Mistral(api_key=api_key)
-    with open(source_path, "rb") as handle:
-        uploaded = client.files.upload(
-            file={"file_name": filename, "content": handle},
-            purpose="ocr",
-        )
+    uploaded = None
     try:
+        with open(source_path, "rb") as handle:
+            uploaded = client.files.upload(
+                file={"file_name": filename, "content": handle},
+                purpose="ocr",
+            )
         signed_url = client.files.get_signed_url(file_id=uploaded.id)
         response = client.ocr.process(
             model=model,
@@ -158,10 +159,11 @@ def _fetch_missing_pages_once(
     except Exception as exc:
         raise PdfOcrError(f"Error al solicitar OCR nativo a Mistral: {exc}") from exc
     finally:
-        try:
-            client.files.delete(file_id=uploaded.id)
-        except Exception as delete_exc:
-            logger.warning("No se pudo borrar el archivo OCR remoto de Mistral: %s", delete_exc)
+        if uploaded is not None:
+            try:
+                client.files.delete(file_id=uploaded.id)
+            except Exception as delete_exc:
+                logger.warning("No se pudo borrar el archivo OCR remoto de Mistral: %s", delete_exc)
 
     return _build_mistral_ocr_result(
         response_payload=_response_to_mapping(response),
