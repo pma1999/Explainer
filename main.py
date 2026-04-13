@@ -1317,8 +1317,6 @@ async def _process_project(
     segment_pdf_paths: list[str] = []
     pdf_total_pages: int = 0
     content_page_set: frozenset[int] = frozenset()
-    openrouter_pdf_prepare_task: asyncio.Task | None = None
-    openrouter_pdf_context: OpenRouterPreparedPdfContext | None = None
     mistral_pdf_prepare_task: asyncio.Task | None = None
     mistral_pdf_context: PreparedPdfOcrContext | None = None
     temp_paths: list[str] = []

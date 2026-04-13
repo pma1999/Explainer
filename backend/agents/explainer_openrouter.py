@@ -15,13 +15,10 @@ from backend.openrouter_client import (
     OpenRouterJsonSchemaResponseFormat,
     OpenRouterPdfParseCacheEntry,
     OpenRouterUsage,
-    build_messages_with_cached_pdf_annotations,
     call_openrouter_chat,
     get_or_prime_pdf_parse_cache,
-    render_pdf_page_subset_to_text,
 )
-from backend.mistral_ocr_client import MISTRAL_OCR_ENGINE, MISTRAL_OCR_MODEL
-from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_text as render_mistral_pdf_page_subset
+from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_text
 from backend.agents.explainer_prompts import (
     SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
     SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
@@ -528,7 +525,7 @@ def _call_openrouter_json_with_pdf_fallback(
     try:
         if mime_type == "application/pdf" and pdf_cache_entry is not None:
             requested_pages = page_numbers or pdf_cache_entry.cached_page_numbers
-            ocr_text = render_mistral_pdf_page_subset(
+            ocr_text = render_pdf_page_subset_to_text(
                 cache_entry=pdf_cache_entry,
                 page_numbers=requested_pages,
             )

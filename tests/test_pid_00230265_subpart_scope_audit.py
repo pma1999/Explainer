@@ -49,7 +49,7 @@ def main() -> None:
     content_page_set, _, _ = run_page_classifier(api_key, uploaded.uri, total_pages, MODEL_CLASSIFIER)
     if not content_page_set:
         raise RuntimeError(
-            "El clasificador no devolvió páginas de contenido; no se puede preparar la caché OCR de OpenRouter."
+            "El clasificador no devolvió páginas de contenido; no se puede preparar la caché OCR de Mistral."
         )
 
     local_temp_paths: list[str] = [numbered]
@@ -143,7 +143,7 @@ def main() -> None:
                         source_path=numbered,
                         identificacion=prompt,
                         mime_type="application/pdf",
-                        api_key=openrouter_key,
+                        api_key=mistral_key,
                         pdf_cache_entry=or_pdf_ctx.cache_entry,
                         page_numbers=page_scope,
                     )
@@ -153,7 +153,7 @@ def main() -> None:
                         source_path=fallback_source_path,
                         identificacion=prompt,
                         mime_type="application/pdf",
-                        api_key=openrouter_key,
+                        api_key=mistral_key,
                     )
 
                 review, _ = run_subpart_scope_auditor(
