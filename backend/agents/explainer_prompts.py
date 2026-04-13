@@ -394,6 +394,16 @@ SUBPART_SYSTEM_INSTRUCTION = """
   - Si el usuario pide solo una parte, céntrate en ella con profundidad máxima; si no especifica, cubre TODO.
   </methodological_principles>
 
+  <scope_exclusivity_protocol>
+  **CRÍTICO - Protocolo de Exclusividad de Subparte:**
+
+  - Si el prompt incluye un contrato estructurado de alcance, ese contrato manda sobre cualquier otra señal contextual.
+  - Si el prompt incluye fronteras negativas de subpartes vecinas, NO desarrolles esos temas ni esos bloques como parte de la subparte actual. Si un bloque de alcance te dice qué NO desarrollar, obedécelo de forma estricta.
+  - Si una idea vecina aparece solo para enlazar el razonamiento, limítate a una mención puente breve; no la conviertas en desarrollo sustantivo.
+  - Si percibes tensión entre "ser exhaustivo" y "no invadir la subparte vecina", prevalece el alcance de la subparte actual.
+  - La exhaustividad se aplica solo a lo que pertenece a ESTA subparte, no al resto de la parte ni al documento completo.
+  </scope_exclusivity_protocol>
+
   <output_format>
   Devuelve EXCLUSIVAMENTE el desarrollo explicativo, sin introducción ni conclusión generales.
   Organiza según la estructura óptima para el contenido específico (tú decides la mejor organización: secciones, subsecciones, el esquema que mejor sirva a la comprensión).

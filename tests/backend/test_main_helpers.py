@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from types import SimpleNamespace
 
 
 def _get_helper():
@@ -115,3 +116,116 @@ def test_assemble_part_explainer_merges_segmentador_scaffold_with_subpart_desarr
     assert result["conclusion"] == "Cierre global"
     assert result["conexiones_contextuales"] == parte["conexiones_contextuales"]
     assert [section["titulo_seccion"] for section in result["desarrollo"]] == ["Sección 1", "Sección 2"]
+
+
+def _scope_handoff():
+    import main as m
+
+    return m.PartHandoffContext(
+        titulo="Parte 2",
+        resumen_alcance="Instituciones del Estado Moderno",
+        temas_cubiertos=("Concepto de Estado", "Burocracia"),
+        intent_usuario=None,
+        continuidad_previa=None,
+        vision_global_division=None,
+    )
+
+
+def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbors():
+    import main as m
+
+    parte = {
+        "numero": 2,
+        "titulo": "El Estado Moderno",
+        "identificacion": "Parte 2 completa",
+        "pagina_inicio": 12,
+        "pagina_fin": 27,
+    }
+    subpartes = [
+        {
+            "numero_subparte": 1,
+            "titulo": "Precursores",
+            "contenido": "Teorización política previa",
+            "temas_cubiertos": ["Tomás de Aquino", "Maquiavelo"],
+            "pagina_inicio": 18,
+            "pagina_fin": 19,
+        },
+        {
+            "numero_subparte": 2,
+            "titulo": "Cambios estructurales",
+            "contenido": "Reforma administrativa y oficiales",
+            "temas_cubiertos": ["Burocracia"],
+            "pagina_inicio": 19,
+            "pagina_fin": 22,
+            "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 19–22.",
+            "delimitacion_explainer": {
+                "inicio": {"encabezado": "2.3", "ancla_texto": "Las monarquías modernas reforzaron"},
+                "fin": {"ancla_texto": "oficio público cada vez más técnico", "encabezado_siguiente_excluido": "2.4 Régimen de Consejos"},
+                "transicion_compartida": {
+                    "hay_transicion": True,
+                    "pagina": 19,
+                    "hasta_texto_inclusive": "la mención a Bodin",
+                    "desde_texto_inclusive": "2.3 Cambios estructurales",
+                },
+            },
+        },
+        {
+            "numero_subparte": 3,
+            "titulo": "Consejos",
+            "contenido": "Régimen polisinodial",
+            "temas_cubiertos": ["Consejos", "Audiencias"],
+            "pagina_inicio": 23,
+            "pagina_fin": 27,
+        },
+    ]
+
+    prompt = m._build_subpart_pdf_prompt(
+        "TABLA",
+        parte,
+        subpartes[1],
+        subpartes,
+        2,
+        5,
+        _scope_handoff(),
+        pdf_scope_mode="subpdf_buffered",
+        nucleo_inicio=12,
+        nucleo_fin=27,
+    )
+
+    assert "CONTRATO ESTRUCTURADO DE ALCANCE DE LA SUBPARTE" in prompt
+    assert "FRONTERAS NEGATIVAS (NO DESARROLLAR)" in prompt
+    assert "Subparte 1 (anterior)" in prompt
+    assert "Subparte 3 (siguiente)" in prompt
+    assert "Burocracia" in prompt
+    assert "Tomás de Aquino" in prompt
+    assert "Consejos" in prompt
+
+
+def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch):
+    import main as m
+
+    captured: dict = {}
+    fake_cache_entry = SimpleNamespace(
+        cache_hit=False,
+        cache_path="cache.json",
+        expected_page_numbers=(1, 3),
+        cached_page_numbers=(1, 3),
+        page_index=(),
+    )
+
+    def _fake_get_or_prime(**kwargs):
+        captured.update(kwargs)
+        return fake_cache_entry
+
+    monkeypatch.setattr(m, "get_or_prime_mistral_pdf_ocr_cache", _fake_get_or_prime)
+
+    context = m._prepare_mistral_pdf_ocr_context(
+        numbered_pdf_path="document-numbered.pdf",
+        content_page_set=frozenset({3, 1}),
+        api_key="mistral-test-key",
+        engine="mistral-native",
+    )
+
+    assert captured["expected_page_numbers"] == (1, 3)
+    assert context.source_pdf_path == "document-numbered.pdf"
+    assert context.cache_entry is fake_cache_entry

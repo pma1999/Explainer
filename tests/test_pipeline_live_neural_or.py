@@ -139,7 +139,7 @@ def main():
     log.info("STEP 2: Running Page Classifier (Gemini)")
     log.info("=" * 80)
     clf_start = time.time()
-    content_pages, clf_usage = run_page_classifier(api_key, file_uri, total_pages, MODEL_CLASSIFIER)
+    content_pages, clf_usage, _clf_raw = run_page_classifier(api_key, file_uri, total_pages, MODEL_CLASSIFIER)
     log.info("Page classifier done in %dms", int((time.time() - clf_start) * 1000))
     log.info("Content pages: %d / %d — %s", len(content_pages), total_pages, sorted(content_pages))
     log.info("Token usage: %s", _tokens_gemini(clf_usage))

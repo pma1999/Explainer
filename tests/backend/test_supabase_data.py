@@ -149,13 +149,14 @@ class TestGetProjectExecuteNone:
     """Regression: execute() may return None; must not access .data on None."""
 
     def test_returns_none_when_execute_returns_none(self):
-        mock_maybe = MagicMock(return_value=MagicMock(execute=MagicMock(return_value=None)))
-        mock_eq2 = MagicMock()
-        mock_eq2.maybe_single = mock_maybe
-        mock_eq1 = MagicMock()
-        mock_eq1.eq.return_value = mock_eq2
+        inner = MagicMock()
+        inner.execute = MagicMock(return_value=None)
+        after_second_eq = MagicMock()
+        after_second_eq.maybe_single.return_value = inner
+        first_eq = MagicMock()
+        first_eq.eq.return_value = after_second_eq
         mock_select = MagicMock()
-        mock_select.eq.return_value = mock_eq1
+        mock_select.eq.return_value = first_eq
         mock_table = MagicMock()
         mock_table.select.return_value = mock_select
         with patch("backend.supabase_data._client") as mock_client:

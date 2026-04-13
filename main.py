@@ -8,7 +8,8 @@ import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Annotated, AsyncGenerator, Literal
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, AsyncGenerator, Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -44,6 +45,7 @@ from backend.supabase_data import (
     get_user_api_key_status,
     PROVIDER_GEMINI,
     PROVIDER_OPENROUTER,
+    PROVIDER_MISTRAL,
 )
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
@@ -74,12 +76,19 @@ from backend.agents.explainer_openrouter import (
     OPENROUTER_MODEL_AGENTS as OPENROUTER_EXPLAINER_MODEL,
     OPENROUTER_PDF_PARSER_ENGINE,
     OPENROUTER_PDF_PRIMING_MODEL,
+    OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
 )
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
-from backend.openrouter_client import OpenRouterPdfParseCacheEntry, get_or_prime_pdf_parse_cache
+from backend.openrouter_client import OpenRouterPdfParseCacheEntry
+from backend.mistral_ocr_client import (
+    MISTRAL_OCR_ENGINE,
+    MISTRAL_OCR_MODEL,
+    get_or_prime_mistral_pdf_ocr_cache,
+)
+from backend.pdf_ocr_cache import PdfOcrCacheEntry
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -89,6 +98,16 @@ from backend.url_extraction import (
     render_block_marked_document,
     slice_block_range,
     write_text_document_temp,
+)
+from backend.subpart_scope import (
+    build_subpart_negative_scope_block,
+    build_subpart_scope_contract_block,
+    build_subpart_scope_summary,
+)
+from backend.subpart_scope_auditor import (
+    MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS,
+    build_subpart_scope_rewrite_brief,
+    run_subpart_scope_auditor,
 )
 
 
@@ -163,6 +182,14 @@ def _validate_openrouter_api_key(api_key: str) -> str:
     return key
 
 
+def _validate_mistral_api_key(api_key: str) -> str:
+    """Validate and normalize Mistral API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if len(key) < 20 or len(key) > 300 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=400, detail="API key de Mistral inválida")
+    return key
+
+
 # ---- Gemini key endpoints ----
 
 @app.post("/api/settings/api-key")
@@ -216,6 +243,34 @@ async def api_delete_openrouter_key(
     """Delete user's OpenRouter API key."""
     delete_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
     logger.info("[API Key] User %s... deleted OpenRouter key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- Mistral key endpoints ----
+
+@app.post("/api/settings/api-key/mistral")
+@api_key_rate_limit
+async def api_set_mistral_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    api_key: str = Form(...),
+):
+    """Store user's Mistral API key (BYOK)."""
+    api_key = _validate_mistral_api_key(api_key)
+    set_user_api_key(user_id, api_key, provider=PROVIDER_MISTRAL)
+    logger.info("[API Key] User %s... configured Mistral key: %s", user_id[:8], mask_api_key(api_key))
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key/mistral")
+@api_key_rate_limit
+async def api_delete_mistral_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Delete user's Mistral API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_MISTRAL)
+    logger.info("[API Key] User %s... deleted Mistral key", user_id[:8])
     return {"ok": True}
 
 
@@ -545,30 +600,45 @@ def _select_openrouter_pdf_pages(
     return tuple(page for page in ordered_pages if lower <= page <= upper)
 
 
-def _prepare_openrouter_pdf_context(
+@dataclass(frozen=True, slots=True)
+class OpenRouterPreparedPdfContext:
+    source_pdf_path: str
+    cache_entry: OpenRouterPdfParseCacheEntry
+    priming_model: str = OPENROUTER_PDF_PRIMING_MODEL
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedPdfOcrContext:
+    source_pdf_path: str
+    cache_entry: PdfOcrCacheEntry
+    ocr_model: str = MISTRAL_OCR_MODEL
+
+
+def _prepare_mistral_pdf_ocr_context(
     *,
     numbered_pdf_path: str,
     content_page_set: frozenset[int],
     api_key: str,
     engine: str,
-) -> "OpenRouterPreparedPdfContext":
-    """Prime the incremental OCR cache over the numbered source PDF.
+) -> "PreparedPdfOcrContext":
+    """Prepare Mistral native OCR cache for the content pages of the numbered source PDF.
 
     The cache is keyed by the numbered source document itself, not by a
     reconstructed per-run subset PDF. This allows future executions to reuse
     already processed pages even if the classifier adds or removes pages.
     """
-    cache_entry = get_or_prime_pdf_parse_cache(
+    cache_entry = get_or_prime_mistral_pdf_ocr_cache(
         source_path=numbered_pdf_path,
         api_key=api_key,
-        model=OPENROUTER_PDF_PRIMING_MODEL,
+        model=MISTRAL_OCR_MODEL,
         engine=engine,
         filename="document.pdf",
         expected_page_numbers=tuple(sorted(content_page_set)),
     )
-    return OpenRouterPreparedPdfContext(
+    return PreparedPdfOcrContext(
         source_pdf_path=numbered_pdf_path,
         cache_entry=cache_entry,
+        ocr_model=MISTRAL_OCR_MODEL,
     )
 
 
@@ -617,12 +687,6 @@ class PartHandoffContext:
     intent_usuario: str | None
     continuidad_previa: str | None
     vision_global_division: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class OpenRouterPreparedPdfContext:
-    source_pdf_path: str
-    cache_entry: OpenRouterPdfParseCacheEntry
 
 
 def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
@@ -948,7 +1012,6 @@ def _build_subpart_context(
     part_id: int,
     num_partes: int,
 ) -> str:
-    """Build the subpart-specific scope block for the explainer prompt."""
     sp_num = subparte.get("numero_subparte", 1)
     total_sp = len(all_subpartes)
     sp_titulo = subparte.get("titulo", f"Subparte {sp_num}")
@@ -956,40 +1019,22 @@ def _build_subpart_context(
     sp_temas = subparte.get("temas_cubiertos", [])
 
     lines: list[str] = []
-    lines.append("ALCANCE DE LA SUBPARTE (EXPLAINER)")
-    lines.append(
-        f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}."
-    )
-    lines.append(
-        "CONTRATO DE FOCO: limita el desarrollo al núcleo indicado en el bloque de alcance del PDF/texto "
-        "y a la identificación de esta subparte. No repitas ni expliques trozos asignados a otras subpartes; "
-        "si la identificación incluye «PÁGINA … COMPARTIDA» o equivalente para un tramo compartido, "
-        "respeta esa frontera al pie de la letra."
-    )
+    lines.append("ALCANCE PEDAGÓGICO DE LA SUBPARTE")
+    lines.append(f"Estás explicando la SUBPARTE {sp_num}/{total_sp} de la Parte {part_id}/{num_partes}.")
+    lines.append("Desarrolla SOLO el contenido asignado a esta subparte.")
+    lines.append("")
+    lines.append(f"Título: «{sp_titulo}»")
+    if sp_contenido:
+        lines.append(f"Contenido propio: {sp_contenido}")
+    if sp_temas:
+        lines.append("Temas propios a desarrollar:")
+        for i, tema in enumerate(sp_temas, 1):
+            lines.append(f"  {i}. {tema}")
     lines.append(
         "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
         "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
         "por el segmentador con visión global del documento completo."
     )
-    lines.append("")
-    lines.append(f"Título de esta subparte: «{sp_titulo}»")
-    if sp_contenido:
-        lines.append(f"Alcance: {sp_contenido}")
-    if sp_temas:
-        lines.append("Temas a desarrollar en esta subparte:")
-        for i, tema in enumerate(sp_temas, 1):
-            lines.append(f"  {i}. {tema}")
-
-    # Context about sibling subparts for continuity
-    if total_sp > 1:
-        lines.append("")
-        lines.append("Contexto de otras subpartes de esta misma parte (NO las expliques, solo para continuidad):")
-        for sp in all_subpartes:
-            sp_n = sp.get("numero_subparte", 0)
-            if sp_n != sp_num:
-                label = "anterior" if sp_n < sp_num else "siguiente"
-                lines.append(f"  - Subparte {sp_n} ({label}): {sp.get('titulo', '?')} — {sp.get('contenido', '')[:120]}")
-
     return "\n".join(lines)
 
 
@@ -1029,6 +1074,8 @@ def _build_subpart_pdf_prompt(
     )
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1040,8 +1087,11 @@ def _build_subpart_pdf_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
 
 
@@ -1069,6 +1119,8 @@ def _build_subpart_text_prompt(
     scope = _text_scope_instructions(part_id, num_partes, int(sp_bi), int(sp_bf))
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1080,8 +1132,11 @@ def _build_subpart_text_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
 
 
@@ -1103,6 +1158,8 @@ def _build_subpart_youtube_prompt(
     scope = _youtube_scope_instructions(part_id, num_partes)
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
+    scope_contract = build_subpart_scope_contract_block(subparte)
+    negative_scope = build_subpart_negative_scope_block(subparte, all_subpartes)
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
@@ -1114,9 +1171,50 @@ def _build_subpart_youtube_prompt(
         f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
-        f"IDENTIFICACIÓN DE LA SUBPARTE (delimitación exacta; respétala para no duplicar otras subpartes):\n"
-        f"{sp_identificacion}"
+        f"{scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
+
+
+async def _run_subpart_explainer_with_scope_audit(
+    *,
+    run_explainer_call: Callable[[str], Awaitable[tuple[dict[str, Any], Any]]],
+    initial_prompt: str,
+    audit_context_builder: Callable[[], dict[str, str]],
+    audit_api_key: str,
+    audit_model: str,
+) -> tuple[dict[str, Any], Any, list[Any]]:
+    prompt = initial_prompt
+    reviewer_usages: list[Any] = []
+
+    for _ in range(MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS):
+        result, usage = await run_explainer_call(prompt)
+        ctx = audit_context_builder()
+        report, review_usage = await asyncio.to_thread(
+            run_subpart_scope_auditor,
+            api_key=audit_api_key,
+            current_subpart_summary=ctx["current"],
+            previous_subpart_summary=ctx["previous"],
+            next_subpart_summary=ctx["next"],
+            desarrollo_payload=result,
+            model=audit_model,
+        )
+        reviewer_usages.append(review_usage)
+        if report.is_valid:
+            return result, usage, reviewer_usages
+        rewrite_brief = build_subpart_scope_rewrite_brief(
+            report,
+            failed_desarrollo_payload=result,
+            current_subpart_summary=ctx["current"],
+            previous_subpart_summary=ctx["previous"],
+            next_subpart_summary=ctx["next"],
+        )
+        prompt = f"{initial_prompt}\n\n{rewrite_brief}"
+
+    raise RuntimeError("El auditor de alcance de subparte agotó sus reintentos.")
 
 
 def _parse_text_source_evaluation(segmentation: dict[str, object]) -> dict[str, object]:
@@ -1227,8 +1325,8 @@ async def _process_project(
     segment_pdf_paths: list[str] = []
     pdf_total_pages: int = 0
     content_page_set: frozenset[int] = frozenset()
-    openrouter_pdf_prepare_task: asyncio.Task | None = None
-    openrouter_pdf_context: OpenRouterPreparedPdfContext | None = None
+    mistral_pdf_prepare_task: asyncio.Task | None = None
+    mistral_pdf_context: PreparedPdfOcrContext | None = None
     temp_paths: list[str] = []
     web_blocks = []
     source_mime_type = "application/pdf"
@@ -1285,6 +1383,7 @@ async def _process_project(
             return
 
         openrouter_api_key = ""
+        mistral_api_key = ""
         if use_openrouter_explainer:
             openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
             if not openrouter_api_key:
@@ -1300,6 +1399,21 @@ async def _process_project(
                     },
                 )
                 update_project(project_id, user_id, {"status": "error", "error_message": "API key OpenRouter no configurada"})
+                return
+            mistral_api_key = get_user_api_key(user_id, provider=PROVIDER_MISTRAL) or ""
+            if source_type == "pdf" and not mistral_api_key:
+                logger.error(f"[Process] API key Mistral no configurada para PDF con OpenRouter: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de Mistral configurada. "
+                            "Guárdala en Ajustes para usar OCR nativo en PDFs con OpenRouter."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
                 return
 
         logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
@@ -1566,22 +1680,21 @@ async def _process_project(
                     extra={"error_type": type(clf_err).__name__},
                 )
 
-            if use_openrouter_explainer and openrouter_api_key and content_page_set:
+            if use_openrouter_explainer and mistral_api_key and content_page_set and source_type == "pdf":
                 logger.info(
-                    "[Process] Preparando OCR canónico de OpenRouter sobre páginas con contenido",
+                    "[Process] Preparando OCR canónico de Mistral sobre páginas con contenido",
                     extra={
                         "content_pages_count": len(content_page_set),
-                        "openrouter_model": explainer_model,
-                        "openrouter_pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+                        "mistral_ocr_engine": MISTRAL_OCR_ENGINE,
                     },
                 )
-                openrouter_pdf_prepare_task = asyncio.create_task(
+                mistral_pdf_prepare_task = asyncio.create_task(
                     asyncio.to_thread(
-                        _prepare_openrouter_pdf_context,
+                        _prepare_mistral_pdf_ocr_context,
                         numbered_pdf_path=numbered_pdf_path,
                         content_page_set=content_page_set,
-                        api_key=openrouter_api_key,
-                        engine=OPENROUTER_PDF_PARSER_ENGINE,
+                        api_key=mistral_api_key,
+                        engine=MISTRAL_OCR_ENGINE,
                     )
                 )
 
@@ -1796,23 +1909,31 @@ async def _process_project(
                 extra={"toc_preview": table_of_contents[:300]}
             )
 
-        if openrouter_pdf_prepare_task is not None:
+        if mistral_pdf_prepare_task is not None:
             try:
-                openrouter_pdf_context = await openrouter_pdf_prepare_task
+                mistral_pdf_context = await mistral_pdf_prepare_task
+                diagnostic_artifact_path = getattr(
+                    mistral_pdf_context.cache_entry,
+                    "diagnostic_artifact_path",
+                    None,
+                )
+                if diagnostic_artifact_path:
+                    logger.info(
+                        "[Process] OCR artefacto de páginas no resueltas: %s",
+                        diagnostic_artifact_path,
+                        extra={"diagnostic_artifact_path": diagnostic_artifact_path},
+                    )
                 logger.info(
-                    "[Process] OCR canónico OpenRouter preparado",
+                    "[Process] OCR canónico de Mistral preparado",
                     extra={
-                        "source_pdf_path": openrouter_pdf_context.source_pdf_path,
-                        "cache_path": openrouter_pdf_context.cache_entry.cache_path,
-                        "cache_hit": openrouter_pdf_context.cache_entry.cache_hit,
-                        "requested_pages_count": len(openrouter_pdf_context.cache_entry.expected_page_numbers),
-                        "cached_pages_count": len(openrouter_pdf_context.cache_entry.cached_page_numbers),
+                        "cache_hit": mistral_pdf_context.cache_entry.cache_hit,
+                        "cached_pages_count": len(mistral_pdf_context.cache_entry.cached_page_numbers),
                     },
                 )
             except Exception as exc:
-                openrouter_pdf_context = None
+                mistral_pdf_context = None
                 logger.warning(
-                    "[Process] No se pudo preparar el OCR canónico OpenRouter; se usará el flujo local por parte: %s",
+                    "[Process] No se pudo preparar el OCR canónico de Mistral; se usará el flujo local por parte: %s",
                     exc,
                     extra={"error_type": type(exc).__name__},
                 )
@@ -2072,31 +2193,98 @@ async def _process_project(
 
                 # Execute all subpart explainers + recorrido + resources in parallel
                 agents_start = time.time()
-                use_or_canonical = use_openrouter_explainer and is_pdf_source and openrouter_pdf_context is not None
+                use_or_canonical = use_openrouter_explainer and is_pdf_source and mistral_pdf_context is not None
                 use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
                 use_or = use_or_canonical or use_or_direct
-                if use_or:
-                    explainer_fn_or = run_subpart_explainer_or if use_subpart_explainer else run_explainer_or
+                if use_subpart_explainer:
+                    explainer_fn_or_sp = run_subpart_explainer_or
+                    explainer_fn_sp = run_subpart_explainer
+
+                    def _make_audited_subpart_task(idx: int):
+                        sp_prompt = subpart_prompts[idx]
+                        subparte = subpartes[idx] if idx < len(subpartes) else None
+                        canonical_source_path = mistral_pdf_context.source_pdf_path if use_or_canonical else None
+                        canonical_cache_entry = mistral_pdf_context.cache_entry if use_or_canonical else None
+                        canonical_page_scope = tuple(openrouter_page_scopes[idx]) if use_or_canonical else ()
+
+                        async def _audited():
+                            def _audit_context() -> dict[str, str]:
+                                previous_sp = subpartes[idx - 1] if idx > 0 else None
+                                next_sp = subpartes[idx + 1] if idx + 1 < len(subpartes) else None
+                                return {
+                                    "current": build_subpart_scope_summary(subparte) if subparte else "",
+                                    "previous": build_subpart_scope_summary(previous_sp) if previous_sp else "",
+                                    "next": build_subpart_scope_summary(next_sp) if next_sp else "",
+                                }
+
+                            async def _call(prompt: str) -> tuple[dict[str, Any], Any]:
+                                if use_or:
+                                    if use_or_canonical:
+                                        return await asyncio.to_thread(
+                                            explainer_fn_or_sp,
+                                            canonical_source_path,
+                                            prompt,
+                                            explainer_model,
+                                            "application/pdf",
+                                            openrouter_api_key,
+                                            canonical_cache_entry,
+                                            canonical_page_scope,
+                                        )
+                                    return await asyncio.to_thread(
+                                        explainer_fn_or_sp,
+                                        segment_temp_path,
+                                        prompt,
+                                        explainer_model,
+                                        agent_mime_type,
+                                        openrouter_api_key,
+                                    )
+                                return await asyncio.to_thread(
+                                    explainer_fn_sp,
+                                    api_key,
+                                    agent_file_uri,
+                                    prompt,
+                                    MODEL_AGENTS,
+                                    agent_mime_type,
+                                )
+
+                            return await _run_subpart_explainer_with_scope_audit(
+                                run_explainer_call=_call,
+                                initial_prompt=sp_prompt,
+                                audit_context_builder=_audit_context,
+                                audit_api_key=api_key,
+                                audit_model=MODEL_CLASSIFIER,
+                            )
+
+                        return _audited()
+
                     if use_or_canonical:
                         if len(openrouter_page_scopes) != len(subpart_prompts):
                             raise RuntimeError(
                                 "Las páginas OpenRouter no coinciden con el número de subprompts generados."
                             )
-                        explainer_calls = [
+                    parallel_explainer = [_make_audited_subpart_task(i) for i in range(num_subparts)]
+                elif use_or:
+                    explainer_fn_or = run_explainer_or
+                    if use_or_canonical:
+                        if len(openrouter_page_scopes) != len(subpart_prompts):
+                            raise RuntimeError(
+                                "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                            )
+                        parallel_explainer = [
                             asyncio.to_thread(
                                 explainer_fn_or,
-                                openrouter_pdf_context.source_pdf_path,
+                                mistral_pdf_context.source_pdf_path,
                                 sp_prompt,
                                 explainer_model,
                                 "application/pdf",
                                 openrouter_api_key,
-                                openrouter_pdf_context.cache_entry,
+                                mistral_pdf_context.cache_entry,
                                 page_scope,
                             )
                             for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
                         ]
                     else:
-                        explainer_calls = [
+                        parallel_explainer = [
                             asyncio.to_thread(
                                 explainer_fn_or,
                                 segment_temp_path,
@@ -2108,13 +2296,13 @@ async def _process_project(
                             for sp_prompt in subpart_prompts
                         ]
                 else:
-                    explainer_fn = run_subpart_explainer if use_subpart_explainer else run_explainer
-                    explainer_calls = [
+                    explainer_fn = run_explainer
+                    parallel_explainer = [
                         asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
                         for sp_prompt in subpart_prompts
                     ]
                 results = await asyncio.gather(
-                    *explainer_calls,
+                    *parallel_explainer,
                     asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                     asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
                     return_exceptions=True,
@@ -2135,7 +2323,10 @@ async def _process_project(
                             extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
                         )
                     else:
-                        sp_data, _ = sp_result
+                        if use_subpart_explainer:
+                            sp_data, _, _ = sp_result
+                        else:
+                            sp_data, _ = sp_result
                         subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
                 # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2156,13 +2347,29 @@ async def _process_project(
                 async with usage_lock:
                     for i, sp_result in enumerate(subpart_results):
                         if not isinstance(sp_result, Exception):
-                            sp_data, sp_usage = sp_result
-                            if sp_usage:
-                                _update_usage(
-                                    sp_usage,
-                                    phase=f"part_{part_id}_explainer_sp{i+1}",
-                                    cost_model=explainer_model,
-                                )
+                            if use_subpart_explainer:
+                                _sp_data, sp_usage, reviewer_usages = sp_result
+                                if sp_usage:
+                                    _update_usage(
+                                        sp_usage,
+                                        phase=f"part_{part_id}_explainer_sp{i+1}",
+                                        cost_model=explainer_model,
+                                    )
+                                for j, ru in enumerate(reviewer_usages):
+                                    if ru:
+                                        _update_usage(
+                                            ru,
+                                            phase=f"part_{part_id}_scope_audit_sp{i+1}_a{j+1}",
+                                            cost_model=MODEL_CLASSIFIER,
+                                        )
+                            else:
+                                sp_data, sp_usage = sp_result
+                                if sp_usage:
+                                    _update_usage(
+                                        sp_usage,
+                                        phase=f"part_{part_id}_explainer_sp{i+1}",
+                                        cost_model=explainer_model,
+                                    )
                     if usage_rec:
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
                     if usage_res:
@@ -2368,19 +2575,19 @@ async def _process_project(
         update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
-        if openrouter_pdf_prepare_task is not None:
+        if mistral_pdf_prepare_task is not None:
             try:
-                if not openrouter_pdf_prepare_task.done():
-                    openrouter_pdf_prepare_task.cancel()
+                if not mistral_pdf_prepare_task.done():
+                    mistral_pdf_prepare_task.cancel()
                     try:
-                        await openrouter_pdf_prepare_task
+                        await mistral_pdf_prepare_task
                     except asyncio.CancelledError:
                         pass
-                elif openrouter_pdf_context is None:
-                    prepared_context = openrouter_pdf_prepare_task.result()
+                elif mistral_pdf_context is None:
+                    mistral_pdf_prepare_task.result()  # surface stored exception for logging
             except Exception as exc:
                 logger.debug(
-                    "[Process] Cierre del task OCR canónico OpenRouter sin contexto reutilizable",
+                    "[Process] Cierre del task OCR canónico Mistral sin contexto reutilizable",
                     extra={
                         "project_id": project_id,
                         "error_type": type(exc).__name__,
@@ -2566,6 +2773,12 @@ async def api_process_project(
             raise HTTPException(
                 status_code=400,
                 detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar MiniMax en el explainer.",
+            )
+        if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
+            logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con OpenRouter.",
             )
 
     logger.info(

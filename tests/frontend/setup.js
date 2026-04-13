@@ -58,6 +58,11 @@ beforeAll(() => {
   // Ensure required DOM elements exist for modules that use $
   ensureElement('toast-container');
 
+  // PWA offline banner (real nodes — stub classList.contains breaks height sync)
+  const offlineBanner = ensureElement('offline-banner');
+  offlineBanner.classList.add('hidden');
+  ensureElement('offline-banner-text');
+
   // View containers (main.js showView, bootstrap)
   ['view-auth', 'view-landing', 'view-projects', 'view-project'].forEach((id) => {
     const el = ensureElement(id);
@@ -91,6 +96,21 @@ beforeAll(() => {
 
   // Mock fetch for API tests
   global.fetch = vi.fn();
+
+  // jsdom has no matchMedia; PWA / main.js call it at load time
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
 
   // Return stub for missing elements so bootstrap and initSettings don't throw
   const stubEl = createStubElement();

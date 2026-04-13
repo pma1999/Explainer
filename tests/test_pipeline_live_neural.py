@@ -134,7 +134,7 @@ def main():
     log.info("STEP 2: Running Page Classifier")
     log.info("=" * 80)
     clf_start = time.time()
-    content_pages, clf_usage = run_page_classifier(
+    content_pages, clf_usage, _clf_raw = run_page_classifier(
         api_key, file_uri, total_pages, MODEL_CLASSIFIER,
     )
     clf_ms = (time.time() - clf_start) * 1000

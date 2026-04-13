@@ -845,7 +845,7 @@
           <h4 class="settings-section-title">API Key de OpenRouter <span class="settings-badge-optional">Opcional</span></h4>
           <p class="settings-description">
             Si la configuras, podrás elegir <strong>Qwen (qwen/qwen3.6-plus)</strong> para el explainer en cada ejecución.
-            El OCR de PDFs seguirá usando <strong>Grok</strong> y el resto de agentes (segmentación, recorrido, recursos y formateo)
+            El OCR de PDFs usará <strong>Mistral nativo</strong> y el resto de agentes (segmentación, recorrido, recursos y formateo)
             siguen usando Gemini.
             Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
           </p>
@@ -874,6 +874,40 @@
             </div>
             <p class="form-error" id="openrouter-key-error"></p>
             <p class="form-success" id="openrouter-key-success"></p>
+          </form>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-title">API Key de Mistral <span class="settings-badge-optional">Necesaria para PDF + OpenRouter</span></h4>
+          <p class="settings-description">
+            Si quieres usar <strong>Qwen vía OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
+            Obtén tu API key en <a href="https://console.mistral.ai/" target="_blank" rel="noopener">console.mistral.ai</a>.
+          </p>
+
+          <div id="mistral-key-not-set" class="api-key-status hidden">
+            <div class="status-badge status-neutral">No configurada</div>
+            <p class="status-text">Los PDFs con OpenRouter seguirán bloqueados hasta guardar esta key.</p>
+          </div>
+
+          <div id="mistral-key-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Configurada</div>
+            <p class="status-text">El OCR nativo de Mistral queda disponible para proyectos PDF con OpenRouter.</p>
+          </div>
+
+          <form id="form-mistral-key" class="settings-form">
+            <div class="form-group">
+              <label for="mistral-key-input" class="form-label">API Key</label>
+              <input type="password" id="mistral-key-input" class="form-input" placeholder="Tu clave de Mistral" autocomplete="off" />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="btn-save-mistral-key">
+                <span class="btn-text">Guardar API Key</span>
+                <span class="spinner hidden"></span>
+              </button>
+              <button type="button" class="btn-danger" id="btn-delete-mistral-key">Eliminar</button>
+            </div>
+            <p class="form-error" id="mistral-key-error"></p>
+            <p class="form-success" id="mistral-key-success"></p>
           </form>
         </div>
       </div>

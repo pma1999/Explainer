@@ -56,6 +56,7 @@ export function validateExplainerProviderSelection({
   provider,
   hasGeminiKey,
   hasOpenRouterKey,
+  hasMistralKey,
 }) {
   if (!hasGeminiKey) {
     return 'Necesitas configurar tu API key de Gemini primero. Ve a Ajustes.';
@@ -69,6 +70,10 @@ export function validateExplainerProviderSelection({
     return 'Necesitas configurar tu API key de OpenRouter para usar Qwen en el explainer.';
   }
 
+  if (provider === 'openrouter' && sourceType === 'pdf' && !hasMistralKey) {
+    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con Qwen/OpenRouter.';
+  }
+
   return null;
 }
 
@@ -78,6 +83,14 @@ function buildExplainerProviderHint(sourceType, provider) {
   }
 
   if (provider === 'openrouter') {
+    if (sourceType === 'pdf') {
+      if (state.hasOpenRouterKey && state.hasMistralKey) {
+        return 'La explicación usará Qwen vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.';
+      }
+      if (!state.hasMistralKey) {
+        return 'Para PDFs con Qwen necesitas guardar también tu API key de Mistral para el OCR nativo.';
+      }
+    }
     if (state.hasOpenRouterKey) {
       return 'La explicación usará Qwen vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
     }
@@ -304,6 +317,7 @@ async function handleUpload() {
     provider: currentExplainerProvider,
     hasGeminiKey: state.hasApiKey,
     hasOpenRouterKey: state.hasOpenRouterKey,
+    hasMistralKey: state.hasMistralKey,
   });
   if (providerValidationError) {
     providerError.textContent = providerValidationError;

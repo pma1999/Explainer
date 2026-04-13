@@ -16,6 +16,9 @@ supabase>=2.0.0
 # Gemini
 google-genai>=1.0.0
 
+# Mistral (native OCR)
+mistralai==2.3.2
+
 # PDF manipulation (page numbering + extraction)
 pypdf>=4.0.0
 reportlab>=4.0

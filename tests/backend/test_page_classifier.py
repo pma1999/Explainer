@@ -61,3 +61,29 @@ def test_single_page_range():
     r = {"total_paginas": 3, "rangos_contenido": [{"inicio": 2, "fin": 2}], "rangos_no_contenido": []}
     pages = _parse_classifier_result(r, total_pages=3)
     assert pages == frozenset([2])
+
+
+def test_validate_classifier_partition_ok():
+    from backend.agents.page_classifier import validate_classifier_partition
+    r = {
+        "total_paginas": 5,
+        "rangos_contenido": [{"inicio": 2, "fin": 4}],
+        "rangos_no_contenido": [
+            {"inicio": 1, "fin": 1, "razon": "portada"},
+            {"inicio": 5, "fin": 5, "razon": "colofon"},
+        ],
+    }
+    ok, errs = validate_classifier_partition(r, 5)
+    assert ok and errs == []
+
+
+def test_validate_classifier_partition_overlap():
+    from backend.agents.page_classifier import validate_classifier_partition
+    r = {
+        "total_paginas": 3,
+        "rangos_contenido": [{"inicio": 1, "fin": 2}],
+        "rangos_no_contenido": [{"inicio": 2, "fin": 3, "razon": "x"}],
+    }
+    ok, errs = validate_classifier_partition(r, 3)
+    assert not ok
+    assert any("Solapamiento" in e for e in errs)

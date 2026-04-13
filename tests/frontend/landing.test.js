@@ -125,5 +125,25 @@ describe('landing.js', () => {
         hasOpenRouterKey: true,
       })).toBeNull();
     });
+
+    it('requires Mistral when OpenRouter is selected for PDFs', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'openrouter',
+        hasGeminiKey: true,
+        hasOpenRouterKey: true,
+        hasMistralKey: false,
+      })).toMatch(/Mistral/i);
+    });
+
+    it('does not require Mistral when OpenRouter is selected for web URLs', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'openrouter',
+        hasGeminiKey: true,
+        hasOpenRouterKey: true,
+        hasMistralKey: false,
+      })).toBeNull();
+    });
   });
 });
