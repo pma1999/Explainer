@@ -754,6 +754,30 @@ def _find_parte_by_numero(partes: list[dict], numero: int) -> dict | None:
     return None
 
 
+def _adjacent_subparts_for_audit(
+    *,
+    partes_segmentadas: list[dict],
+    part_num: int,
+    subpartes: list[dict],
+    subpart_idx: int,
+) -> tuple[dict | None, dict | None]:
+    """Return previous/next subpart for scope auditing, including cross-part boundaries."""
+    previous_sp = subpartes[subpart_idx - 1] if subpart_idx > 0 else None
+    next_sp = subpartes[subpart_idx + 1] if subpart_idx + 1 < len(subpartes) else None
+
+    if previous_sp is None and part_num > 1:
+        prev_parte = _find_parte_by_numero(partes_segmentadas, part_num - 1)
+        prev_subpartes = (prev_parte or {}).get("subpartes") or []
+        previous_sp = prev_subpartes[-1] if prev_subpartes else None
+
+    if next_sp is None and part_num > 0:
+        next_parte = _find_parte_by_numero(partes_segmentadas, part_num + 1)
+        next_subpartes = (next_parte or {}).get("subpartes") or []
+        next_sp = next_subpartes[0] if next_subpartes else None
+
+    return previous_sp, next_sp
+
+
 def _assemble_part_explainer(
     parte: dict,
     subpart_desarrollos: list[list[dict]],
@@ -2215,8 +2239,12 @@ async def _process_project(
 
                         async def _audited():
                             def _audit_context() -> dict[str, str]:
-                                previous_sp = subpartes[idx - 1] if idx > 0 else None
-                                next_sp = subpartes[idx + 1] if idx + 1 < len(subpartes) else None
+                                previous_sp, next_sp = _adjacent_subparts_for_audit(
+                                    partes_segmentadas=partes_segmentadas,
+                                    part_num=part_index,
+                                    subpartes=subpartes,
+                                    subpart_idx=idx,
+                                )
                                 return {
                                     "current": build_subpart_scope_summary(subparte) if subparte else "",
                                     "previous": build_subpart_scope_summary(previous_sp) if previous_sp else "",
