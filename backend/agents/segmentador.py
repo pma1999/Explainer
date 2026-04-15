@@ -153,9 +153,10 @@ SYSTEM_INSTRUCTION = """<system_instruction>
 
   **Principios de subdivisión:**
   1. **Autocontención**: Cada subparte debe poder explicarse de forma aislada, sin necesidad de conocer las otras subpartes de la misma parte.
-  2. **MECE interno y consistencia vertical**: Las subpartes de una parte deben cubrir TODOS los temas y unidades estructurales de esa parte sin solapamientos ni huecos. Los temas_cubiertos de las subpartes deben sumar exactamente los temas_cubiertos de la parte padre, sin faltantes, sin sobrantes y sin duplicados.
+  2. **MECE interno y consistencia vertical**: Las subpartes de una parte deben cubrir TODAS las unidades estructurales de esa parte sin solapamientos ni huecos.
   3. **Rangos contiguos**: Las subpartes deben usar subrangos contiguos dentro del rango de páginas de la parte padre. No puede haber huecos ni solapamientos de páginas entre subpartes.
   4. **Granularidad adecuada**: Divide cuando haya cambios temáticos claros dentro de la parte. Si hay subsecciones explícitas, usa esas subsecciones como átomos base de las subpartes. Mínimo 1 subparte si la parte es ya suficientemente focalizada; típicamente 2-4 subpartes por parte.
+  5. **Restricción de extensión de subpartes (obligatoria y validada automáticamente)**: ninguna subparte puede abarcar más de 15 páginas del PDF original. Si la parte abarca más de 15 páginas de contenido, DEBES dividirla en al menos 2 subpartes con ≤15 páginas cada una. Un incumplimiento de esta restricción provoca reintento obligatorio.
   5. **Identificación precisa (obligatoria, formato anti-duplicidad)**: Cada subparte debe llevar un campo `identificacion` redactado para que un explainer **sin acceso al resto del documento** sepa exactamente qué explicar y qué no. Sigue **todas** las reglas del PASO 7 (plantilla obligatoria).
 
   **INTRODUCCIÓN, CONCLUSIÓN Y CONEXIONES CONTEXTUALES — POR PARTE:**
@@ -250,7 +251,8 @@ Realiza esta comprobación explícita antes de continuar al PASO 7. Si detectas 
     pueden referenciarla: subparte_anterior.pagina_fin = P y subparte_siguiente.pagina_inicio = P.
     Esto solo es válido para UNA página por transición; si el solapamiento es de más de
     una página es un error.
-  - Verifica que los temas_cubiertos de las subpartes suman exactamente los de la parte y que ninguna subsección explícita queda repartida entre varias subpartes
+  - Verifica que las subpartes cubren todas las unidades estructurales de la parte sin huecos ni solapamientos, y que ninguna subsección explícita queda repartida entre varias subpartes
+  - **RESTRICCIÓN CRÍTICA**: comprueba que ninguna subparte supera las 15 páginas. Si una lo supera, subdivídela antes de continuar.
   - **FORMATO OBLIGATORIO del campo `identificacion` en cada subparte (PDF)** — redacta en un solo texto, en este orden, sin omitir secciones:
     1) **Línea de núcleo**: «NÚCLEO SEGÚN MARCAS PDF: páginas X–Y.» donde X e Y son **exactamente** `pagina_inicio` y `pagina_fin` de esta subparte (deben coincidir con «— Página X / N —»).
     2) **Inicio del contenido a explicar**: número y título de capítulo/sección/apartado si existen, y **cita textual entre comillas** con las primeras 8–15 palabras del primer párrafo o línea que entra en esta subparte (texto literal del PDF).
@@ -358,7 +360,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
     required=[
         "analisis_texto",
-        "temas_identificados",
         "decision_num_partes",
         "decision_justificacion",
         "partes",
@@ -368,11 +369,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
         "analisis_texto": genai.types.Schema(
             type=genai.types.Type.STRING,
             description="2-3 frases: longitud aproximada, tipo de contenido, si tiene estructura explícita o no.",
-        ),
-        "temas_identificados": genai.types.Schema(
-            type=genai.types.Type.ARRAY,
-            items=genai.types.Schema(type=genai.types.Type.STRING),
-            description="Lista completa y exhaustiva de todos los temas y subtemas identificados en el texto. Esta lista debe incluir cada tema que aparece en el documento, desde principales hasta subtemas significativos.",
         ),
         "decision_num_partes": genai.types.Schema(
             type=genai.types.Type.INTEGER,
@@ -393,7 +389,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
                     "identificacion",
                     "pagina_inicio",
                     "pagina_fin",
-                    "temas_cubiertos",
                     "extension_estimada",
                     "complejidad",
                     "expansion_prevista",
@@ -430,11 +425,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
                             "(1-indexed, según la marca visible '— Página X / N —' del documento)."
                         ),
                     ),
-                    "temas_cubiertos": genai.types.Schema(
-                        type=genai.types.Type.ARRAY,
-                        items=genai.types.Schema(type=genai.types.Type.STRING),
-                        description="Lista de temas (de temas_identificados) que cubre esta parte específica. Cada tema de temas_identificados debe aparecer en exactamente una parte.",
-                    ),
                     "extension_estimada": genai.types.Schema(type=genai.types.Type.STRING),
                     "complejidad": genai.types.Schema(type=genai.types.Type.STRING),
                     "expansion_prevista": genai.types.Schema(type=genai.types.Type.STRING),
@@ -456,7 +446,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                 "delimitacion_explainer",
                                 "pagina_inicio",
                                 "pagina_fin",
-                                "temas_cubiertos",
                             ],
                             properties={
                                 "numero_subparte": genai.types.Schema(
@@ -490,14 +479,6 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                 "pagina_fin": genai.types.Schema(
                                     type=genai.types.Type.INTEGER,
                                     description="Última página de la subparte (según las marcas visibles del PDF).",
-                                ),
-                                "temas_cubiertos": genai.types.Schema(
-                                    type=genai.types.Type.ARRAY,
-                                    items=genai.types.Schema(type=genai.types.Type.STRING),
-                                    description=(
-                                        "Subconjunto de los temas_cubiertos de la parte que cubre esta subparte. "
-                                        "Cada tema de la parte debe aparecer en exactamente una subparte."
-                                    ),
                                 ),
                             },
                         ),
@@ -677,9 +658,6 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
       "motivo": "string — razón de la evaluación",
       "indicios": ["string"] // solo si es_segmentable = false
     },
-    "temas_identificados": [
-      "string — cada tema/subtema principal del texto"
-    ],
     "decision_num_partes": N,
     "justificacion_division": "string — por qué N partes y no más o menos",
     "partes": [
@@ -690,7 +668,6 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
         "bloque_fin": Y,
         "texto_inicio": "primeras 8-10 palabras exactas del contenido...",
         "texto_fin": "últimas 8-10 palabras exactas del contenido...",
-        "temas_cubiertos": ["string"],
         "complejidad_estimada": "baja | media | alta",
         "razon_corte": "string — por qué esta parte termina aquí y la siguiente empieza allí",
         "introduccion": "string — contextualización pedagógica de la parte",
@@ -703,8 +680,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
             "contenido": "string — qué abarca",
             "identificacion": "string — ubicación precisa",
             "bloque_inicio": X,
-            "bloque_fin": Y,
-            "temas_cubiertos": ["string — subconjunto de temas de la parte"]
+            "bloque_fin": Y
           }
         ]
       }
@@ -717,7 +693,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   - Los rangos deben ser contiguos internamente y cubrir todos los bloques sustantivos exactamente una vez entre todas las partes.
   - Los rangos de subpartes deben ser subrangos contiguos dentro de su parte padre.
   - Si el texto tiene secciones explícitas, ninguna sección puede repartirse entre varias partes; si tiene subsecciones explícitas, ninguna puede repartirse entre varias subpartes.
-  - Si `es_segmentable = false`: `decision_num_partes = 0`, `partes = []`, `temas_identificados = []`.
+  - Si `es_segmentable = false`: `decision_num_partes = 0`, `partes = []`.
   </output_format>
 
 </system_instruction>
@@ -732,7 +708,6 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
     <output_pattern>
       {
         "evaluacion_fuente": { "es_segmentable": true, "motivo": "[Confirmación de contenido técnico real con estructura clara]" },
-        "temas_identificados": ["[Lista exhaustiva de todos los temas y subtemas detectados]"],
         "decision_num_partes": "[N justificado por independencia temática]",
         "justificacion_division": "[Razonamiento que compare opciones consideradas y explique por qué esta es óptima]",
         "partes": [
@@ -743,7 +718,6 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
             "bloque_fin": "[Número exacto del marcador visible]",
             "texto_inicio": "[Palabras textuales exactas del documento]",
             "texto_fin": "[Palabras textuales exactas del documento]",
-            "temas_cubiertos": ["[Temas de la lista que caen en esta parte]"],
             "complejidad_estimada": "[Evaluación basada en densidad conceptual]",
             "razon_corte": "[Transición temática concreta que justifica el límite]"
           }
@@ -764,7 +738,6 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
           "motivo": "[Descripción clara del problema de extracción]",
           "indicios": ["[Señales concretas observadas: boilerplate, menús, etc.]"]
         },
-        "temas_identificados": [],
         "decision_num_partes": 0,
         "justificacion_division": "[Explicación de por qué no se puede segmentar]",
         "partes": []
@@ -786,7 +759,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
     required=[
         "evaluacion_fuente",
         "analisis_texto",
-        "temas_identificados",
         "decision_num_partes",
         "decision_justificacion",
         "partes",
@@ -824,11 +796,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
             type=genai.types.Type.STRING,
             description="2-3 frases: longitud aproximada, tipo de contenido, y estructura temática del texto.",
         ),
-        "temas_identificados": genai.types.Schema(
-            type=genai.types.Type.ARRAY,
-            items=genai.types.Schema(type=genai.types.Type.STRING),
-            description="Lista completa y exhaustiva de todos los temas y subtemas relevantes detectados.",
-        ),
         "decision_num_partes": genai.types.Schema(
             type=genai.types.Type.INTEGER,
             description="Número total de partes propuesto.",
@@ -848,7 +815,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                     "identificacion",
                     "bloque_inicio",
                     "bloque_fin",
-                    "temas_cubiertos",
                     "extension_estimada",
                     "complejidad",
                     "expansion_prevista",
@@ -872,11 +838,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                         type=genai.types.Type.INTEGER,
                         description="Número exacto del último bloque visible `=== BLOQUE X ===` que pertenece a la parte.",
                     ),
-                    "temas_cubiertos": genai.types.Schema(
-                        type=genai.types.Type.ARRAY,
-                        items=genai.types.Schema(type=genai.types.Type.STRING),
-                        description="Lista de temas de `temas_identificados` cubiertos por esta parte.",
-                    ),
                     "extension_estimada": genai.types.Schema(type=genai.types.Type.STRING),
                     "complejidad": genai.types.Schema(type=genai.types.Type.STRING),
                     "expansion_prevista": genai.types.Schema(type=genai.types.Type.STRING),
@@ -897,7 +858,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                                 "identificacion",
                                 "bloque_inicio",
                                 "bloque_fin",
-                                "temas_cubiertos",
                             ],
                             properties={
                                 "numero_subparte": genai.types.Schema(
@@ -929,13 +889,6 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
                                 "bloque_fin": genai.types.Schema(
                                     type=genai.types.Type.INTEGER,
                                     description="Último bloque visible `=== BLOQUE X ===` de esta subparte.",
-                                ),
-                                "temas_cubiertos": genai.types.Schema(
-                                    type=genai.types.Type.ARRAY,
-                                    items=genai.types.Schema(type=genai.types.Type.STRING),
-                                    description=(
-                                        "Subconjunto de los temas_cubiertos de la parte que cubre esta subparte."
-                                    ),
                                 ),
                             },
                         ),
@@ -1057,14 +1010,12 @@ def run_segmentador(
 
         # Extraer información relevante
         num_partes = len(result.get("partes", []))
-        temas_identificados = len(result.get("temas_identificados", []))
         source_evaluation = result.get("evaluacion_fuente") if source_kind != "pdf" else None
 
         logger.info(
-            f"Segmentación completada: {num_partes} partes, {temas_identificados} temas",
+            f"Segmentación completada: {num_partes} partes",
             extra={
                 "num_partes": num_partes,
-                "temas_identificados": temas_identificados,
                 "es_segmentable": (
                     source_evaluation.get("es_segmentable")
                     if isinstance(source_evaluation, dict)
@@ -1079,10 +1030,6 @@ def run_segmentador(
         )
 
         # Quality preview (visible en desarrollo, nivel DEBUG)
-        logger.debug(
-            "Segmentador — temas: %s",
-            ", ".join(result.get("temas_identificados", [])[:8]),
-        )
         for p in result.get("partes", []):
             sps = p.get("subpartes", [])
             logger.debug(
@@ -1092,10 +1039,9 @@ def run_segmentador(
             )
             for sp in sps:
                 logger.debug(
-                    "    SP %d: \"%s\" pp.%s-%s | temas: %s",
+                    "    SP %d: \"%s\" pp.%s-%s",
                     sp.get("numero_subparte", "?"), sp.get("titulo", "?"),
                     sp.get("pagina_inicio", "?"), sp.get("pagina_fin", "?"),
-                    ", ".join(sp.get("temas_cubiertos", [])),
                 )
 
         return result, response.usage_metadata
