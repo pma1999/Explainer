@@ -213,8 +213,29 @@ def get_or_prime_mistral_pdf_ocr_cache(
     cached_page_numbers = tuple(page.page_number for page in page_index)
     missing_pages = tuple(page for page in effective_expected if page not in cached_page_numbers)
 
+    if not missing_pages:
+        logger.info(
+            "[OCR] Caché completo: %d/%d páginas ya procesadas — sin llamada a API",
+            len(cached_page_numbers),
+            len(effective_expected),
+        )
+    elif cached_page_numbers:
+        logger.info(
+            "[OCR] Caché parcial: %d/%d páginas en caché, %d páginas pendientes de OCR",
+            len(cached_page_numbers),
+            len(effective_expected),
+            len(missing_pages),
+        )
+    else:
+        logger.info(
+            "[OCR] Sin caché: procesando %d páginas vía API Mistral (%s)",
+            len(missing_pages),
+            engine,
+        )
+
     diagnostic_artifact_path: str | None = None
     if missing_pages:
+        logger.debug("[OCR] Páginas a procesar: %s", list(missing_pages))
         build_result = _fetch_missing_pages_once(
             source_path=source_path,
             api_key=api_key,
@@ -224,6 +245,11 @@ def get_or_prime_mistral_pdf_ocr_cache(
         )
         page_index = merge_page_indexes(page_index, build_result.page_index)
         if build_result.missing_pages:
+            logger.warning(
+                "[OCR] %d página(s) no resueltas tras llamada a API: %s",
+                len(build_result.missing_pages),
+                list(build_result.missing_pages),
+            )
             diagnostic_artifact_path = write_unresolved_pdf_ocr_artifact(
                 cache_path=cache_path,
                 source_sha256=source_sha256,
