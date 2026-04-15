@@ -61,12 +61,6 @@ from backend.gemini_model_routing import (
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
-from backend.segmentation_tema_coverage import (
-    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
-    build_tema_coverage_retry_suffix,
-    validate_tema_partition,
-)
 from backend.agents.page_classifier import run_page_classifier
 from backend.segmentation_page_coverage import (
     MAX_PAGE_COVERAGE_ATTEMPTS,
@@ -1738,11 +1732,10 @@ async def _process_project(
                     )
                 )
 
-        # Fase de segmentación (con validación MECE de temas + cobertura de páginas y reintentos)
+        # Fase de segmentación (con validación de cobertura de páginas y reintentos)
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
         segmentation: dict | None = None
-        tema_report = None
         page_report = None
         is_pdf_seg = source_type == "pdf"
         content_pages_prefix = (
@@ -1750,32 +1743,20 @@ async def _process_project(
             if is_pdf_seg and content_page_set
             else ""
         )
-        MAX_COMBINED_ATTEMPTS = max(MAX_SEGMENTATION_COVERAGE_ATTEMPTS, MAX_PAGE_COVERAGE_ATTEMPTS)
+        MAX_COMBINED_ATTEMPTS = MAX_PAGE_COVERAGE_ATTEMPTS
 
         for seg_attempt in range(MAX_COMBINED_ATTEMPTS):
             if seg_attempt == 0:
                 seg_description = content_pages_prefix + (project["description"].strip() or DEFAULT_DESCRIPTION)
             else:
                 assert segmentation is not None
-                correction_parts = []
-                if tema_report is not None and not tema_report.is_valid:
-                    correction_parts.append(
-                        build_tema_coverage_retry_suffix(
-                            attempt=seg_attempt,
-                            segmentation=segmentation,
-                            report=tema_report,
-                        )
-                    )
-                if page_report is not None and not page_report.is_valid:
-                    correction_parts.append(
-                        build_page_coverage_retry_suffix(
-                            attempt=seg_attempt,
-                            segmentation=segmentation,
-                            report=page_report,
-                            content_page_set=content_page_set,
-                        )
-                    )
-                correction_suffix = "\n\n".join(correction_parts)
+                assert page_report is not None and not page_report.is_valid
+                correction_suffix = build_page_coverage_retry_suffix(
+                    attempt=seg_attempt,
+                    segmentation=segmentation,
+                    report=page_report,
+                    content_page_set=content_page_set,
+                )
                 base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
                 seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
@@ -1792,55 +1773,41 @@ async def _process_project(
             await _locked_apply_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
-            tema_report = validate_tema_partition(segmentation)
             page_report = (
                 validate_page_coverage(segmentation, content_page_set)
                 if is_pdf_seg
                 else None
             )
 
-            both_valid = tema_report.is_valid and (page_report is None or page_report.is_valid)
+            both_valid = page_report is None or page_report.is_valid
 
             if both_valid:
-                if tema_report.empty_temas_inventory:
-                    logger.warning(
-                        "[Process] Segmentación sin temas_identificados; se omite validación MECE de temas",
-                        extra={"project_id": project_id, "seg_attempt": seg_attempt},
-                    )
                 if seg_attempt > 0:
                     logger.info(
-                        "[Process] Segmentación corregida tras reintento (temas + páginas)",
+                        "[Process] Segmentación corregida tras reintento (páginas)",
                         extra={"project_id": project_id, "seg_attempt": seg_attempt},
                     )
                 break
 
             logger.warning(
-                "[Process] Validación fallida; se reintentará el segmentador si quedan intentos",
+                "[Process] Validación de páginas fallida; se reintentará el segmentador si quedan intentos",
                 extra={
                     "project_id": project_id,
                     "seg_attempt": seg_attempt,
-                    "tema_valid": tema_report.is_valid,
-                    "page_valid": page_report.is_valid if page_report else True,
-                    "tema_missing": len(tema_report.missing),
-                    "tema_duplicates": len(tema_report.duplicates),
-                    "page_part_errors": len(page_report.part_errors) if page_report else 0,
-                    "page_subpart_errors": len(page_report.subpart_errors) if page_report else 0,
+                    "page_valid": False,
+                    "page_part_errors": len(page_report.part_errors),
+                    "page_subpart_errors": len(page_report.subpart_errors),
                 },
             )
         else:
             assert segmentation is not None
             error_bits = []
-            if tema_report and not tema_report.is_valid:
-                if tema_report.missing:
-                    error_bits.append(f"{len(tema_report.missing)} tema(s) sin asignar")
-                if tema_report.duplicates:
-                    error_bits.append(f"{len(tema_report.duplicates)} tema(s) duplicados")
             if page_report and not page_report.is_valid:
                 if page_report.part_errors:
                     error_bits.append(f"{len(page_report.part_errors)} error(es) de rango en partes")
                 if page_report.subpart_errors:
                     error_bits.append(f"{len(page_report.subpart_errors)} error(es) de rango en subpartes")
-            detail = "; ".join(error_bits) if error_bits else "inconsistencias en segmentación"
+            detail = "; ".join(error_bits) if error_bits else "inconsistencias en rangos de página"
             logger.error(
                 "[Process] Segmentación abortada tras agotar reintentos",
                 extra={
@@ -1856,24 +1823,22 @@ async def _process_project(
                     "segmentation": segmentation,
                     "partes_contenido": {},
                     "status": "error",
-                    "error_message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
+                    "error_message": SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
                 },
             )
             await send_event(
                 project_id,
-                {"type": "error", "message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE},
+                {"type": "error", "message": SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE},
             )
             return
 
         seg_duration = (time.time() - seg_start) * 1000
 
         num_partes = len(segmentation.get("partes", []))
-        temas_identificados = len(segmentation.get("temas_identificados", []))
         logger.info(
-            f"[Process] Segmentación completada: {num_partes} partes, {temas_identificados} temas en {int(seg_duration)}ms",
+            f"[Process] Segmentación completada: {num_partes} partes en {int(seg_duration)}ms",
             extra={
                 "num_partes": num_partes,
-                "temas_identificados": temas_identificados,
                 "segmentation_duration_ms": int(seg_duration),
             }
         )
