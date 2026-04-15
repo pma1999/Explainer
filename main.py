@@ -1219,9 +1219,13 @@ async def _run_subpart_explainer_with_scope_audit(
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     prompt = initial_prompt
     reviewer_usages: list[Any] = []
+    last_result: dict[str, Any] = {}
+    last_usage: Any = None
 
     for _ in range(MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS):
         result, usage = await run_explainer_call(prompt)
+        last_result = result
+        last_usage = usage
         ctx = audit_context_builder()
         report, review_usage = await asyncio.to_thread(
             run_subpart_scope_auditor,
@@ -1244,7 +1248,12 @@ async def _run_subpart_explainer_with_scope_audit(
         )
         prompt = f"{initial_prompt}\n\n{rewrite_brief}"
 
-    raise RuntimeError("El auditor de alcance de subparte agotó sus reintentos.")
+    logger.warning(
+        "El auditor de alcance de subparte agotó sus reintentos "
+        f"({MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS} intento(s)). "
+        "Se devuelve el último resultado como best-effort fallback."
+    )
+    return last_result, last_usage, reviewer_usages
 
 
 def _parse_text_source_evaluation(segmentation: dict[str, object]) -> dict[str, object]:
