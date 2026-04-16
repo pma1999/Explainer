@@ -57,7 +57,7 @@ PRICING = {
 
 def get_model_name() -> str:
     """Obtiene el nombre del modelo configurado en .env o variables de entorno."""
-    return os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
+    return os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 
 def calculate_cost(model_name: str, usage: Any) -> float:
     """

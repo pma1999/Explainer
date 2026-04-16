@@ -87,8 +87,8 @@ def main():
     from backend.gemini_model_routing import MODEL_CLASSIFIER, MODEL_SEGMENTADOR, MODEL_AGENTS
 
     # Override explainer model for comparison test
-    EXPLAINER_MODEL = "gemini-3-flash-preview"  # was MODEL_AGENTS (flash-lite)
-    log.info("EXPLAINER_MODEL override: %s (default would be %s)", EXPLAINER_MODEL, MODEL_AGENTS)
+    EXPLAINER_MODEL = MODEL_EXPLAINER
+    log.info("EXPLAINER_MODEL: %s", EXPLAINER_MODEL)
     from backend.pdf_utils import add_page_numbers, extract_page_range
     from backend.gemini_client import upload_file_with_retry
     from main import (

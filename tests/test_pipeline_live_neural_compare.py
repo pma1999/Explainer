@@ -53,8 +53,8 @@ log = logging.getLogger("test_pipeline_compare")
 
 GEMINI_EXPLAINER_MODEL = os.environ.get(
     "GEMINI_EXPLAINER_MODEL_OVERRIDE",
-    "gemini-3-flash-preview",
-).strip() or "gemini-3-flash-preview"
+    "gemini-3.1-flash-lite-preview",
+).strip() or "gemini-3.1-flash-lite-preview"
 OPENROUTER_EXPLAINER_MODEL = os.environ.get(
     "OPENROUTER_EXPLAINER_MODEL_OVERRIDE",
     "minimax/minimax-m2.7",
