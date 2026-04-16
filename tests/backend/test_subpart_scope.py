@@ -73,16 +73,3 @@ def test_negative_scope_block_uses_neighbor_content_and_topics():
     assert "Contenido anterior" in text
     assert "Tema anterior" in text
     assert "Tema actual" not in text
-
-
-def test_scope_summary_includes_title_content_topics_and_contract():
-    from backend.subpart_scope import build_subpart_scope_summary
-
-    text = build_subpart_scope_summary(
-        _sp(2, "Actual", "Contenido actual", ["Tema actual"], 13, 15, "3.0 Siguiente")
-    )
-
-    assert "Título: Actual" in text
-    assert "Contenido: Contenido actual" in text
-    assert "Tema actual" in text
-    assert "CONTRATO ESTRUCTURADO DE ALCANCE DE LA SUBPARTE" in text
