@@ -13,7 +13,7 @@ Usage:
 
     python -m tests.test_pipeline_live_neural_compare \\
       --reuse-segmentation test_output/live_compare_neural_YYYYMMDD_HHMMSS/shared_01_segmentation.json \\
-      --only-subpart 1 --openrouter-only --openrouter-model deepseek/deepseek-v4-flash
+      --only-subpart 1 --openrouter-only --openrouter-model qwen/qwen3.6-plus
 
 Optional environment overrides:
     OPENROUTER_EXPLAINER_MODEL_OVERRIDE
@@ -57,8 +57,8 @@ GEMINI_EXPLAINER_MODEL = os.environ.get(
 ).strip() or "gemini-3-flash-preview"
 OPENROUTER_EXPLAINER_MODEL = os.environ.get(
     "OPENROUTER_EXPLAINER_MODEL_OVERRIDE",
-    "deepseek/deepseek-v4-flash",
-).strip() or "deepseek/deepseek-v4-flash"
+    "qwen/qwen3.6-plus",
+).strip() or "qwen/qwen3.6-plus"
 
 
 def _tokens_gemini(usage: Any) -> dict[str, int]:

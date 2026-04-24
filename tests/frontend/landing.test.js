@@ -99,7 +99,7 @@ describe('landing.js', () => {
       })).toMatch(/Gemini/i);
     });
 
-    it('requires OpenRouter key when OpenRouter (DeepSeek) explainer is selected', () => {
+    it('requires OpenRouter key when OpenRouter (Qwen) explainer is selected', () => {
       expect(validateExplainerProviderSelection({
         sourceType: 'pdf',
         provider: 'openrouter',

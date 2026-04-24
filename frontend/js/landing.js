@@ -67,11 +67,11 @@ export function validateExplainerProviderSelection({
   }
 
   if (provider === 'openrouter' && !hasOpenRouterKey) {
-    return 'Necesitas configurar tu API key de OpenRouter para usar DeepSeek en el explainer.';
+    return 'Necesitas configurar tu API key de OpenRouter para usar Qwen en el explainer.';
   }
 
   if (provider === 'openrouter' && sourceType === 'pdf' && !hasMistralKey) {
-    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con DeepSeek/OpenRouter.';
+    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con Qwen/OpenRouter.';
   }
 
   return null;
@@ -85,16 +85,16 @@ function buildExplainerProviderHint(sourceType, provider) {
   if (provider === 'openrouter') {
     if (sourceType === 'pdf') {
       if (state.hasOpenRouterKey && state.hasMistralKey) {
-        return 'La explicación usará DeepSeek vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.';
+        return 'La explicación usará Qwen vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.';
       }
       if (!state.hasMistralKey) {
-        return 'Para PDFs con DeepSeek necesitas guardar también tu API key de Mistral para el OCR nativo.';
+        return 'Para PDFs con Qwen necesitas guardar también tu API key de Mistral para el OCR nativo.';
       }
     }
     if (state.hasOpenRouterKey) {
-      return 'La explicación usará DeepSeek vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
+      return 'La explicación usará Qwen vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
     }
-    return 'DeepSeek está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
+    return 'Qwen está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
