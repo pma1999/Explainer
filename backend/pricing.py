@@ -46,6 +46,13 @@ PRICING = {
         "output_small": 1.95,
         "output_large": 3.90,
     },
+    "deepseek/deepseek-v4-flash": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 0.14,
+        "input_large": 0.14,
+        "output_small": 0.28,
+        "output_large": 0.28,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

@@ -29,6 +29,10 @@ def _write_text_source(content: str = "Contenido de prueba.") -> str:
     return str(source)
 
 
+def test_default_openrouter_explainer_model_is_deepseek_v4_flash():
+    assert module.OPENROUTER_MODEL_AGENTS == "deepseek/deepseek-v4-flash"
+
+
 def test_run_explainer_or_uses_json_schema_for_supported_models(monkeypatch):
     source_path = _write_text_source()
     captured_call: dict = {}

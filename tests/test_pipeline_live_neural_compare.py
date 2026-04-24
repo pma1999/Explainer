@@ -13,7 +13,7 @@ Usage:
 
     python -m tests.test_pipeline_live_neural_compare \\
       --reuse-segmentation test_output/live_compare_neural_YYYYMMDD_HHMMSS/shared_01_segmentation.json \\
-      --only-subpart 1 --openrouter-only --openrouter-model qwen/qwen3.6-plus
+      --only-subpart 1 --openrouter-only --openrouter-model deepseek/deepseek-v4-flash
 
 Optional environment overrides:
     OPENROUTER_EXPLAINER_MODEL_OVERRIDE
@@ -57,8 +57,8 @@ GEMINI_EXPLAINER_MODEL = os.environ.get(
 ).strip() or "gemini-3-flash-preview"
 OPENROUTER_EXPLAINER_MODEL = os.environ.get(
     "OPENROUTER_EXPLAINER_MODEL_OVERRIDE",
-    "minimax/minimax-m2.7",
-).strip() or "minimax/minimax-m2.7"
+    "deepseek/deepseek-v4-flash",
+).strip() or "deepseek/deepseek-v4-flash"
 
 
 def _tokens_gemini(usage: Any) -> dict[str, int]:
@@ -72,14 +72,18 @@ def _tokens_gemini(usage: Any) -> dict[str, int]:
     }
 
 
-def _tokens_openrouter(usage: Any) -> dict[str, int]:
+def _tokens_openrouter(usage: Any) -> dict[str, int | float]:
     if usage is None:
         return {}
-    return {
+    tokens = {
         "prompt": getattr(usage, "prompt_token_count", 0) or 0,
         "completion": getattr(usage, "candidates_token_count", 0) or 0,
         "total": getattr(usage, "total_token_count", 0) or 0,
     }
+    raw_cost_usd = getattr(usage, "cost_usd", None)
+    if isinstance(raw_cost_usd, (int, float)) and raw_cost_usd >= 0:
+        tokens["cost_usd"] = raw_cost_usd
+    return tokens
 
 
 def _save_json(label: str, data: dict[str, Any], output_dir: str) -> str:
@@ -304,7 +308,7 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
         f"segmentador `{summary['models']['segmentador']}`, "
         f"gemini `{summary['models']['gemini_explainer']}`, "
         f"openrouter `{summary['models']['openrouter_explainer']}`, "
-        f"ocr-priming `{summary['models']['openrouter_pdf_priming_model']}`"
+        f"ocr `{summary['models']['mistral_ocr_model']}`"
     )
     if shared.get("segmentation_reused"):
         reuse = shared.get("segmentation_reuse") or {}
@@ -319,9 +323,9 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
     lines.append(
         f"- Shared scope PDF SHA-256: `{shared['shared_scope_pdf']['sha256']}`"
     )
-    cache = shared.get("openrouter_pdf_parse_cache", {})
+    cache = shared.get("pdf_ocr_cache", {})
     lines.append(
-        f"- OpenRouter PDF parser: `{summary['models']['openrouter_pdf_parser_engine']}`; "
+        f"- Native Mistral OCR cache: `{summary['models']['mistral_ocr_engine']}`; "
         f"cache status `{cache.get('status', 'unknown')}`; "
         f"cache hit `{cache.get('cache_hit', 'n/a')}`."
     )
@@ -500,6 +504,11 @@ def main() -> None:
         log.error("OPENROUTER_API_KEY not set")
         sys.exit(1)
 
+    mistral_api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+    if not mistral_api_key:
+        log.error("MISTRAL_API_KEY not set")
+        sys.exit(1)
+
     pdf_path = os.path.join(PROJECT_ROOT, "neural_archive_merged_extract (3) (1).pdf")
     if not os.path.isfile(pdf_path):
         log.error("PDF not found: %s", pdf_path)
@@ -513,16 +522,16 @@ def main() -> None:
     from backend.agents.page_classifier import run_page_classifier
     from backend.agents.segmentador import run_segmentador, DEFAULT_DESCRIPTION
     from backend.agents.explainer import run_subpart_explainer
-    from backend.agents.explainer_openrouter import (
-        OPENROUTER_PDF_PARSER_ENGINE,
-        OPENROUTER_PDF_PRIMING_MODEL,
-        run_subpart_explainer_or,
+    from backend.agents.explainer_openrouter import run_subpart_explainer_or
+    from backend.mistral_ocr_client import (
+        MISTRAL_OCR_ENGINE,
+        MISTRAL_OCR_MODEL,
+        get_or_prime_mistral_pdf_ocr_cache,
     )
     from backend.gemini_model_routing import MODEL_CLASSIFIER, MODEL_SEGMENTADOR
     from backend.agents.formatter import format_explainer_content
     from backend.pdf_utils import add_page_numbers, extract_page_range
     from backend.gemini_client import upload_file_with_retry
-    from backend.openrouter_client import get_or_prime_pdf_parse_cache
     from main import (
         _assemble_part_explainer,
         _build_content_pages_prefix,
@@ -664,50 +673,55 @@ def main() -> None:
     log.info("Shared scope PDF uploaded in %dms -> %s", scope_upload_ms, scope_file_uri)
 
     log.info("=" * 80)
-    log.info("STEP 3.5: Priming OpenRouter PDF parse cache")
+    log.info("STEP 3.5: Preparing native Mistral OCR cache")
     log.info("=" * 80)
-    openrouter_cache_start = time.time()
-    openrouter_cache: dict[str, Any]
+    ocr_cache_start = time.time()
+    pdf_ocr_cache: dict[str, Any]
     cache_entry: Any = None
     try:
-        cache_entry = get_or_prime_pdf_parse_cache(
+        cache_entry = get_or_prime_mistral_pdf_ocr_cache(
             source_path=openrouter_document_pdf_path,
-            api_key=openrouter_api_key,
-            model=OPENROUTER_PDF_PRIMING_MODEL,
-            engine=OPENROUTER_PDF_PARSER_ENGINE,
+            api_key=mistral_api_key,
+            model=MISTRAL_OCR_MODEL,
+            engine=MISTRAL_OCR_ENGINE,
             filename="document.pdf",
             expected_page_numbers=tuple(sorted(content_pages)),
         )
-        openrouter_cache_ms = int((time.time() - openrouter_cache_start) * 1000)
-        openrouter_cache = {
+        ocr_cache_ms = int((time.time() - ocr_cache_start) * 1000)
+        pdf_ocr_cache = {
             "status": "ok",
-            "engine": OPENROUTER_PDF_PARSER_ENGINE,
+            "engine": MISTRAL_OCR_ENGINE,
+            "model": MISTRAL_OCR_MODEL,
             "cache_hit": cache_entry.cache_hit,
             "cache_path": cache_entry.cache_path,
             "source_sha256": cache_entry.source_sha256,
             "cached_pages_count": len(cache_entry.cached_page_numbers),
             "requested_pages_count": len(cache_entry.expected_page_numbers),
-            "duration_ms": openrouter_cache_ms,
+            "duration_ms": ocr_cache_ms,
         }
+        diagnostic_artifact_path = getattr(cache_entry, "diagnostic_artifact_path", None)
+        if diagnostic_artifact_path:
+            pdf_ocr_cache["diagnostic_artifact_path"] = diagnostic_artifact_path
         log.info(
-            "OpenRouter PDF cache ready in %dms -> hit=%s path=%s cached_pages=%d",
-            openrouter_cache_ms,
+            "Native Mistral OCR cache ready in %dms -> hit=%s path=%s cached_pages=%d",
+            ocr_cache_ms,
             cache_entry.cache_hit,
             cache_entry.cache_path,
             len(cache_entry.cached_page_numbers),
         )
     except Exception as exc:
-        openrouter_cache_ms = int((time.time() - openrouter_cache_start) * 1000)
-        openrouter_cache = {
+        ocr_cache_ms = int((time.time() - ocr_cache_start) * 1000)
+        pdf_ocr_cache = {
             "status": "error",
-            "engine": OPENROUTER_PDF_PARSER_ENGINE,
-            "duration_ms": openrouter_cache_ms,
+            "engine": MISTRAL_OCR_ENGINE,
+            "model": MISTRAL_OCR_MODEL,
+            "duration_ms": ocr_cache_ms,
             "error_type": type(exc).__name__,
             "error_message": str(exc),
         }
         log.warning(
-            "OpenRouter PDF cache priming failed in %dms: %s",
-            openrouter_cache_ms,
+            "Native Mistral OCR cache preparation failed in %dms: %s",
+            ocr_cache_ms,
             exc,
             exc_info=True,
         )
@@ -841,7 +855,7 @@ def main() -> None:
                 model=openrouter_explainer_model,
                 mime_type="application/pdf",
                 api_key=openrouter_api_key,
-                pdf_cache_entry=cache_entry if openrouter_cache.get("status") == "ok" else None,
+                pdf_cache_entry=cache_entry if pdf_ocr_cache.get("status") == "ok" else None,
                 page_numbers=_select_openrouter_pdf_pages(
                     content_pages,
                     start_page=subparte.get("pagina_inicio"),
@@ -1013,8 +1027,8 @@ def main() -> None:
             "segmentador": MODEL_SEGMENTADOR,
             "gemini_explainer": gemini_explainer_model,
             "openrouter_explainer": openrouter_explainer_model,
-            "openrouter_pdf_parser_engine": OPENROUTER_PDF_PARSER_ENGINE,
-            "openrouter_pdf_priming_model": OPENROUTER_PDF_PRIMING_MODEL,
+            "mistral_ocr_engine": MISTRAL_OCR_ENGINE,
+            "mistral_ocr_model": MISTRAL_OCR_MODEL,
         },
         "shared_pipeline": {
             "total_pages": total_pages,
@@ -1045,7 +1059,7 @@ def main() -> None:
                 "path": openrouter_document_pdf_path,
                 "sha256": openrouter_document_pdf_sha256,
             },
-            "openrouter_pdf_parse_cache": openrouter_cache,
+            "pdf_ocr_cache": pdf_ocr_cache,
             "openrouter_formatter_enabled": args.format_openrouter,
         },
         "providers": {
