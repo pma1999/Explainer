@@ -38,6 +38,13 @@ PRICING = {
         "output_small": 3.00,  # $3.00 / 1M tokens
         "output_large": 3.00,
     },
+    "xiaomi/mimo-v2.5": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 0.40,   # $0.40 / 1M tokens
+        "input_large": 0.40,
+        "output_small": 2.00,  # $2.00 / 1M tokens
+        "output_large": 2.00,
+    },
     "minimax/minimax-m2.7": {
         "input_small": 0.30,   # $0.30 / 1M tokens
         "input_large": 0.30,

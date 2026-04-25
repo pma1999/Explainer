@@ -228,11 +228,12 @@ class TestProcessProject:
     def test_defaults_to_gemini_when_body_is_missing(self, auth_client):
         scheduled: dict = {}
 
-        async def _fake_process(project_id, user_id, explainer_provider="gemini"):
+        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
             scheduled.update({
                 "project_id": project_id,
                 "user_id": user_id,
                 "explainer_provider": explainer_provider,
+                "openrouter_model": openrouter_model,
             })
 
         with patch(
@@ -248,7 +249,9 @@ class TestProcessProject:
 
         assert r.status_code == 200
         assert r.json()["explainer_provider"] == "gemini"
+        assert r.json()["explainer_model"] == "gemini-3.1-flash-lite-preview"
         assert scheduled["explainer_provider"] == "gemini"
+        assert scheduled["openrouter_model"] is None
 
     def test_requires_openrouter_key_when_openrouter_is_selected(self, auth_client):
         with patch(
@@ -282,6 +285,54 @@ class TestProcessProject:
 
         assert r.status_code == 400
         assert "YouTube" in r.json()["detail"]
+
+    def test_accepts_supported_openrouter_model_selection(self, auth_client):
+        scheduled: dict = {}
+
+        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
+            scheduled.update({
+                "project_id": project_id,
+                "user_id": user_id,
+                "explainer_provider": explainer_provider,
+                "openrouter_model": openrouter_model,
+            })
+
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
+                with patch("main._process_project", new=_fake_process):
+                    r = auth_client.post(
+                        "/api/projects/proj-1/process",
+                        headers={"Authorization": "Bearer fake-token"},
+                        json={
+                            "explainer_provider": "openrouter",
+                            "openrouter_model": "xiaomi/mimo-v2.5",
+                        },
+                    )
+
+        assert r.status_code == 200
+        assert r.json()["explainer_provider"] == "openrouter"
+        assert r.json()["explainer_model"] == "xiaomi/mimo-v2.5"
+        assert scheduled["explainer_provider"] == "openrouter"
+        assert scheduled["openrouter_model"] == "xiaomi/mimo-v2.5"
+
+    def test_rejects_unsupported_openrouter_model_selection(self, auth_client):
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            r = auth_client.post(
+                "/api/projects/proj-1/process",
+                headers={"Authorization": "Bearer fake-token"},
+                json={
+                    "explainer_provider": "openrouter",
+                    "openrouter_model": "qwen/qwen3.6-plus",
+                },
+            )
+
+        assert r.status_code == 422
 
 
 class TestMistralApiKeys:

@@ -11,6 +11,9 @@ import { updateApiKeyUI, showSettings } from './auth.js';
 let selectedFile = null;
 let currentSourceType = 'pdf';
 let currentExplainerProvider = 'gemini';
+export const OPENROUTER_MODEL_MIMO_PRO = 'xiaomi/mimo-v2.5-pro';
+export const OPENROUTER_MODEL_MIMO = 'xiaomi/mimo-v2.5';
+let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 
 export function extractYouTubeVideoId(url) {
   const patterns = [
@@ -51,6 +54,15 @@ export function isExplainerProviderSupportedForSource(sourceType, provider) {
   return provider === 'gemini' || provider === 'openrouter';
 }
 
+export function isValidOpenRouterModel(model) {
+  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO;
+}
+
+function openRouterModelLabel(model) {
+  if (model === OPENROUTER_MODEL_MIMO) return 'Xiaomi MiMo V2.5';
+  return 'Xiaomi MiMo V2.5 Pro';
+}
+
 export function validateExplainerProviderSelection({
   sourceType,
   provider,
@@ -83,18 +95,19 @@ function buildExplainerProviderHint(sourceType, provider) {
   }
 
   if (provider === 'openrouter') {
+    const modelLabel = openRouterModelLabel(currentOpenRouterModel);
     if (sourceType === 'pdf') {
       if (state.hasOpenRouterKey && state.hasMistralKey) {
-        return 'La explicación usará Xiaomi vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.';
+        return `La explicación usará ${modelLabel} vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.`;
       }
       if (!state.hasMistralKey) {
-        return 'Para PDFs con Xiaomi necesitas guardar también tu API key de Mistral para el OCR nativo.';
+        return `Para PDFs con ${modelLabel} necesitas guardar también tu API key de Mistral para el OCR nativo.`;
       }
     }
     if (state.hasOpenRouterKey) {
-      return 'La explicación usará Xiaomi vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
+      return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.`;
     }
-    return 'Xiaomi está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.';
+    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.`;
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
@@ -112,6 +125,9 @@ export function initLanding() {
   const webUrlInput = $('web-url');
   const providerGemini = $('explainer-provider-gemini');
   const providerOpenRouter = $('explainer-provider-openrouter');
+  const modelPro = $('openrouter-model-pro');
+  const modelStandard = $('openrouter-model-standard');
+  const modelPanel = $('openrouter-model-panel');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
 
@@ -140,6 +156,11 @@ export function initLanding() {
     $('provider-card-gemini').classList.toggle('selected', currentExplainerProvider === 'gemini');
     $('provider-card-openrouter').classList.toggle('selected', currentExplainerProvider === 'openrouter');
     $('provider-card-openrouter').classList.toggle('disabled', !openRouterSupported);
+    modelPanel.classList.toggle('hidden', currentExplainerProvider !== 'openrouter' || !openRouterSupported);
+    modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO;
+    modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO;
+    $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
+    $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
 
     providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
     clearProviderError();
@@ -147,6 +168,12 @@ export function initLanding() {
 
   function setExplainerProvider(provider) {
     currentExplainerProvider = provider;
+    syncExplainerProviderUI();
+  }
+
+  function setOpenRouterModel(model) {
+    if (!isValidOpenRouterModel(model)) return;
+    currentOpenRouterModel = model;
     syncExplainerProviderUI();
   }
 
@@ -189,6 +216,12 @@ export function initLanding() {
   });
   providerOpenRouter.addEventListener('change', () => {
     if (providerOpenRouter.checked) setExplainerProvider('openrouter');
+  });
+  modelPro.addEventListener('change', () => {
+    if (modelPro.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO);
+  });
+  modelStandard.addEventListener('change', () => {
+    if (modelStandard.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO);
   });
 
   function checkReady() {
@@ -374,10 +407,15 @@ async function handleUpload() {
     $('project-description').value = '';
     $('youtube-url').value = '';
     $('web-url').value = '';
+    const processPayload = { explainer_provider: currentExplainerProvider };
+    if (currentExplainerProvider === 'openrouter') {
+      processPayload.openrouter_model = currentOpenRouterModel;
+    }
+
     await api(`/api/projects/${project.id}/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ explainer_provider: currentExplainerProvider }),
+      body: JSON.stringify(processPayload),
     });
 
     if (window.pushRoute) window.pushRoute({ view: 'project', projectId: project.id });

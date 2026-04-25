@@ -688,6 +688,22 @@ body {
   line-height: 1.5;
 }
 
+.openrouter-model-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.openrouter-model-panel .form-label {
+  margin-bottom: 10px;
+}
+
+.openrouter-model-grid .provider-card {
+  min-height: 82px;
+}
+
 .upload-note {
   font-family: var(--font-ui);
   font-size: 12px;

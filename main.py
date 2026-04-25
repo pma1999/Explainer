@@ -112,17 +112,33 @@ logger = get_logger("main")
 MAX_CONCURRENT_PARTS = 5
 
 ExplainerProvider = Literal["gemini", "openrouter"]
+OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
 EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
+OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
+    {
+        "xiaomi/mimo-v2.5-pro",
+        "xiaomi/mimo-v2.5",
+    }
+)
 
 
 class ProcessProjectRequest(BaseModel):
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI
+    openrouter_model: OpenRouterExplainerModel | None = None
 
 
-def _resolve_explainer_model(explainer_provider: ExplainerProvider) -> str:
+def _resolve_explainer_model(
+    explainer_provider: ExplainerProvider,
+    openrouter_model: OpenRouterExplainerModel | str | None = None,
+) -> str:
     if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
+        if openrouter_model:
+            model = str(openrouter_model).strip()
+            if model not in OPENROUTER_EXPLAINER_MODELS:
+                raise ValueError(f"Modelo OpenRouter no soportado: {model}")
+            return model
         return OPENROUTER_EXPLAINER_MODEL
     return MODEL_AGENTS
 
@@ -1273,6 +1289,7 @@ async def _process_project(
     project_id: str,
     user_id: str,
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI,
+    openrouter_model: OpenRouterExplainerModel | str | None = None,
 ) -> None:
     process_start_time = time.time()
     pdf_temp_path = None
@@ -1290,7 +1307,12 @@ async def _process_project(
     resolved_source_url = ""
     source_metadata: dict[str, object] = {}
     use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
-    explainer_model = _resolve_explainer_model(explainer_provider)
+    try:
+        explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
+    except ValueError as exc:
+        await send_event(project_id, {"type": "error", "message": str(exc)})
+        update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
+        return
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -1349,7 +1371,7 @@ async def _process_project(
                         "type": "error",
                         "message": (
                             "No hay API key de OpenRouter configurada. "
-                            "Guárdala en Ajustes para usar MiniMax en el explainer."
+                            "Guárdala en Ajustes para usar Xiaomi en el explainer."
                         ),
                     },
                 )
@@ -2616,7 +2638,8 @@ async def api_process_project(
 ):
     """Start processing a project using the user's own API key (BYOK)."""
     explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
-    explainer_model = _resolve_explainer_model(explainer_provider)
+    openrouter_model = payload.openrouter_model if payload else None
+    explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
         extra={
@@ -2624,6 +2647,7 @@ async def api_process_project(
             "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id,
             "endpoint": "POST /api/projects/{project_id}/process",
             "explainer_provider": explainer_provider,
+            "explainer_model": explainer_model,
         }
     )
 
@@ -2653,7 +2677,7 @@ async def api_process_project(
             logger.warning(f"[API] Usuario sin API key OpenRouter configurada: {user_id[:8]}...")
             raise HTTPException(
                 status_code=400,
-                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar MiniMax en el explainer.",
+                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar Xiaomi en el explainer.",
             )
         if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
             logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")
@@ -2674,8 +2698,13 @@ async def api_process_project(
             "explainer_model": explainer_model,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider)
-    return {"ok": True, "status": "started", "explainer_provider": explainer_provider}
+    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider, openrouter_model)
+    return {
+        "ok": True,
+        "status": "started",
+        "explainer_provider": explainer_provider,
+        "explainer_model": explainer_model,
+    }
 
 
 @app.get("/api/projects/{project_id}/events")

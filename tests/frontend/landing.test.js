@@ -8,6 +8,9 @@ import {
   normalizeWebUrl,
   isValidWebUrl,
   isExplainerProviderSupportedForSource,
+  isValidOpenRouterModel,
+  OPENROUTER_MODEL_MIMO,
+  OPENROUTER_MODEL_MIMO_PRO,
   validateExplainerProviderSelection,
 } from '../../frontend/js/landing.js';
 
@@ -86,6 +89,18 @@ describe('landing.js', () => {
       expect(isExplainerProviderSupportedForSource('pdf', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('web', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('youtube', 'openrouter')).toBe(false);
+    });
+  });
+
+  describe('isValidOpenRouterModel', () => {
+    it('accepts both Xiaomi OpenRouter model choices', () => {
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
+    });
+
+    it('rejects unsupported OpenRouter model ids', () => {
+      expect(isValidOpenRouterModel('qwen/qwen3.6-plus')).toBe(false);
+      expect(isValidOpenRouterModel('')).toBe(false);
     });
   });
 
