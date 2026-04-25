@@ -224,26 +224,8 @@ def test_retry_suffix_contains_instruccion_critica():
     assert "INSTRUCCIÓN CRÍTICA" in text or "SOLO modifica" in text
 
 
-def test_retry_suffix_includes_temas_identificados_when_present():
-    """When segmentation has temas_identificados, they must appear in the retry suffix."""
-    temas = ["La querella de las investiduras", "El Papado gregoriano", "El Imperio y el Papado"]
-    seg = {
-        "temas_identificados": temas,
-        "partes": [
-            _parte(1, 3, 9, temas=["La querella de las investiduras"]),
-            _parte(2, 12, 20, temas=["El Papado gregoriano", "El Imperio y el Papado"]),
-        ],
-    }
-    report = validate_page_coverage(seg, CONTENT)
-    text = build_page_coverage_retry_suffix(
-        attempt=0, segmentation=seg, report=report, content_page_set=CONTENT
-    )
-    assert "La querella de las investiduras" in text
-    assert "El Papado gregoriano" in text
-
-
-def test_retry_suffix_temas_section_absent_when_no_temas_identificados():
-    """Without temas_identificados, suffix must still include INSTRUCCIÓN CRÍTICA and content pages."""
+def test_retry_suffix_without_theme_context_still_has_page_instructions():
+    """The page retry suffix is independent from theme assignment validation."""
     seg = {"partes": [_parte(1, 3, 9), _parte(2, 12, 20)]}
     report = validate_page_coverage(seg, CONTENT)
     text = build_page_coverage_retry_suffix(
@@ -255,8 +237,8 @@ def test_retry_suffix_temas_section_absent_when_no_temas_identificados():
     assert "PÁGINAS DE CONTENIDO" in text
 
 
-def test_compact_segmentation_ranges_includes_temas_cubiertos():
-    """_compact_segmentation_ranges must include temas_cubiertos in part entries."""
+def test_compact_segmentation_ranges_omits_theme_assignment_fields():
+    """Range retry context should not depend on theme assignment fields."""
     from backend.segmentation_page_coverage import _compact_segmentation_ranges
     seg = {
         "partes": [
@@ -265,9 +247,8 @@ def test_compact_segmentation_ranges_includes_temas_cubiertos():
         ]
     }
     text = _compact_segmentation_ranges(seg)
-    assert "Tema A" in text
-    assert "Tema B" in text
-    assert "Tema C" in text
+    assert "temas_cubiertos" not in text
+    assert "Tema A" not in text
 
 
 if __name__ == "__main__":
