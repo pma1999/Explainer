@@ -11,6 +11,7 @@ from backend.supabase_data import (
     get_project_by_share_token,
     update_subsection_progress,
 )
+from backend.project_progress import handle_update_subsection_progress
 
 
 class TestSanitizeProjectForShared:
@@ -195,95 +196,80 @@ class TestApiUpdateSubsectionProgress:
     """Tests for PATCH /api/projects/{id}/progress/subsection endpoint."""
 
     def test_400_when_subsection_id_missing(self):
-        from main import api_update_subsection_progress
         body = {"part_id": 1}
-        with patch("main.get_project", return_value={"id": "p1"}):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id y part_id requeridos" in exc_info.value.detail
 
     def test_400_when_part_id_missing(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0"}
-        with patch("main.get_project", return_value={"id": "p1"}):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id y part_id requeridos" in exc_info.value.detail
 
     def test_400_when_part_id_not_a_number(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": "abc"}
-        with patch("main.get_project", return_value={"id": "p1"}):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "part_id debe ser un número" in exc_info.value.detail
 
     def test_400_when_completed_not_bool(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": "yes"}
-        with patch("main.get_project", return_value={"id": "p1"}):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "completed debe ser boolean" in exc_info.value.detail
 
     def test_404_when_project_not_found(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
-        with patch("main.get_project", return_value=None):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value=None):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 404
             assert "Proyecto no encontrado" in exc_info.value.detail
 
     def test_400_when_part_not_found(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 2, "titulo": "P2"}]}}
-        with patch("main.get_project", return_value=project):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value=project):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "Sección no encontrada" in exc_info.value.detail
 
     def test_400_when_subsection_id_does_not_belong_to_part(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-2-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("main.get_project", return_value=project):
-            import asyncio
+        with patch("backend.project_progress.get_project", return_value=project):
             with pytest.raises(Exception) as exc_info:
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+                handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id no pertenece a la sección" in exc_info.value.detail
 
     def test_200_successful_update(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True, "is_last_read": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("main.get_project", return_value=project):
-            with patch("main.update_subsection_progress", return_value={"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}}):
-                import asyncio
-                result = asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+        with patch("backend.project_progress.get_project", return_value=project):
+            with patch(
+                "backend.project_progress.update_subsection_progress",
+                return_value={"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}},
+            ):
+                result = handle_update_subsection_progress("user-1", "p1", body)
         assert result == {"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}}
 
     def test_is_last_read_defaults_to_false(self):
-        from main import api_update_subsection_progress
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("main.get_project", return_value=project):
-            with patch("main.update_subsection_progress", return_value={"ok": True}) as mock_update:
-                import asyncio
-                asyncio.run(api_update_subsection_progress("user-1", "p1", body))
+        with patch("backend.project_progress.get_project", return_value=project):
+            with patch("backend.project_progress.update_subsection_progress", return_value={"ok": True}) as mock_update:
+                handle_update_subsection_progress("user-1", "p1", body)
         mock_update.assert_called_once_with("p1", "user-1", "subsec-1-0-0", 1, completed=True, is_last_read=False)
 
 
