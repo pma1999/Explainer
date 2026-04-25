@@ -5,7 +5,7 @@
 | Suite | Command | Description |
 |-------|---------|--------------|
 | Frontend unit | `npm run test` | Vitest: dom, storage, landing, export, router, api, shared, auth, modules |
-| Backend | `npm run test:backend` | pytest: FastAPI endpoints, supabase_data |
+| Backend | `npm run test:backend` | pytest via the project runner: FastAPI endpoints, supabase_data |
 | E2E | `npm run test:e2e` | Playwright: app load, views, router, forms, shared view |
 | All | `npm run test:all` | Runs frontend unit, backend, and E2E sequentially |
 
@@ -26,7 +26,13 @@
 - **test_api.py**: FastAPI TestClient for GET /api/shared/{token}, POST/DELETE /api/projects/{id}/share, GET /api/projects/{id}
 - **test_supabase_data.py**: _sanitize_project_for_shared, create_share_token, revoke_share_token, get_project_by_share_token
 
-Requires: `pip install -r requirements-dev.txt` (or `pytest`, `httpx`).
+Use the project runner instead of calling `python -m pytest` directly. It disables global pytest plugin auto-loading and loads only the async plugin required by this suite:
+
+```bash
+python scripts/run_pytest.py tests/backend/test_supabase_data.py::TestApiUpdateSubsectionProgress -v
+```
+
+Requires: `pip install -r requirements-dev.txt`.
 
 ## E2E Tests (Playwright)
 

@@ -14,10 +14,11 @@ import json
 import logging
 import random
 import time
-from typing import Any, Callable, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 
-from google import genai
-from google.genai import types
+if TYPE_CHECKING:
+    from google import genai
+    from google.genai import types
 
 from backend.logging_config import get_logger
 
@@ -534,10 +535,10 @@ def gemini_retry(
 
 
 def generate_content_with_retry(
-    client: genai.Client,
+    client: "genai.Client",
     model: str,
     contents: list,
-    config: types.GenerateContentConfig,
+    config: "types.GenerateContentConfig",
     max_retries: int = MAX_RETRIES,
     operation_context: dict[str, Any] | None = None,
 ) -> Any:
@@ -582,7 +583,7 @@ def generate_content_with_retry(
 
 
 def upload_file_with_retry(
-    client: genai.Client,
+    client: "genai.Client",
     file_path: str,
     max_retries: int = MAX_RETRIES,
 ) -> Any:

@@ -1,0 +1,1240 @@
+import _frozen_importlib # frozen
+import _imp # builtin
+import '_thread' # <class '_frozen_importlib.BuiltinImporter'>
+import '_warnings' # <class '_frozen_importlib.BuiltinImporter'>
+import '_weakref' # <class '_frozen_importlib.BuiltinImporter'>
+import 'winreg' # <class '_frozen_importlib.BuiltinImporter'>
+import '_io' # <class '_frozen_importlib.BuiltinImporter'>
+import 'marshal' # <class '_frozen_importlib.BuiltinImporter'>
+import 'nt' # <class '_frozen_importlib.BuiltinImporter'>
+import '_frozen_importlib_external' # <class '_frozen_importlib.FrozenImporter'>
+# installing zipimport hook
+import 'time' # <class '_frozen_importlib.BuiltinImporter'>
+import 'zipimport' # <class '_frozen_importlib.FrozenImporter'>
+# installed zipimport hook
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\encodings\\__pycache__\\__init__.cpython-313.pyc'
+import '_codecs' # <class '_frozen_importlib.BuiltinImporter'>
+import 'codecs' # <class '_frozen_importlib.FrozenImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\__pycache__\aliases.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\aliases.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\encodings\\__pycache__\\aliases.cpython-313.pyc'
+import 'encodings.aliases' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E4BA350>
+import 'encodings' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E435400>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\__pycache__\utf_8.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\utf_8.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\encodings\\__pycache__\\utf_8.cpython-313.pyc'
+import 'encodings.utf_8' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E4BA490>
+import '_signal' # <class '_frozen_importlib.BuiltinImporter'>
+import '_abc' # <class '_frozen_importlib.BuiltinImporter'>
+import 'abc' # <class '_frozen_importlib.FrozenImporter'>
+import 'io' # <class '_frozen_importlib.FrozenImporter'>
+import '_stat' # <class '_frozen_importlib.BuiltinImporter'>
+import 'stat' # <class '_frozen_importlib.FrozenImporter'>
+import '_collections_abc' # <class '_frozen_importlib.FrozenImporter'>
+import 'genericpath' # <class '_frozen_importlib.FrozenImporter'>
+import '_winapi' # <class '_frozen_importlib.BuiltinImporter'>
+import 'ntpath' # <class '_frozen_importlib.FrozenImporter'>
+import 'os' # <class '_frozen_importlib.FrozenImporter'>
+import '_sitebuiltins' # <class '_frozen_importlib.FrozenImporter'>
+Processing user site-packages
+Processing global site-packages
+Adding directory: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313'
+Adding directory: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages'
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__editable__.learni-0.1.0.pth'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\__pycache__\utf_8_sig.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\encodings\utf_8_sig.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\encodings\\__pycache__\\utf_8_sig.cpython-313.pyc'
+import 'encodings.utf_8_sig' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E4AA060>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__pycache__\__editable___learni_0_1_0_finder.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__editable___learni_0_1_0_finder.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__pycache__\\__editable___learni_0_1_0_finder.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\__future__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__future__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\__future__.cpython-313.pyc'
+import '__future__' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6F0950>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\__pycache__\\__init__.cpython-313.pyc'
+import 'importlib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6DC5A0>
+import 'importlib.machinery' # <class '_frozen_importlib.FrozenImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\__pycache__\_abc.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\_abc.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\__pycache__\\_abc.cpython-313.pyc'
+import 'importlib._abc' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6DCC00>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\types.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\types.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\types.cpython-313.pyc'
+import 'types' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6C7450>
+import 'importlib.util' # <class '_frozen_importlib.FrozenImporter'>
+import 'itertools' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\pathlib\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\__pycache__\_abc.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\_abc.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\pathlib\\__pycache__\\_abc.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\functools.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\functools.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\functools.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\collections\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\collections\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\collections\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\keyword.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\keyword.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\keyword.cpython-313.pyc'
+import 'keyword' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E702CF0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\operator.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\operator.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\operator.cpython-313.pyc'
+import '_operator' # <class '_frozen_importlib.BuiltinImporter'>
+import 'operator' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6F6B60>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\reprlib.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\reprlib.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\reprlib.cpython-313.pyc'
+import 'reprlib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E446ED0>
+import '_collections' # <class '_frozen_importlib.BuiltinImporter'>
+import 'collections' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E702350>
+import '_functools' # <class '_frozen_importlib.BuiltinImporter'>
+import 'functools' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6CD8B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\glob.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\glob.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\glob.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\contextlib.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\contextlib.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\contextlib.cpython-313.pyc'
+import 'contextlib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E457D80>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\re\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\enum.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\enum.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\enum.cpython-313.pyc'
+import 'enum' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8E2850>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__pycache__\_compiler.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\_compiler.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\re\\__pycache__\\_compiler.cpython-313.pyc'
+import '_sre' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__pycache__\_parser.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\_parser.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\re\\__pycache__\\_parser.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__pycache__\_constants.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\_constants.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\re\\__pycache__\\_constants.cpython-313.pyc'
+import 're._constants' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8EA050>
+import 're._parser' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E77D6D0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\__pycache__\_casefix.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\re\_casefix.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\re\\__pycache__\\_casefix.cpython-313.pyc'
+import 're._casefix' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8E9C50>
+import 're._compiler' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8E2990>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\copyreg.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\copyreg.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\copyreg.cpython-313.pyc'
+import 'copyreg' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6CBD90>
+import 're' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E884310>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\fnmatch.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\fnmatch.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\fnmatch.cpython-313.pyc'
+import 'errno' # <class '_frozen_importlib.BuiltinImporter'>
+import 'posixpath' # <class '_frozen_importlib.FrozenImporter'>
+import 'fnmatch' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8F4BB0>
+import 'glob' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E447350>
+import 'pathlib._abc' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6CD400>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\__pycache__\_local.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\pathlib\\__pycache__\\_local.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\warnings.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\warnings.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\warnings.cpython-313.pyc'
+import 'warnings' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E9443B0>
+import 'pathlib._local' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E8CAFF0>
+import 'pathlib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6C7350>
+import '__editable___learni_0_1_0_finder' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E4AB5C0>
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__editable__.learning_path_generator-0.1.0.pth'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__pycache__\__editable___learning_path_generator_0_1_0_finder.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__editable___learning_path_generator_0_1_0_finder.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__pycache__\\__editable___learning_path_generator_0_1_0_finder.cpython-313.pyc'
+import '__editable___learning_path_generator_0_1_0_finder' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E945310>
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__editable__.nexusnews-1.0.0.pth'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__pycache__\__editable___nexusnews_1_0_0_finder.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__editable___nexusnews_1_0_0_finder.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__pycache__\\__editable___nexusnews_1_0_0_finder.cpython-313.pyc'
+import '__editable___nexusnews_1_0_0_finder' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6E0C50>
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_insight.pth'
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\coloredlogs.pth'
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\distutils-precedence.pth'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_distutils_hack\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_distutils_hack\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_distutils_hack\\__pycache__\\__init__.cpython-313.pyc'
+import '_distutils_hack' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E945D90>
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\google_cloud_aiplatform-1.130.0-py3.10-nspkg.pth'
+# possible namespace for C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\google
+# possible namespace for C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\google\cloud
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\google_generativeai-0.8.6-py3.13-nspkg.pth'
+# possible namespace for C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\google
+# destroy google
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pytest-cov.pth'
+Processing .pth file: 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pywin32.pth'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\win32\lib\__pycache__\pywin32_bootstrap.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\win32\lib\pywin32_bootstrap.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\win32\\lib\\__pycache__\\pywin32_bootstrap.cpython-313.pyc'
+# possible namespace for C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pywin32_system32
+import 'pywin32_system32' # <_frozen_importlib_external.NamespaceLoader object at 0x0000018C8E950B00>
+import 'pywin32_bootstrap' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E9464B0>
+import 'site' # <class '_frozen_importlib.FrozenImporter'>
+Python 3.13.1 (tags/v3.13.1:0671451, Dec  3 2024, 19:06:28) [MSC v.1942 64 bit (AMD64)] on win32
+Type "help", "copyright", "credits" or "license" for more information.
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\linecache.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\linecache.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\linecache.cpython-313.pyc'
+import 'linecache' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E6E18B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pytest\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pytest\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pytest\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\_version.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_version.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\_version.cpython-313.pyc'
+import '_pytest._version' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E9466F0>
+import '_pytest' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E9465D0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_code\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\__pycache__\code.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\code.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_code\\__pycache__\\code.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\ast.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\ast.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\ast.cpython-313.pyc'
+import '_ast' # <class '_frozen_importlib.BuiltinImporter'>
+import 'ast' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E946870>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\dataclasses.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\dataclasses.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\dataclasses.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\copy.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\copy.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\copy.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\weakref.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\weakref.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\weakref.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\_weakrefset.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\_weakrefset.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\_weakrefset.cpython-313.pyc'
+import '_weakrefset' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC08890>
+import 'weakref' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC08110>
+import 'copy' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EBB3710>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\inspect.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\inspect.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\inspect.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\dis.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\dis.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\dis.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\opcode.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\opcode.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\opcode.cpython-313.pyc'
+import '_opcode' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\_opcode_metadata.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\_opcode_metadata.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\_opcode_metadata.cpython-313.pyc'
+import '_opcode_metadata' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4C170>
+import 'opcode' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC0B890>
+import 'dis' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC093D0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\tokenize.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\tokenize.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\tokenize.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\token.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\token.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\token.cpython-313.pyc'
+import 'token' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4CFB0>
+import '_tokenize' # <class '_frozen_importlib.BuiltinImporter'>
+import 'tokenize' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4CA10>
+import 'inspect' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC091F0>
+import 'dataclasses' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EBB3170>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\traceback.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\traceback.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\traceback.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\textwrap.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\textwrap.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\textwrap.cpython-313.pyc'
+import 'textwrap' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4DCD0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\_colorize.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\_colorize.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\_colorize.cpython-313.pyc'
+import '_colorize' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4F650>
+import 'traceback' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EBB33B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\typing.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\typing.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\typing.cpython-313.pyc'
+import '_typing' # <class '_frozen_importlib.BuiltinImporter'>
+import 'typing' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EC4ED50>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_hooks.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_hooks.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_hooks.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_result.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_result.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_result.cpython-313.pyc'
+import 'pluggy._result' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC75F0>
+import 'pluggy._hooks' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC6690>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_manager.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_manager.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_manager.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_tracing.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_tracing.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_tracing.cpython-313.pyc'
+import 'pluggy._tracing' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC7CB0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_callers.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_callers.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_callers.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_warnings.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_warnings.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_warnings.cpython-313.pyc'
+import 'pluggy._warnings' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CB90>
+import 'pluggy._callers' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CA70>
+import 'pluggy._manager' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC67B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\__pycache__\_version.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\pluggy\_version.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\pluggy\\__pycache__\\_version.cpython-313.pyc'
+import 'pluggy._version' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC7C50>
+import 'pluggy' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC4410>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\__pycache__\source.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_code\source.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_code\\__pycache__\\source.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\bisect.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\bisect.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\bisect.cpython-313.pyc'
+import '_bisect' # <class '_frozen_importlib.BuiltinImporter'>
+import 'bisect' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CEF0>
+import '_pytest._code.source' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ECC55B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_io\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__pycache__\terminalwriter.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\terminalwriter.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_io\\__pycache__\\terminalwriter.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\shutil.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\shutil.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\shutil.cpython-313.pyc'
+import 'zlib' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\bz2.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\bz2.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\bz2.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\_compression.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\_compression.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\_compression.cpython-313.pyc'
+import '_compression' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1EF90>
+# extension module '_bz2' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_bz2.pyd'
+# extension module '_bz2' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_bz2.pyd'
+import '_bz2' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8EC92E40>
+import 'bz2' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1E930>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\lzma.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\lzma.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\lzma.cpython-313.pyc'
+# extension module '_lzma' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_lzma.pyd'
+# extension module '_lzma' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_lzma.pyd'
+import '_lzma' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8EC9EE90>
+import 'lzma' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1F290>
+import 'shutil' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1D850>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\compat.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\compat.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\compat.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\__pycache__\py.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\py.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\__pycache__\\py.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_py\\__pycache__\\__init__.cpython-313.pyc'
+import '_pytest._py' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6C050>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\__pycache__\error.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\error.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_py\\__pycache__\\error.cpython-313.pyc'
+import '_pytest._py.error' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1FFB0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\__pycache__\path.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_py\path.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_py\\__pycache__\\path.cpython-313.pyc'
+import 'atexit' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\uuid.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\uuid.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\uuid.cpython-313.pyc'
+# extension module '_uuid' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_uuid.pyd'
+# extension module '_uuid' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_uuid.pyd'
+import '_uuid' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8ED98550>
+import 'uuid' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6C3B0>
+import '_pytest._py.path' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6C290>
+import 'py' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1FE90>
+import '_pytest.compat' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1E8D0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__pycache__\wcwidth.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\wcwidth.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_io\\__pycache__\\wcwidth.cpython-313.pyc'
+# extension module 'unicodedata' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\unicodedata.pyd'
+# extension module 'unicodedata' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\unicodedata.pyd'
+import 'unicodedata' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8ED78050>
+import '_pytest._io.wcwidth' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1FE30>
+import '_pytest._io.terminalwriter' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CFB0>
+import '_pytest._io' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CB30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__pycache__\saferepr.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\saferepr.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_io\\__pycache__\\saferepr.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\pprint.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\pprint.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\pprint.cpython-313.pyc'
+import 'pprint' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6E690>
+import '_pytest._io.saferepr' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED1CE30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\deprecated.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\deprecated.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\deprecated.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\warning_types.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\warning_types.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\warning_types.cpython-313.pyc'
+import '_pytest.warning_types' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6E930>
+import '_pytest.deprecated' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6DFD0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\pathlib.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\pathlib.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\pathlib.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\outcomes.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\outcomes.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\outcomes.cpython-313.pyc'
+import '_pytest.outcomes' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6FFB0>
+import '_pytest.pathlib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8ED6E7B0>
+import '_pytest._code.code' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E946750>
+import '_pytest._code' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E946630>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\assertion\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\__pycache__\rewrite.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\rewrite.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\assertion\\__pycache__\\rewrite.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\__pycache__\abc.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\abc.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\__pycache__\\abc.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\resources\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\__pycache__\_common.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\_common.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\resources\\__pycache__\\_common.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\tempfile.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\tempfile.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\tempfile.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\random.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\random.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\random.cpython-313.pyc'
+import 'math' # <class '_frozen_importlib.BuiltinImporter'>
+import '_random' # <class '_frozen_importlib.BuiltinImporter'>
+import 'random' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCF5F0>
+import 'tempfile' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCF1D0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\__pycache__\abc.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\abc.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\resources\\__pycache__\\abc.cpython-313.pyc'
+import 'importlib.resources.abc' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCFA10>
+import 'importlib.resources._common' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCECF0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\__pycache__\_functional.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\resources\_functional.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\resources\\__pycache__\\_functional.cpython-313.pyc'
+import 'importlib.resources._functional' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0C230>
+import 'importlib.resources' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCEB10>
+import 'importlib.abc' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCDFD0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\struct.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\struct.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\struct.cpython-313.pyc'
+import '_struct' # <class '_frozen_importlib.BuiltinImporter'>
+import 'struct' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0C9B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\__pycache__\util.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\util.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\assertion\\__pycache__\\util.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\__pycache__\pprint.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\_io\pprint.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\_io\\__pycache__\\pprint.cpython-313.pyc'
+import '_pytest._io.pprint' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0CEF0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\config\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\argparse.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\argparse.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\argparse.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\gettext.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\gettext.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\gettext.cpython-313.pyc'
+import 'gettext' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E76A150>
+import 'argparse' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0DA90>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\metadata\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\__pycache__\decoder.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\decoder.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\__pycache__\\decoder.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\__pycache__\scanner.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\scanner.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\__pycache__\\scanner.cpython-313.pyc'
+import '_json' # <class '_frozen_importlib.BuiltinImporter'>
+import 'json.scanner' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE739B0>
+import 'json.decoder' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE72B10>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\__pycache__\encoder.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\json\encoder.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\json\\__pycache__\\encoder.cpython-313.pyc'
+import 'json.encoder' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE73830>
+import 'json' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE70A10>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\email\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\email\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\email\\__pycache__\\__init__.cpython-313.pyc'
+import 'email' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE73EF0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\zipfile\\__pycache__\\__init__.cpython-313.pyc'
+import 'binascii' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\threading.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\threading.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\threading.cpython-313.pyc'
+import 'threading' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F2C0A70>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\_path\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\_path\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\zipfile\\_path\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\_path\__pycache__\glob.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\zipfile\_path\glob.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\zipfile\\_path\\__pycache__\\glob.cpython-313.pyc'
+import 'zipfile._path.glob' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F2C2090>
+import 'zipfile._path' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F2C0BF0>
+import 'zipfile' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE73E30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__pycache__\_meta.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\_meta.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\metadata\\__pycache__\\_meta.cpython-313.pyc'
+import 'importlib.metadata._meta' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F2C2030>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__pycache__\_collections.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\_collections.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\metadata\\__pycache__\\_collections.cpython-313.pyc'
+import 'importlib.metadata._collections' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F2C3B30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__pycache__\_functools.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\_functools.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\metadata\\__pycache__\\_functools.cpython-313.pyc'
+import 'importlib.metadata._functools' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324170>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\__pycache__\_itertools.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\importlib\metadata\_itertools.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\importlib\\metadata\\__pycache__\\_itertools.cpython-313.pyc'
+import 'importlib.metadata._itertools' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324290>
+import 'importlib.metadata' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E769430>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\shlex.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\shlex.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\shlex.cpython-313.pyc'
+import 'shlex' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE73410>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__pycache__\compat.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\compat.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\config\\__pycache__\\compat.cpython-313.pyc'
+import '_pytest.config.compat' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324650>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__pycache__\exceptions.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\exceptions.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\config\\__pycache__\\exceptions.cpython-313.pyc'
+import '_pytest.config.exceptions' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324890>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__pycache__\findpaths.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\findpaths.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\config\\__pycache__\\findpaths.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\iniconfig\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\__pycache__\exceptions.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\exceptions.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\iniconfig\\__pycache__\\exceptions.cpython-313.pyc'
+import 'iniconfig.exceptions' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F3251F0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\__pycache__\_parse.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\iniconfig\_parse.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\iniconfig\\__pycache__\\_parse.cpython-313.pyc'
+import 'iniconfig._parse' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F325250>
+import 'iniconfig' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324E90>
+import '_pytest.config.findpaths' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324B30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\__pycache__\argparsing.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\config\argparsing.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\config\\__pycache__\\argparsing.cpython-313.pyc'
+import '_pytest.config.argparsing' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F324E30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\hookspec.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\hookspec.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\hookspec.cpython-313.pyc'
+import '_pytest.hookspec' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F325FD0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\stash.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\stash.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\stash.cpython-313.pyc'
+import '_pytest.stash' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F3267B0>
+import '_pytest.config' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0CFB0>
+import '_pytest.assertion.util' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0C770>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\main.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\main.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\main.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\nodes.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\nodes.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\nodes.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\mark\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\__pycache__\expression.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\expression.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\mark\\__pycache__\\expression.cpython-313.pyc'
+import '_pytest.mark.expression' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37CDD0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\__pycache__\structures.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\mark\structures.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\mark\\__pycache__\\structures.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\scope.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\scope.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\scope.cpython-313.pyc'
+import '_pytest.scope' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37E5D0>
+import '_pytest.mark.structures' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37D010>
+import '_pytest.mark' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37C890>
+import '_pytest.nodes' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F327050>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\reports.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\reports.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\reports.cpython-313.pyc'
+import '_pytest.reports' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F327110>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\runner.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\runner.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\runner.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\bdb.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\bdb.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\bdb.cpython-313.pyc'
+import 'bdb' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37FA70>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\timing.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\timing.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\timing.cpython-313.pyc'
+import '_pytest.timing' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F3CC530>
+import '_pytest.runner' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F37C050>
+import '_pytest.main' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EE0CE90>
+import '_pytest.assertion.rewrite' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCD4F0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\__pycache__\truncate.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\assertion\truncate.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\assertion\\__pycache__\\truncate.cpython-313.pyc'
+import '_pytest.assertion.truncate' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCDD90>
+import '_pytest.assertion' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E946690>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\cacheprovider.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\cacheprovider.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\cacheprovider.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\fixtures.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\fixtures.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\fixtures.cpython-313.pyc'
+import '_pytest.fixtures' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F3CD010>
+import '_pytest.cacheprovider' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8EDCD490>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\capture.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\capture.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\capture.cpython-313.pyc'
+import '_pytest.capture' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F326F90>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\debugging.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\debugging.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\debugging.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\result.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\result.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\result.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\util.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\util.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\util.cpython-313.pyc'
+import 'unittest.util' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F425A90>
+import 'unittest.result' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4258B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\case.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\case.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\case.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\difflib.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\difflib.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\difflib.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\heapq.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\heapq.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\heapq.cpython-313.pyc'
+import '_heapq' # <class '_frozen_importlib.BuiltinImporter'>
+import 'heapq' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F468950>
+import 'difflib' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4263F0>
+import 'unittest.case' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F425EB0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\suite.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\suite.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\suite.cpython-313.pyc'
+import 'unittest.suite' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F426210>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\loader.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\loader.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\loader.cpython-313.pyc'
+import 'unittest.loader' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F469370>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\main.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\main.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\main.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\runner.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\runner.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\runner.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\__pycache__\signals.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\unittest\signals.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\unittest\\__pycache__\\signals.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\signal.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\signal.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\signal.cpython-313.pyc'
+import 'signal' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F46A270>
+import 'unittest.signals' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F469FD0>
+import 'unittest.runner' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F469A90>
+import 'unittest.main' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F469010>
+import 'unittest' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4257F0>
+import '_pytest.debugging' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F425370>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\doctest.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\doctest.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\doctest.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\platform.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\platform.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\platform.cpython-313.pyc'
+# extension module '_wmi' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_wmi.pyd'
+# extension module '_wmi' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_wmi.pyd'
+import '_wmi' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8F42AFD0>
+import 'platform' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F46A630>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\python.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\python.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\python.cpython-313.pyc'
+# destroy empty_module
+import '_pytest.python' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F46B5F0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\python_api.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\python_api.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\python_api.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\decimal.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\decimal.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\decimal.cpython-313.pyc'
+# extension module '_decimal' loaded from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_decimal.pyd'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\numbers.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\numbers.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\numbers.cpython-313.pyc'
+import 'numbers' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F2B10>
+# extension module '_decimal' executed from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\DLLs\\_decimal.pyd'
+import '_decimal' # <_frozen_importlib_external.ExtensionFileLoader object at 0x0000018C8F514170>
+import 'decimal' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F2570>
+import '_pytest.python_api' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F0B30>
+import '_pytest.doctest' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F425550>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\freeze_support.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\freeze_support.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\freeze_support.cpython-313.pyc'
+import '_pytest.freeze_support' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F46A1B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\legacypath.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\legacypath.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\legacypath.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\subprocess.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\subprocess.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\subprocess.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\locale.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\locale.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\locale.cpython-313.pyc'
+import '_locale' # <class '_frozen_importlib.BuiltinImporter'>
+import 'locale' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F3710>
+import 'msvcrt' # <class '_frozen_importlib.BuiltinImporter'>
+import 'subprocess' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F3410>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\monkeypatch.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\monkeypatch.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\monkeypatch.cpython-313.pyc'
+import '_pytest.monkeypatch' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F33B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\pytester.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\pytester.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\pytester.cpython-313.pyc'
+import 'gc' # <class '_frozen_importlib.BuiltinImporter'>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\tmpdir.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\tmpdir.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\tmpdir.cpython-313.pyc'
+import '_pytest.tmpdir' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F539790>
+import '_pytest.pytester' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F538E30>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\terminal.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\terminal.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\terminal.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\datetime.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\datetime.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\datetime.cpython-313.pyc'
+import '_datetime' # <class '_frozen_importlib.BuiltinImporter'>
+import 'datetime' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F5A4290>
+import '_pytest.terminal' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F539730>
+import '_pytest.legacypath' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F4F3290>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\logging.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\logging.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\logging.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\logging\__pycache__\__init__.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\logging\__init__.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\logging\\__pycache__\\__init__.cpython-313.pyc'
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\__pycache__\string.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\string.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\__pycache__\\string.cpython-313.pyc'
+import '_string' # <class '_frozen_importlib.BuiltinImporter'>
+import 'string' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F5A7950>
+import 'logging' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F5A65D0>
+import '_pytest.logging' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F5380B0>
+# C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\__pycache__\recwarn.cpython-313.pyc matches C:\Users\PcVIP\AppData\Local\Programs\Python\Python313\Lib\site-packages\_pytest\recwarn.py
+# code object from 'C:\\Users\\PcVIP\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\_pytest\\__pycache__\\recwarn.cpython-313.pyc'
+import '_pytest.recwarn' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8F5A6510>
+import 'pytest' # <_frozen_importlib_external.SourceFileLoader object at 0x0000018C8E9463F0>
+# clear sys.path_importer_cache
+# clear sys.path_hooks
+# clear builtins._
+# clear sys.path
+# clear sys.argv
+# clear sys.ps1
+# clear sys.ps2
+# clear sys.last_exc
+# clear sys.last_type
+# clear sys.last_value
+# clear sys.last_traceback
+# clear sys.__interactivehook__
+# clear sys.meta_path
+# restore sys.stdin
+# restore sys.stdout
+# restore sys.stderr
+# cleanup[2] removing sys
+# cleanup[2] removing builtins
+# cleanup[2] removing _frozen_importlib
+# cleanup[2] removing _imp
+# cleanup[2] removing _thread
+# cleanup[2] removing _warnings
+# cleanup[2] removing _weakref
+# cleanup[2] removing winreg
+# cleanup[2] removing _io
+# cleanup[2] removing marshal
+# cleanup[2] removing nt
+# cleanup[2] removing _frozen_importlib_external
+# cleanup[2] removing time
+# cleanup[2] removing zipimport
+# destroy zipimport
+# cleanup[2] removing _codecs
+# cleanup[2] removing codecs
+# cleanup[2] removing encodings.aliases
+# cleanup[2] removing encodings
+# cleanup[2] removing encodings.utf_8
+# cleanup[2] removing _signal
+# cleanup[2] removing _abc
+# cleanup[2] removing abc
+# cleanup[2] removing io
+# cleanup[2] removing __main__
+# destroy __main__
+# cleanup[2] removing _stat
+# cleanup[2] removing stat
+# cleanup[2] removing _collections_abc
+# cleanup[2] removing genericpath
+# cleanup[2] removing _winapi
+# cleanup[2] removing ntpath
+# cleanup[2] removing os.path
+# cleanup[2] removing os
+# cleanup[2] removing _sitebuiltins
+# cleanup[2] removing encodings.utf_8_sig
+# cleanup[2] removing __future__
+# destroy __future__
+# cleanup[2] removing importlib._bootstrap
+# cleanup[2] removing importlib._bootstrap_external
+# cleanup[2] removing importlib
+# cleanup[2] removing importlib.machinery
+# cleanup[2] removing importlib._abc
+# cleanup[2] removing types
+# cleanup[2] removing importlib.util
+# cleanup[2] removing itertools
+# cleanup[2] removing collections.abc
+# cleanup[2] removing keyword
+# cleanup[2] removing _operator
+# cleanup[2] removing operator
+# cleanup[2] removing reprlib
+# cleanup[2] removing _collections
+# cleanup[2] removing collections
+# cleanup[2] removing _functools
+# cleanup[2] removing functools
+# cleanup[2] removing contextlib
+# cleanup[2] removing enum
+# cleanup[2] removing _sre
+# cleanup[2] removing re._constants
+# cleanup[2] removing re._parser
+# cleanup[2] removing re._casefix
+# cleanup[2] removing re._compiler
+# cleanup[2] removing copyreg
+# cleanup[2] removing re
+# cleanup[2] removing errno
+# cleanup[2] removing posixpath
+# cleanup[2] removing fnmatch
+# cleanup[2] removing glob
+# cleanup[2] removing pathlib._abc
+# cleanup[2] removing warnings
+# cleanup[2] removing pathlib._local
+# cleanup[2] removing pathlib
+# cleanup[2] removing __editable___learni_0_1_0_finder
+# destroy __editable___learni_0_1_0_finder
+# cleanup[2] removing __editable___learning_path_generator_0_1_0_finder
+# destroy __editable___learning_path_generator_0_1_0_finder
+# cleanup[2] removing __editable___nexusnews_1_0_0_finder
+# destroy __editable___nexusnews_1_0_0_finder
+# cleanup[2] removing _distutils_hack
+# destroy _distutils_hack
+# cleanup[2] removing google
+# destroy google
+# cleanup[2] removing google.cloud
+# destroy google.cloud
+# cleanup[2] removing pywin32_system32
+# cleanup[2] removing pywin32_bootstrap
+# destroy pywin32_bootstrap
+# destroy pywin32_system32
+# cleanup[2] removing site
+# destroy site
+# cleanup[2] removing linecache
+# cleanup[2] removing _pytest._version
+# cleanup[2] removing _pytest
+# cleanup[2] removing _ast
+# destroy _ast
+# cleanup[2] removing ast
+# cleanup[2] removing _weakrefset
+# destroy _weakrefset
+# cleanup[2] removing weakref
+# cleanup[2] removing copy
+# cleanup[2] removing _opcode
+# cleanup[2] removing _opcode_metadata
+# destroy _opcode_metadata
+# cleanup[2] removing opcode
+# destroy opcode
+# cleanup[2] removing dis
+# cleanup[2] removing token
+# cleanup[2] removing _tokenize
+# cleanup[2] removing tokenize
+# cleanup[2] removing inspect
+# cleanup[2] removing dataclasses
+# cleanup[2] removing textwrap
+# cleanup[2] removing _colorize
+# cleanup[2] removing traceback
+# cleanup[2] removing _typing
+# cleanup[2] removing typing
+# destroy typing
+# cleanup[2] removing pluggy._result
+# cleanup[2] removing pluggy._hooks
+# cleanup[2] removing pluggy._tracing
+# cleanup[2] removing pluggy._warnings
+# cleanup[2] removing pluggy._callers
+# cleanup[2] removing pluggy._manager
+# cleanup[2] removing pluggy._version
+# cleanup[2] removing pluggy
+# cleanup[2] removing _bisect
+# cleanup[2] removing bisect
+# destroy bisect
+# cleanup[2] removing _pytest._code.source
+# cleanup[2] removing zlib
+# cleanup[2] removing _compression
+# cleanup[2] removing _bz2
+# cleanup[2] removing bz2
+# cleanup[2] removing _lzma
+# cleanup[2] removing lzma
+# cleanup[2] removing shutil
+# cleanup[2] removing _pytest._py
+# cleanup[2] removing _pytest._py.error
+# cleanup[2] removing atexit
+# cleanup[2] removing _uuid
+# cleanup[2] removing uuid
+# cleanup[2] removing _pytest._py.path
+# cleanup[2] removing py.error
+# cleanup[2] removing py.path
+# cleanup[2] removing py
+# cleanup[2] removing _pytest.compat
+# cleanup[2] removing unicodedata
+# cleanup[2] removing _pytest._io.wcwidth
+# cleanup[2] removing _pytest._io.terminalwriter
+# cleanup[2] removing _pytest._io
+# cleanup[2] removing pprint
+# cleanup[2] removing _pytest._io.saferepr
+# cleanup[2] removing _pytest.warning_types
+# cleanup[2] removing _pytest.deprecated
+# cleanup[2] removing _pytest.outcomes
+# cleanup[2] removing _pytest.pathlib
+# cleanup[2] removing _pytest._code.code
+# cleanup[2] removing _pytest._code
+# cleanup[2] removing math
+# cleanup[2] removing _random
+# cleanup[2] removing random
+# destroy random
+# cleanup[2] removing tempfile
+# cleanup[2] removing importlib.resources.abc
+# cleanup[2] removing importlib.resources._common
+# cleanup[2] removing importlib.resources._functional
+# cleanup[2] removing importlib.resources
+# cleanup[2] removing importlib.abc
+# cleanup[2] removing _struct
+# cleanup[2] removing struct
+# cleanup[2] removing _pytest._io.pprint
+# cleanup[2] removing gettext
+# destroy gettext
+# cleanup[2] removing argparse
+# cleanup[2] removing _json
+# cleanup[2] removing json.scanner
+# cleanup[2] removing json.decoder
+# cleanup[2] removing json.encoder
+# cleanup[2] removing json
+# cleanup[2] removing email
+# cleanup[2] removing binascii
+# cleanup[2] removing threading
+# cleanup[2] removing zipfile._path.glob
+# cleanup[2] removing zipfile._path
+# cleanup[2] removing zipfile
+# cleanup[2] removing importlib.metadata._meta
+# cleanup[2] removing importlib.metadata._collections
+# cleanup[2] removing importlib.metadata._functools
+# cleanup[2] removing importlib.metadata._itertools
+# cleanup[2] removing importlib.metadata
+# cleanup[2] removing shlex
+# cleanup[2] removing _pytest.config.compat
+# cleanup[2] removing _pytest.config.exceptions
+# cleanup[2] removing iniconfig.exceptions
+# cleanup[2] removing iniconfig._parse
+# cleanup[2] removing iniconfig
+# cleanup[2] removing _pytest.config.findpaths
+# cleanup[2] removing _pytest.config.argparsing
+# cleanup[2] removing _pytest.hookspec
+# cleanup[2] removing _pytest.stash
+# cleanup[2] removing _pytest.config
+# cleanup[2] removing _pytest.assertion.util
+# cleanup[2] removing _pytest.mark.expression
+# cleanup[2] removing _pytest.scope
+# cleanup[2] removing _pytest.mark.structures
+# cleanup[2] removing _pytest.mark
+# cleanup[2] removing _pytest.nodes
+# cleanup[2] removing _pytest.reports
+# cleanup[2] removing bdb
+# cleanup[2] removing _pytest.timing
+# cleanup[2] removing _pytest.runner
+# cleanup[2] removing _pytest.main
+# cleanup[2] removing _pytest.assertion.rewrite
+# cleanup[2] removing _pytest.assertion.truncate
+# cleanup[2] removing _pytest.assertion
+# cleanup[2] removing _pytest.fixtures
+# cleanup[2] removing _pytest.cacheprovider
+# cleanup[2] removing _pytest.capture
+# cleanup[2] removing unittest.util
+# cleanup[2] removing unittest.result
+# cleanup[2] removing _heapq
+# cleanup[2] removing heapq
+# destroy heapq
+# cleanup[2] removing difflib
+# cleanup[2] removing unittest.case
+# cleanup[2] removing unittest.suite
+# cleanup[2] removing unittest.loader
+# cleanup[2] removing signal
+# cleanup[2] removing unittest.signals
+# cleanup[2] removing unittest.runner
+# cleanup[2] removing unittest.main
+# destroy unittest.main
+# cleanup[2] removing unittest
+# cleanup[2] removing _pytest.debugging
+# cleanup[2] removing _wmi
+# cleanup[2] removing platform
+# cleanup[2] removing _pytest.python
+# cleanup[2] removing numbers
+# destroy numbers
+# cleanup[2] removing _decimal
+# cleanup[2] removing decimal
+# destroy decimal
+# cleanup[2] removing _pytest.python_api
+# cleanup[2] removing _pytest.doctest
+# cleanup[2] removing _pytest.freeze_support
+# cleanup[2] removing _locale
+# cleanup[2] removing locale
+# cleanup[2] removing msvcrt
+# cleanup[2] removing subprocess
+# cleanup[2] removing _pytest.monkeypatch
+# cleanup[2] removing gc
+# cleanup[2] removing _pytest.tmpdir
+# cleanup[2] removing _pytest.pytester
+# cleanup[2] removing _datetime
+# cleanup[2] removing datetime
+# cleanup[2] removing _pytest.terminal
+# cleanup[2] removing _pytest.legacypath
+# cleanup[2] removing _string
+# cleanup[2] removing string
+# destroy string
+# cleanup[2] removing logging
+# cleanup[2] removing _pytest.logging
+# cleanup[2] removing _pytest.recwarn
+# cleanup[2] removing pytest
+# destroy pytest
+# destroy _sitebuiltins
+# destroy _datetime
+# cleanup[3] wiping _pytest.recwarn
+# cleanup[3] wiping _pytest.logging
+# destroy logging
+# cleanup[3] wiping _string
+# cleanup[3] wiping _pytest.legacypath
+# cleanup[3] wiping _pytest.terminal
+# destroy datetime
+# cleanup[3] wiping _pytest.pytester
+# destroy subprocess
+# cleanup[3] wiping _pytest.tmpdir
+# cleanup[3] wiping gc
+# destroy gc
+# cleanup[3] wiping _pytest.monkeypatch
+# cleanup[3] wiping msvcrt
+# cleanup[3] wiping locale
+# destroy encodings
+# cleanup[3] wiping _locale
+# destroy _locale
+# cleanup[3] wiping _pytest.freeze_support
+# cleanup[3] wiping _pytest.doctest
+# destroy platform
+# cleanup[3] wiping _pytest.python_api
+# cleanup[3] wiping _decimal
+# cleanup[3] wiping _pytest.python
+# cleanup[3] wiping _wmi
+# cleanup[3] wiping _pytest.debugging
+# destroy unittest
+# cleanup[3] wiping unittest.runner
+# cleanup[3] wiping unittest.signals
+# cleanup[3] wiping signal
+# cleanup[3] wiping unittest.loader
+# cleanup[3] wiping unittest.suite
+# cleanup[3] wiping unittest.case
+# destroy difflib
+# cleanup[3] wiping _heapq
+# cleanup[3] wiping unittest.result
+# cleanup[3] wiping unittest.util
+# cleanup[3] wiping _pytest.capture
+# cleanup[3] wiping _pytest.cacheprovider
+# cleanup[3] wiping _pytest.fixtures
+# cleanup[3] wiping _pytest.assertion
+# destroy _pytest.assertion.rewrite
+# destroy _pytest.assertion.truncate
+# cleanup[3] wiping _pytest.main
+# cleanup[3] wiping _pytest.runner
+# destroy bdb
+# cleanup[3] wiping _pytest.timing
+# cleanup[3] wiping _pytest.reports
+# cleanup[3] wiping _pytest.nodes
+# cleanup[3] wiping _pytest.mark
+# destroy _pytest.mark.expression
+# destroy _pytest.mark.structures
+# cleanup[3] wiping _pytest.scope
+# cleanup[3] wiping _pytest.assertion.util
+# cleanup[3] wiping _pytest.config
+# destroy glob
+# destroy shlex
+# destroy _pytest.config.compat
+# destroy _pytest.config.exceptions
+# destroy _pytest.config.findpaths
+# destroy _pytest.config.argparsing
+# cleanup[3] wiping _pytest.stash
+# cleanup[3] wiping _pytest.hookspec
+# cleanup[3] wiping iniconfig
+# destroy iniconfig._parse
+# destroy iniconfig.exceptions
+# cleanup[3] wiping importlib.metadata
+# destroy importlib.metadata._meta
+# destroy importlib.metadata._collections
+# destroy importlib.metadata._functools
+# destroy importlib.metadata._itertools
+# destroy json
+# destroy email
+# cleanup[3] wiping zipfile
+# destroy zipfile._path
+# destroy bz2
+# destroy lzma
+# cleanup[3] wiping zipfile._path.glob
+# cleanup[3] wiping threading
+# cleanup[3] wiping binascii
+# destroy binascii
+# cleanup[3] wiping json.encoder
+# cleanup[3] wiping json.decoder
+# cleanup[3] wiping json.scanner
+# cleanup[3] wiping _json
+# cleanup[3] wiping argparse
+# cleanup[3] wiping _pytest._io.pprint
+# cleanup[3] wiping struct
+# cleanup[3] wiping _struct
+# cleanup[3] wiping importlib.abc
+# cleanup[3] wiping importlib.resources
+# destroy importlib.resources._common
+# destroy importlib.resources._functional
+# destroy importlib.resources.abc
+# cleanup[3] wiping tempfile
+# cleanup[3] wiping _random
+# cleanup[3] wiping math
+# cleanup[3] wiping _pytest._code
+# destroy _pytest._code.source
+# destroy _pytest._code.code
+# cleanup[3] wiping _pytest.pathlib
+# cleanup[3] wiping _pytest.outcomes
+# cleanup[3] wiping _pytest.deprecated
+# cleanup[3] wiping _pytest.warning_types
+# cleanup[3] wiping _pytest._io.saferepr
+# destroy pprint
+# destroy reprlib
+# cleanup[3] wiping _pytest._io
+# destroy _pytest._io.wcwidth
+# destroy _pytest._io.terminalwriter
+# destroy _pytest._io.saferepr
+# destroy _pytest._io.pprint
+# cleanup[3] wiping unicodedata
+# cleanup[3] wiping _pytest.compat
+# destroy py
+# cleanup[3] wiping py.path
+# destroy uuid
+# cleanup[3] wiping py.error
+# cleanup[3] wiping _pytest._py.path
+# cleanup[3] wiping _uuid
+# cleanup[3] wiping atexit
+# cleanup[3] wiping _pytest._py.error
+# cleanup[3] wiping _pytest._py
+# destroy _pytest._py.error
+# destroy _pytest._py.path
+# cleanup[3] wiping shutil
+# cleanup[3] wiping _lzma
+# cleanup[3] wiping _bz2
+# cleanup[3] wiping _compression
+# cleanup[3] wiping zlib
+# cleanup[3] wiping _bisect
+# cleanup[3] wiping pluggy
+# destroy pluggy._result
+# destroy pluggy._hooks
+# destroy pluggy._warnings
+# destroy pluggy._callers
+# destroy pluggy._manager
+# destroy pluggy._version
+# cleanup[3] wiping pluggy._tracing
+# cleanup[3] wiping _typing
+# cleanup[3] wiping traceback
+# destroy _colorize
+# cleanup[3] wiping textwrap
+# cleanup[3] wiping dataclasses
+# destroy copy
+# cleanup[3] wiping inspect
+# destroy dis
+# destroy linecache
+# destroy token
+# cleanup[3] wiping tokenize
+# cleanup[3] wiping _tokenize
+# cleanup[3] wiping _opcode
+# cleanup[3] wiping weakref
+# cleanup[3] wiping ast
+# cleanup[3] wiping _pytest
+# destroy _pytest._version
+# destroy _pytest._py
+# destroy _pytest._io
+# destroy _pytest._code
+# destroy _pytest.compat
+# destroy _pytest.warning_types
+# destroy _pytest.deprecated
+# destroy _pytest.outcomes
+# destroy _pytest.pathlib
+# destroy _pytest.hookspec
+# destroy _pytest.stash
+# destroy _pytest.config
+# destroy _pytest.scope
+# destroy _pytest.mark
+# destroy _pytest.nodes
+# destroy _pytest.reports
+# destroy _pytest.timing
+# destroy _pytest.runner
+# destroy _pytest.main
+# destroy _pytest.assertion
+# destroy _pytest.fixtures
+# destroy _pytest.cacheprovider
+# destroy _pytest.capture
+# destroy _pytest.debugging
+# destroy _pytest.python
+# destroy _pytest.python_api
+# destroy _pytest.doctest
+# destroy _pytest.freeze_support
+# destroy _pytest.monkeypatch
+# destroy _pytest.tmpdir
+# destroy _pytest.pytester
+# destroy _pytest.terminal
+# destroy _pytest.legacypath
+# destroy _pytest.logging
+# destroy _pytest.recwarn
+# cleanup[3] wiping pathlib
+# destroy pathlib._abc
+# destroy pathlib._local
+# cleanup[3] wiping warnings
+# cleanup[3] wiping fnmatch
+# cleanup[3] wiping posixpath
+# cleanup[3] wiping errno
+# cleanup[3] wiping re
+# destroy re._constants
+# destroy re._casefix
+# destroy re._compiler
+# cleanup[3] wiping copyreg
+# cleanup[3] wiping re._parser
+# cleanup[3] wiping _sre
+# cleanup[3] wiping enum
+# cleanup[3] wiping contextlib
+# cleanup[3] wiping functools
+# cleanup[3] wiping _functools
+# cleanup[3] wiping collections
+# destroy _collections_abc
+# cleanup[3] wiping _collections
+# cleanup[3] wiping operator
+# cleanup[3] wiping _operator
+# cleanup[3] wiping keyword
+# cleanup[3] wiping itertools
+# cleanup[3] wiping importlib.util
+# cleanup[3] wiping types
+# cleanup[3] wiping importlib._abc
+# cleanup[3] wiping importlib.machinery
+# cleanup[3] wiping importlib
+# destroy importlib._abc
+# destroy importlib.machinery
+# destroy importlib.util
+# destroy importlib.resources
+# destroy importlib.abc
+# destroy importlib.metadata
+# cleanup[3] wiping importlib._bootstrap_external
+# cleanup[3] wiping importlib._bootstrap
+# destroy _frozen_importlib_external
+# cleanup[3] wiping encodings.utf_8_sig
+# cleanup[3] wiping os
+# cleanup[3] wiping os.path
+# destroy genericpath
+# cleanup[3] wiping ntpath
+# cleanup[3] wiping _winapi
+# cleanup[3] wiping stat
+# cleanup[3] wiping _stat
+# cleanup[3] wiping io
+# cleanup[3] wiping abc
+# cleanup[3] wiping _abc
+# cleanup[3] wiping _signal
+# destroy _signal
+# cleanup[3] wiping encodings.utf_8
+# cleanup[3] wiping encodings.aliases
+# cleanup[3] wiping codecs
+# cleanup[3] wiping _codecs
+# cleanup[3] wiping time
+# cleanup[3] wiping nt
+# cleanup[3] wiping marshal
+# cleanup[3] wiping _io
+# cleanup[3] wiping winreg
+# cleanup[3] wiping _weakref
+# cleanup[3] wiping _warnings
+# cleanup[3] wiping _thread
+# cleanup[3] wiping _imp
+# destroy _imp
+# cleanup[3] wiping _frozen_importlib
+# cleanup[3] wiping sys
+# cleanup[3] wiping builtins
+# destroy sys.monitoring
+# destroy winreg
+# destroy re._parser
+# destroy _sre
+# destroy _functools
+# destroy _thread
+# destroy copyreg
+# destroy _typing
+# destroy textwrap
+# destroy enum
+# destroy keyword
+# destroy pluggy
+# destroy abc
+# destroy traceback
+# destroy weakref
+# destroy atexit
+# destroy _uuid
+# destroy dataclasses
+# destroy _wmi
+# destroy locale
+# destroy signal
+# destroy threading
+# destroy msvcrt
+# destroy time
+# destroy ntpath
+# destroy _warnings
+# destroy _winapi
+# destroy iniconfig
+# destroy _pytest
+# destroy _weakref
+# destroy _opcode
+# destroy _tokenize
+# destroy pluggy._tracing
+# destroy shutil
+# destroy _stat
+# destroy operator
+# destroy fnmatch
+# destroy collections
+# destroy _string
+# destroy tempfile
+# destroy inspect
+# destroy warnings
+# destroy json.scanner
+# destroy json.decoder
+# destroy json.encoder
+# destroy _json
+# destroy unicodedata
+# destroy ast
+# destroy errno
+# destroy functools
+# destroy importlib
+# destroy marshal
+# destroy struct
+# destroy tokenize
+# destroy _pytest.assertion.util
+# destroy unittest.util
+# destroy unittest.result
+# destroy unittest.case
+# destroy unittest.suite
+# destroy unittest.signals
+# destroy math
+# destroy nt
+# destroy _operator
+# destroy _bisect
+# destroy _random
+# destroy zlib
+# destroy _io
+# destroy _compression
+# destroy io
+# destroy posixpath
+# destroy zipfile
+# destroy itertools
+# destroy contextlib
+# destroy pathlib
+# destroy re
+# destroy stat
+# destroy zipfile._path.glob
+# destroy types
+# destroy _bz2
+# destroy _lzma
+# destroy argparse
+# destroy os
+# destroy unittest.loader
+# destroy unittest.runner
+# destroy _struct
+# destroy _heapq
+# clear sys.meta_path
+# clear sys.modules
+# destroy _frozen_importlib
+# destroy codecs
+# destroy encodings.aliases
+# destroy encodings.utf_8
+# destroy encodings.utf_8_sig
+# destroy _decimal
+# destroy builtins
+# destroy _abc
+# destroy sys
+# destroy _codecs
+# destroy _collections
+# clear sys.audit hooks
