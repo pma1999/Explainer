@@ -32,7 +32,12 @@ def main() -> int:
     import pytest
 
     args = sys.argv[1:]
-    if not any(arg == "--basetemp" or arg.startswith("--basetemp=") for arg in args):
+    addopts = os.environ.get("PYTEST_ADDOPTS", "")
+    has_basetemp = (
+        any(arg == "--basetemp" or arg.startswith("--basetemp=") for arg in args)
+        or "--basetemp" in addopts
+    )
+    if not has_basetemp:
         repo_root = Path(__file__).resolve().parents[1]
         base_temp = repo_root / "test_output" / f"pytest-basetemp-{os.getpid()}"
         args = [f"--basetemp={base_temp}", *args]
