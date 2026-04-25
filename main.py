@@ -34,6 +34,7 @@ from backend.supabase_data import (
     list_projects_summary,
     update_project,
     set_section_read_status,
+    update_subsection_progress,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -514,6 +515,54 @@ async def api_update_progress(
         raise HTTPException(status_code=400, detail="El contenido de esta sección aún no está listo")
 
     updated = set_section_read_status(project_id, user_id, part_id, completed)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    return updated
+
+
+@app.patch("/api/projects/{project_id}/progress/subsection")
+async def api_update_subsection_progress(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    body: dict = Body(...),
+):
+    """Update subsection progress. Body: {
+        subsection_id: str, part_id: int,
+        completed?: bool, is_last_read?: bool
+    }."""
+    subsection_id = body.get("subsection_id")
+    part_id = body.get("part_id")
+    if not subsection_id or part_id is None:
+        raise HTTPException(status_code=400, detail="subsection_id y part_id requeridos")
+    try:
+        part_id = int(part_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="part_id debe ser un número")
+
+    completed = body.get("completed")
+    if completed is not None and not isinstance(completed, bool):
+        raise HTTPException(status_code=400, detail="completed debe ser boolean")
+    is_last_read = body.get("is_last_read", False)
+    if not isinstance(is_last_read, bool):
+        is_last_read = False
+
+    project = get_project(project_id, user_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    partes = project.get("segmentation") or {}
+    partes_list = partes.get("partes") or []
+    if not any(p.get("numero") == part_id for p in partes_list):
+        raise HTTPException(status_code=400, detail="Sección no encontrada")
+
+    # Accept deterministic format subsec-{part_id}-... or exact match
+    if not subsection_id.startswith(f"subsec-{part_id}-"):
+        raise HTTPException(status_code=400, detail="subsection_id no pertenece a la sección")
+
+    updated = update_subsection_progress(
+        project_id, user_id, subsection_id, part_id,
+        completed=completed, is_last_read=is_last_read,
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return updated
