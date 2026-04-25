@@ -13,7 +13,7 @@ Usage:
 
     python -m tests.test_pipeline_live_neural_compare \\
       --reuse-segmentation test_output/live_compare_neural_YYYYMMDD_HHMMSS/shared_01_segmentation.json \\
-      --only-subpart 1 --openrouter-only --openrouter-model qwen/qwen3.6-plus
+      --only-subpart 1 --openrouter-only --openrouter-model xiaomi/mimo-v2.5-pro
 
 Optional environment overrides:
     OPENROUTER_EXPLAINER_MODEL_OVERRIDE
@@ -57,8 +57,8 @@ GEMINI_EXPLAINER_MODEL = os.environ.get(
 ).strip() or "gemini-3-flash-preview"
 OPENROUTER_EXPLAINER_MODEL = os.environ.get(
     "OPENROUTER_EXPLAINER_MODEL_OVERRIDE",
-    "qwen/qwen3.6-plus",
-).strip() or "qwen/qwen3.6-plus"
+    "xiaomi/mimo-v2.5-pro",
+).strip() or "xiaomi/mimo-v2.5-pro"
 
 
 def _tokens_gemini(usage: Any) -> dict[str, int]:
