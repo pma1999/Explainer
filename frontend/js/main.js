@@ -679,6 +679,11 @@ function bootstrap() {
       } else {
         disconnectSubsectionObserver();
       }
+
+      const rail = document.querySelector('.ghost-rail');
+      const bar = document.querySelector('.smart-bar');
+      if (rail) rail.style.display = tab === 'explicacion' ? '' : 'none';
+      if (bar) bar.style.display = tab === 'explicacion' ? '' : 'none';
     });
   });
 
