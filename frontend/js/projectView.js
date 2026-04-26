@@ -535,7 +535,7 @@ export function renderSidebarNav(project) {
   });
 }
 
-function renderExplainer(data) {
+function renderExplainer(data, partId) {
   if (data._format === 'markdown') {
     return `<div class="explainer-content">${renderMd(data.content || '')}</div>`;
   }
@@ -544,16 +544,17 @@ function renderExplainer(data) {
     html += `<div class="explainer-intro">${renderMd(data.introduccion)}</div>`;
   }
   if (data.desarrollo && data.desarrollo.length > 0) {
-    data.desarrollo.forEach(section => {
+    data.desarrollo.forEach((section, sectionIndex) => {
       html += `<div class="explainer-section">`;
       html += `<h3 class="explainer-section-title">${escHtml(section.titulo_seccion)}</h3>`;
       if (section.explicacion_introductoria) {
         html += `<div class="explainer-section-intro">${renderMd(section.explicacion_introductoria)}</div>`;
       }
       if (section.subsecciones && section.subsecciones.length > 0) {
-        section.subsecciones.forEach(sub => {
+        section.subsecciones.forEach((sub, subIndex) => {
+          const subsectionId = `subsec-${partId}-${sectionIndex}-${subIndex}`;
           html += `<div class="explainer-subsection">`;
-          html += `<h4 class="explainer-subsection-title">${escHtml(sub.titulo_subseccion)}</h4>`;
+          html += `<h4 class="explainer-subsection-title" id="${subsectionId}">${escHtml(sub.titulo_subseccion)}</h4>`;
           html += `<div class="explainer-text">${renderMd(sub.explicacion_detallada)}</div>`;
           html += `</div>`;
         });
@@ -570,9 +571,11 @@ function renderExplainer(data) {
   }
   if (data.conexiones_contextuales && data.conexiones_contextuales.length > 0) {
     html += `<div class="explainer-section"><h3 class="explainer-section-title">Conexiones contextuales</h3>`;
-    data.conexiones_contextuales.forEach(cx => {
+    data.conexiones_contextuales.forEach((cx, cxIndex) => {
+      // Use a distinct section index for conexiones to avoid collisions
+      const subsectionId = `subsec-${partId}-cx-${cxIndex}`;
       html += `<div class="explainer-subsection">
-        <h4 class="explainer-subsection-title">${escHtml(cx.seccion_temario_relacionada)}</h4>
+        <h4 class="explainer-subsection-title" id="${subsectionId}">${escHtml(cx.seccion_temario_relacionada)}</h4>
         <div class="explainer-text">${renderMd(cx.descripcion_conexion)}</div>
       </div>`;
     });
@@ -717,7 +720,7 @@ export function renderTab(tabName, contenido) {
   }
 
   if (tabName === 'explicacion') {
-    contentEl.innerHTML = renderExplainer(data);
+    contentEl.innerHTML = renderExplainer(data, state.currentPartId);
   } else if (tabName === 'recorrido') {
     contentEl.innerHTML = renderRecorrido(data);
   } else {
