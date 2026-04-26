@@ -543,8 +543,8 @@ function initCopyLink() {
   btn.addEventListener('click', async () => {
     if (!state.currentPartId) return;
     const route = state.isSharedView && state.shareToken
-      ? { view: 'shared', shareToken: state.shareToken, partId: state.currentPartId, tab: state.activeTab }
-      : { view: 'project', projectId: state.currentProjectId, partId: state.currentPartId, tab: state.activeTab };
+      ? { view: 'shared', shareToken: state.shareToken, partId: state.currentPartId, tab: state.activeTab, subsectionId: state.currentSubsectionId }
+      : { view: 'project', projectId: state.currentProjectId, partId: state.currentPartId, tab: state.activeTab, subsectionId: state.currentSubsectionId };
     const url = location.origin + location.pathname + (typeof window.buildHash === 'function'
       ? window.buildHash(route)
       : location.hash || '#/');
