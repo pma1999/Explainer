@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes } from './projectView.js';
 import { initPWA } from './pwa.js';
 
 function saveViewState() {
@@ -525,6 +525,9 @@ function bootstrap() {
   initSharedCtaListeners();
   initObsidianExport();
   window.addEventListener('resize', updateSharedCtaFloatingVisibility);
+  window.addEventListener('resize', () => {
+    if (state.activeTab === 'explicacion') positionGhostRailNodes();
+  });
   initFullProjectExport();
   initReadingProgressBar();
   initSidebarMobile();

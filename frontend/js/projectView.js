@@ -653,6 +653,21 @@ function renderGhostRail(partId, explainerData) {
   panel.appendChild(rail);
 }
 
+export function positionGhostRailNodes() {
+  const rail = document.querySelector('.ghost-rail');
+  const panel = document.getElementById('panel-explicacion');
+  if (!rail || !panel) return;
+
+  const panelRect = panel.getBoundingClientRect();
+  rail.querySelectorAll('.ghost-rail-node').forEach(node => {
+    const target = document.getElementById(node.dataset.subsectionId);
+    if (!target) return;
+    const targetRect = target.getBoundingClientRect();
+    const top = targetRect.top - panelRect.top + panel.scrollTop;
+    node.style.top = top + 'px';
+  });
+}
+
 export function updateGhostRailActive(subsectionId) {
   const rail = document.querySelector('.ghost-rail');
   if (!rail) return;
@@ -944,6 +959,8 @@ export function renderTab(tabName, contenido) {
     contentEl.innerHTML = renderExplainer(data, state.currentPartId);
     renderGhostRail(state.currentPartId, data);
     renderSmartBar(state.currentPartId, data);
+    // Defer positioning until DOM is laid out
+    requestAnimationFrame(() => requestAnimationFrame(positionGhostRailNodes));
   } else if (tabName === 'recorrido') {
     contentEl.innerHTML = renderRecorrido(data);
   } else {
