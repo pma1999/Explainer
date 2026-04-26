@@ -108,6 +108,26 @@ describe('parseRoute', () => {
     });
   });
 
+  it('extracts subsectionId in project route', () => {
+    expect(parseRoute('#/p/abc/s/2/t/explicacion/u/subsec-2-0-1')).toEqual({
+      view: 'project',
+      projectId: 'abc',
+      partId: 2,
+      tab: 'explicacion',
+      subsectionId: 'subsec-2-0-1',
+    });
+  });
+
+  it('extracts subsectionId in shared route', () => {
+    expect(parseRoute('#/s/sharetoken/s/3/t/recorrido/u/subsec-3-1-0')).toEqual({
+      view: 'shared',
+      shareToken: 'sharetoken',
+      partId: 3,
+      tab: 'recorrido',
+      subsectionId: 'subsec-3-1-0',
+    });
+  });
+
   it('returns null for unknown routes', () => {
     expect(parseRoute('#/unknown')).toBeNull();
     expect(parseRoute('#/p')).toBeNull();
@@ -159,6 +179,26 @@ describe('buildHash', () => {
       partId: 2,
       tab: 'recorrido',
     })).toBe('#/s/tok/s/2/t/recorrido');
+  });
+
+  it('appends subsectionId in project hash', () => {
+    expect(buildHash({
+      view: 'project',
+      projectId: 'abc',
+      partId: 2,
+      tab: 'explicacion',
+      subsectionId: 'subsec-2-0-1',
+    })).toBe('#/p/abc/s/2/t/explicacion/u/subsec-2-0-1');
+  });
+
+  it('appends subsectionId in shared hash', () => {
+    expect(buildHash({
+      view: 'shared',
+      shareToken: 'sharetoken',
+      partId: 3,
+      tab: 'recorrido',
+      subsectionId: 'subsec-3-1-0',
+    })).toBe('#/s/sharetoken/s/3/t/recorrido/u/subsec-3-1-0');
   });
 
   it('returns #/ for missing projectId or shareToken', () => {

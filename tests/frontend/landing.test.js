@@ -8,6 +8,9 @@ import {
   normalizeWebUrl,
   isValidWebUrl,
   isExplainerProviderSupportedForSource,
+  isValidOpenRouterModel,
+  OPENROUTER_MODEL_MIMO,
+  OPENROUTER_MODEL_MIMO_PRO,
   validateExplainerProviderSelection,
 } from '../../frontend/js/landing.js';
 
@@ -89,6 +92,18 @@ describe('landing.js', () => {
     });
   });
 
+  describe('isValidOpenRouterModel', () => {
+    it('accepts both Xiaomi OpenRouter model choices', () => {
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
+    });
+
+    it('rejects unsupported OpenRouter model ids', () => {
+      expect(isValidOpenRouterModel('qwen/qwen3.6-plus')).toBe(false);
+      expect(isValidOpenRouterModel('')).toBe(false);
+    });
+  });
+
   describe('validateExplainerProviderSelection', () => {
     it('requires Gemini key for any execution', () => {
       expect(validateExplainerProviderSelection({
@@ -99,7 +114,7 @@ describe('landing.js', () => {
       })).toMatch(/Gemini/i);
     });
 
-    it('requires OpenRouter key when OpenRouter (Qwen) explainer is selected', () => {
+    it('requires OpenRouter key when OpenRouter (Xiaomi) explainer is selected', () => {
       expect(validateExplainerProviderSelection({
         sourceType: 'pdf',
         provider: 'openrouter',

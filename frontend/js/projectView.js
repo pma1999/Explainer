@@ -27,6 +27,12 @@ export function setSaveViewStateCallback(fn) {
   _saveViewState = fn;
 }
 
+// Tracks the partId actually rendered into panel-explicacion. Decoupled
+// from state.currentPartId because most callers pre-assign state.currentPartId
+// BEFORE calling selectPart — using state would make the idempotency guard
+// see a "match" when the panel still shows the previous part.
+let _renderedPartId = null;
+
 const SHARED_CTA_FLOATING_DISMISSED_KEY = 'explainer.sharedCtaFloatingDismissed';
 
 function isSidebarVisible() {
@@ -535,7 +541,7 @@ export function renderSidebarNav(project) {
   });
 }
 
-function renderExplainer(data) {
+function renderExplainer(data, partId) {
   if (data._format === 'markdown') {
     return `<div class="explainer-content">${renderMd(data.content || '')}</div>`;
   }
@@ -544,16 +550,17 @@ function renderExplainer(data) {
     html += `<div class="explainer-intro">${renderMd(data.introduccion)}</div>`;
   }
   if (data.desarrollo && data.desarrollo.length > 0) {
-    data.desarrollo.forEach(section => {
+    data.desarrollo.forEach((section, sectionIndex) => {
       html += `<div class="explainer-section">`;
       html += `<h3 class="explainer-section-title">${escHtml(section.titulo_seccion)}</h3>`;
       if (section.explicacion_introductoria) {
         html += `<div class="explainer-section-intro">${renderMd(section.explicacion_introductoria)}</div>`;
       }
       if (section.subsecciones && section.subsecciones.length > 0) {
-        section.subsecciones.forEach(sub => {
+        section.subsecciones.forEach((sub, subIndex) => {
+          const subsectionId = `subsec-${partId}-${sectionIndex}-${subIndex}`;
           html += `<div class="explainer-subsection">`;
-          html += `<h4 class="explainer-subsection-title">${escHtml(sub.titulo_subseccion)}</h4>`;
+          html += `<h4 class="explainer-subsection-title" id="${subsectionId}">${escHtml(sub.titulo_subseccion)}</h4>`;
           html += `<div class="explainer-text">${renderMd(sub.explicacion_detallada)}</div>`;
           html += `</div>`;
         });
@@ -570,15 +577,283 @@ function renderExplainer(data) {
   }
   if (data.conexiones_contextuales && data.conexiones_contextuales.length > 0) {
     html += `<div class="explainer-section"><h3 class="explainer-section-title">Conexiones contextuales</h3>`;
-    data.conexiones_contextuales.forEach(cx => {
+    data.conexiones_contextuales.forEach((cx, cxIndex) => {
+      // Use a distinct section index for conexiones to avoid collisions
+      const subsectionId = `subsec-${partId}-cx-${cxIndex}`;
       html += `<div class="explainer-subsection">
-        <h4 class="explainer-subsection-title">${escHtml(cx.seccion_temario_relacionada)}</h4>
+        <h4 class="explainer-subsection-title" id="${subsectionId}">${escHtml(cx.seccion_temario_relacionada)}</h4>
         <div class="explainer-text">${renderMd(cx.descripcion_conexion)}</div>
       </div>`;
     });
     html += `</div>`;
   }
   return html;
+}
+
+function renderGhostRail(partId, explainerData) {
+  const panel = document.getElementById('panel-explicacion');
+  if (!panel) return;
+
+  // Remove existing rail (idempotent re-render)
+  const existing = panel.querySelector('.ghost-rail');
+  if (existing) existing.remove();
+
+  if (!explainerData || explainerData._format === 'markdown') return;
+
+  // Build flat list of subsections in DOM order
+  const subsections = [];
+  if (Array.isArray(explainerData.desarrollo)) {
+    explainerData.desarrollo.forEach((section, sIdx) => {
+      if (Array.isArray(section.subsecciones)) {
+        section.subsecciones.forEach((sub, subIdx) => {
+          subsections.push({
+            id: `subsec-${partId}-${sIdx}-${subIdx}`,
+            title: sub.titulo_subseccion || '',
+          });
+        });
+      }
+    });
+  }
+  if (Array.isArray(explainerData.conexiones_contextuales)) {
+    explainerData.conexiones_contextuales.forEach((cx, cxIdx) => {
+      subsections.push({
+        id: `subsec-${partId}-cx-${cxIdx}`,
+        title: cx.seccion_temario_relacionada || '',
+      });
+    });
+  }
+  if (subsections.length === 0) return;
+
+  const rail = document.createElement('div');
+  rail.className = 'ghost-rail';
+  rail.setAttribute('aria-label', 'Navegación de subsecciones');
+
+  const line = document.createElement('div');
+  line.className = 'ghost-rail-line';
+  rail.appendChild(line);
+
+  const completed = new Set(state.currentProject?.reading_progress?.completed_subsections || []);
+
+  subsections.forEach((sub, i) => {
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = 'ghost-rail-node';
+    if (completed.has(sub.id)) {
+      node.classList.add('is-read');
+    }
+    node.dataset.subsectionId = sub.id;
+    node.setAttribute('aria-label', `Subsección ${i + 1}: ${sub.title}`);
+    node.style.animationDelay = `${i * 40}ms`;
+
+    const label = document.createElement('span');
+    label.className = 'ghost-rail-label';
+    label.textContent = sub.title;
+    node.appendChild(label);
+
+    node.addEventListener('click', () => {
+      const target = document.getElementById(sub.id);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+
+    rail.appendChild(node);
+  });
+
+  // Insert rail at the end of panel so it overlays content (CSS in Task 8)
+  panel.appendChild(rail);
+}
+
+export function positionGhostRailNodes() {
+  const rail = document.querySelector('.ghost-rail');
+  const panel = document.getElementById('panel-explicacion');
+  if (!rail || !panel) return;
+
+  const panelRect = panel.getBoundingClientRect();
+  rail.querySelectorAll('.ghost-rail-node').forEach(node => {
+    const target = document.getElementById(node.dataset.subsectionId);
+    if (!target) return;
+    const targetRect = target.getBoundingClientRect();
+    const top = targetRect.top - panelRect.top + panel.scrollTop;
+    node.style.top = top + 'px';
+  });
+}
+
+export function updateGhostRailActive(subsectionId) {
+  const rail = document.querySelector('.ghost-rail');
+  if (!rail) return;
+  rail.querySelectorAll('.ghost-rail-node').forEach((node) => {
+    const isActive = node.dataset.subsectionId === subsectionId;
+    node.classList.toggle('active', isActive);
+    const label = node.querySelector('.ghost-rail-label');
+    if (label) label.classList.toggle('active', isActive);
+  });
+}
+
+/**
+ * Refreshes only the .is-read class on existing rail nodes from the current
+ * reading_progress.completed_subsections. Does NOT rebuild the rail and does
+ * NOT touch any other DOM — safe to call from a background server refetch
+ * without disturbing scroll position or active subsection.
+ */
+export function refreshGhostRailReadState() {
+  const rail = document.querySelector('.ghost-rail');
+  if (!rail) return;
+  const completed = new Set(
+    state.currentProject?.reading_progress?.completed_subsections || [],
+  );
+  rail.querySelectorAll('.ghost-rail-node').forEach((node) => {
+    const id = node.dataset.subsectionId;
+    if (!id) return;
+    node.classList.toggle('is-read', completed.has(id));
+  });
+}
+
+function renderSmartBar(partId, explainerData) {
+  const content = document.getElementById('part-content');
+  if (!content) return;
+
+  // Remove existing
+  const existing = content.querySelector('.smart-bar');
+  if (existing) existing.remove();
+
+  if (!explainerData || explainerData._format === 'markdown') return;
+
+  // Build flat list (same logic as rail)
+  const subsections = [];
+  if (Array.isArray(explainerData.desarrollo)) {
+    explainerData.desarrollo.forEach((section, sIdx) => {
+      if (Array.isArray(section.subsecciones)) {
+        section.subsecciones.forEach((sub, subIdx) => {
+          subsections.push({
+            id: `subsec-${partId}-${sIdx}-${subIdx}`,
+            title: sub.titulo_subseccion || '',
+          });
+        });
+      }
+    });
+  }
+  if (Array.isArray(explainerData.conexiones_contextuales)) {
+    explainerData.conexiones_contextuales.forEach((cx, cxIdx) => {
+      subsections.push({
+        id: `subsec-${partId}-cx-${cxIdx}`,
+        title: cx.seccion_temario_relacionada || '',
+      });
+    });
+  }
+  if (subsections.length === 0) return;
+
+  const bar = document.createElement('div');
+  bar.className = 'smart-bar';
+  bar.setAttribute('role', 'navigation');
+  bar.setAttribute('aria-label', 'Navegación de subsección');
+  bar.dataset.count = String(subsections.length);
+  bar.innerHTML = `
+    <div class="smart-bar-progress"></div>
+    <button type="button" class="smart-bar-peek-hitarea" aria-label="Mostrar navegación de subsecciones"></button>
+    <button type="button" class="smart-bar-prev" aria-label="Subsección anterior">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <button type="button" class="smart-bar-title" aria-label="Abrir índice de subsecciones">
+      <span class="smart-bar-title-text">—</span>
+    </button>
+    <button type="button" class="smart-bar-next" aria-label="Subsección siguiente">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  `;
+
+  const prevBtn = bar.querySelector('.smart-bar-prev');
+  const nextBtn = bar.querySelector('.smart-bar-next');
+  const titleBtn = bar.querySelector('.smart-bar-title');
+  const peekBtn = bar.querySelector('.smart-bar-peek-hitarea');
+
+  prevBtn.addEventListener('click', () => navigateSubsection(-1));
+  nextBtn.addEventListener('click', () => navigateSubsection(1));
+  titleBtn.addEventListener('click', () => openSubsectionSheet(subsections));
+  peekBtn.addEventListener('click', () => {
+    bar.classList.remove('retracted');
+    bar.dataset.manualExpandedUntil = String(Date.now() + 1200);
+  });
+
+  content.appendChild(bar);
+  updateSmartBarText(state.currentSubsectionId);
+}
+
+export function updateSmartBarText(subsectionId) {
+  const bar = document.querySelector('.smart-bar');
+  if (!bar) return;
+  const titleText = bar.querySelector('.smart-bar-title-text');
+  const prevBtn = bar.querySelector('.smart-bar-prev');
+  const nextBtn = bar.querySelector('.smart-bar-next');
+
+  const subsections = [];
+  const rail = document.querySelector('.ghost-rail');
+  if (rail) {
+    rail.querySelectorAll('.ghost-rail-node').forEach((n) => {
+      subsections.push({
+        id: n.dataset.subsectionId,
+        title: n.querySelector('.ghost-rail-label')?.textContent || '',
+      });
+    });
+  }
+
+  const idx = subsections.findIndex((s) => s.id === subsectionId);
+  if (titleText) {
+    titleText.textContent = idx !== -1 ? subsections[idx].title : '—';
+  }
+  if (prevBtn) prevBtn.disabled = idx <= 0;
+  if (nextBtn) nextBtn.disabled = idx === -1 || idx >= subsections.length - 1;
+
+  // Update progress hairline
+  const progress = bar.querySelector('.smart-bar-progress');
+  if (progress && subsections.length > 0) {
+    const pct = idx >= 0 ? ((idx + 1) / subsections.length) * 100 : 0;
+    progress.style.width = pct + '%';
+  }
+}
+
+function navigateSubsection(delta) {
+  const subsections = [];
+  document.querySelectorAll('.ghost-rail-node').forEach((n) => {
+    subsections.push(n.dataset.subsectionId);
+  });
+  const idx = subsections.findIndex((id) => id === state.currentSubsectionId);
+  const next = subsections[idx + delta];
+  if (next) {
+    const target = document.getElementById(next);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function openSubsectionSheet(subsections) {
+  // Simple sheet using existing modal/overlay patterns in the app
+  const overlay = document.createElement('div');
+  overlay.className = 'subsection-sheet-overlay';
+  const sheet = document.createElement('div');
+  sheet.className = 'subsection-sheet';
+  sheet.innerHTML = `<div class="subsection-sheet-handle"></div><div class="subsection-sheet-list"></div>`;
+  const list = sheet.querySelector('.subsection-sheet-list');
+
+  subsections.forEach((sub, i) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'subsection-sheet-item';
+    if (sub.id === state.currentSubsectionId) item.classList.add('active');
+    item.innerHTML = `<span class="subsection-sheet-num">${i + 1}</span><span class="subsection-sheet-label">${escHtml(sub.title)}</span>`;
+    item.addEventListener('click', () => {
+      const target = document.getElementById(sub.id);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      overlay.remove();
+    });
+    list.appendChild(item);
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
 }
 
 function renderRecorrido(data) {
@@ -717,7 +992,11 @@ export function renderTab(tabName, contenido) {
   }
 
   if (tabName === 'explicacion') {
-    contentEl.innerHTML = renderExplainer(data);
+    contentEl.innerHTML = renderExplainer(data, state.currentPartId);
+    renderGhostRail(state.currentPartId, data);
+    renderSmartBar(state.currentPartId, data);
+    // Defer positioning until DOM is laid out
+    requestAnimationFrame(() => requestAnimationFrame(positionGhostRailNodes));
   } else if (tabName === 'recorrido') {
     contentEl.innerHTML = renderRecorrido(data);
   } else {
@@ -739,6 +1018,26 @@ export function activateTab(tabName) {
 }
 
 export function selectPart(partId) {
+  // Idempotent: if THIS exact partId is already rendered into panel-explicacion,
+  // bail out. Re-running selectPart for the same part would otherwise wipe
+  // scrollTop, currentSubsectionId, the ghost rail / smart-bar, and re-fire
+  // the observer — destroying any restored scroll position. We track the
+  // rendered partId in a module variable instead of state.currentPartId
+  // because most callers pre-assign state.currentPartId before calling here,
+  // which would defeat a state-based guard.
+  if (
+    _renderedPartId === partId
+    && state.currentProject
+    && document.querySelector('#panel-explicacion .explainer-content, #panel-explicacion .explainer-section')
+  ) {
+    return;
+  }
+
+  // Clean up subsection UI from previous part
+  document.querySelector('.ghost-rail')?.remove();
+  document.querySelector('.smart-bar')?.remove();
+  state.currentSubsectionId = null;
+
   state.lastPartChangeAt = Date.now();
   state.currentPartId = partId;
 
@@ -798,6 +1097,12 @@ export function selectPart(partId) {
   updateMobileHeader();
   updateToggleCompleteButton();
 
+  // Trigger observer setup after content is rendered
+  if (typeof window.initSubsectionObserver === 'function') {
+    setTimeout(window.initSubsectionObserver, 0);
+  }
+
+  _renderedPartId = partId;
   saveViewState();
 }
 
@@ -900,6 +1205,11 @@ export async function handleReformat() {
 }
 
 export function renderProjectView(project) {
+  // Any time we (re-)render a project's layout, force the next selectPart()
+  // call to do a full render — the panel-explicacion may still hold content
+  // from a previous project (renderProjectView itself does not clear it).
+  _renderedPartId = null;
+
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
 
@@ -1017,4 +1327,3 @@ export function resetDescriptionExpand() {
     btn.setAttribute('aria-label', 'Ver más');
   }
 }
-

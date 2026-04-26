@@ -34,6 +34,7 @@ from backend.supabase_data import (
     list_projects_summary,
     update_project,
     set_section_read_status,
+    update_subsection_progress,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -56,17 +57,10 @@ from backend.gemini_model_routing import (
     MODEL_CLASSIFIER,
     MODEL_EXPLAINER,
     MODEL_SEGMENTADOR,
-    MODEL_SUBPART_SCOPE_AUDITOR,
 )
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
 from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
-from backend.segmentation_tema_coverage import (
-    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
-    build_tema_coverage_retry_suffix,
-    validate_tema_partition,
-)
 from backend.agents.page_classifier import run_page_classifier
 from backend.segmentation_page_coverage import (
     MAX_PAGE_COVERAGE_ATTEMPTS,
@@ -108,13 +102,8 @@ from backend.url_extraction import (
 from backend.subpart_scope import (
     build_subpart_negative_scope_block,
     build_subpart_scope_contract_block,
-    build_subpart_scope_summary,
 )
-from backend.subpart_scope_auditor import (
-    MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS,
-    build_subpart_scope_rewrite_brief,
-    run_subpart_scope_auditor,
-)
+from backend.project_progress import handle_update_subsection_progress
 
 
 # Configurar logging al importar el módulo
@@ -125,17 +114,33 @@ logger = get_logger("main")
 MAX_CONCURRENT_PARTS = 5
 
 ExplainerProvider = Literal["gemini", "openrouter"]
+OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
 EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
+OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
+    {
+        "xiaomi/mimo-v2.5-pro",
+        "xiaomi/mimo-v2.5",
+    }
+)
 
 
 class ProcessProjectRequest(BaseModel):
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI
+    openrouter_model: OpenRouterExplainerModel | None = None
 
 
-def _resolve_explainer_model(explainer_provider: ExplainerProvider) -> str:
+def _resolve_explainer_model(
+    explainer_provider: ExplainerProvider,
+    openrouter_model: OpenRouterExplainerModel | str | None = None,
+) -> str:
     if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
+        if openrouter_model:
+            model = str(openrouter_model).strip()
+            if model not in OPENROUTER_EXPLAINER_MODELS:
+                raise ValueError(f"Modelo OpenRouter no soportado: {model}")
+            return model
         return OPENROUTER_EXPLAINER_MODEL
     return MODEL_AGENTS
 
@@ -514,6 +519,19 @@ async def api_update_progress(
     if not updated:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return updated
+
+
+@app.patch("/api/projects/{project_id}/progress/subsection")
+async def api_update_subsection_progress(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    body: dict = Body(...),
+):
+    """Update subsection progress. Body: {
+        subsection_id: str, part_id: int,
+        completed?: bool, is_last_read?: bool
+    }."""
+    return handle_update_subsection_progress(user_id, project_id, body)
 
 
 @app.delete("/api/projects/{project_id}")
@@ -1131,17 +1149,17 @@ def _build_subpart_pdf_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{toc_with_marker}\n\n"
-        f"---\n\n"
-        f"{handoff_body}\n\n"
-        f"---\n\n"
-        f"{scope}\n\n"
-        f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
         f"---\n\n"
         f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
@@ -1176,17 +1194,17 @@ def _build_subpart_text_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{toc_with_marker}\n\n"
-        f"---\n\n"
-        f"{handoff_body}\n\n"
-        f"---\n\n"
-        f"{scope}\n\n"
-        f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
         f"---\n\n"
         f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
@@ -1215,58 +1233,20 @@ def _build_subpart_youtube_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{toc_with_marker}\n\n"
-        f"---\n\n"
-        f"{handoff_body}\n\n"
-        f"---\n\n"
-        f"{scope}\n\n"
-        f"---\n\n"
         f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
         f"---\n\n"
+        f"{toc_with_marker}\n\n"
+        f"---\n\n"
+        f"{handoff_body}\n\n"
+        f"---\n\n"
+        f"{scope}\n\n"
+        f"---\n\n"
         f"IDENTIFICACIÓN LEGIBLE DE APOYO (texto del segmentador):\n{sp_identificacion}"
     )
-
-
-async def _run_subpart_explainer_with_scope_audit(
-    *,
-    run_explainer_call: Callable[[str], Awaitable[tuple[dict[str, Any], Any]]],
-    initial_prompt: str,
-    audit_context_builder: Callable[[], dict[str, str]],
-    audit_api_key: str,
-    audit_model: str,
-) -> tuple[dict[str, Any], Any, list[Any]]:
-    prompt = initial_prompt
-    reviewer_usages: list[Any] = []
-
-    for _ in range(MAX_SUBPART_SCOPE_AUDIT_ATTEMPTS):
-        result, usage = await run_explainer_call(prompt)
-        ctx = audit_context_builder()
-        report, review_usage = await asyncio.to_thread(
-            run_subpart_scope_auditor,
-            api_key=audit_api_key,
-            current_subpart_summary=ctx["current"],
-            previous_subpart_summary=ctx["previous"],
-            next_subpart_summary=ctx["next"],
-            desarrollo_payload=result,
-            model=audit_model,
-        )
-        reviewer_usages.append(review_usage)
-        if report.is_valid:
-            return result, usage, reviewer_usages
-        rewrite_brief = build_subpart_scope_rewrite_brief(
-            report,
-            failed_desarrollo_payload=result,
-            current_subpart_summary=ctx["current"],
-            previous_subpart_summary=ctx["previous"],
-            next_subpart_summary=ctx["next"],
-        )
-        prompt = f"{initial_prompt}\n\n{rewrite_brief}"
-
-    raise RuntimeError("El auditor de alcance de subparte agotó sus reintentos.")
 
 
 def _parse_text_source_evaluation(segmentation: dict[str, object]) -> dict[str, object]:
@@ -1370,6 +1350,7 @@ async def _process_project(
     project_id: str,
     user_id: str,
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI,
+    openrouter_model: OpenRouterExplainerModel | str | None = None,
 ) -> None:
     process_start_time = time.time()
     pdf_temp_path = None
@@ -1387,7 +1368,12 @@ async def _process_project(
     resolved_source_url = ""
     source_metadata: dict[str, object] = {}
     use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
-    explainer_model = _resolve_explainer_model(explainer_provider)
+    try:
+        explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
+    except ValueError as exc:
+        await send_event(project_id, {"type": "error", "message": str(exc)})
+        update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
+        return
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -1446,7 +1432,7 @@ async def _process_project(
                         "type": "error",
                         "message": (
                             "No hay API key de OpenRouter configurada. "
-                            "Guárdala en Ajustes para usar MiniMax en el explainer."
+                            "Guárdala en Ajustes para usar Xiaomi en el explainer."
                         ),
                     },
                 )
@@ -1750,11 +1736,10 @@ async def _process_project(
                     )
                 )
 
-        # Fase de segmentación (con validación MECE de temas + cobertura de páginas y reintentos)
+        # Fase de segmentación (con validación de cobertura de páginas y reintentos)
         logger.info("[Process] Iniciando segmentación del documento")
         seg_start = time.time()
         segmentation: dict | None = None
-        tema_report = None
         page_report = None
         is_pdf_seg = source_type == "pdf"
         content_pages_prefix = (
@@ -1762,32 +1747,20 @@ async def _process_project(
             if is_pdf_seg and content_page_set
             else ""
         )
-        MAX_COMBINED_ATTEMPTS = max(MAX_SEGMENTATION_COVERAGE_ATTEMPTS, MAX_PAGE_COVERAGE_ATTEMPTS)
+        MAX_COMBINED_ATTEMPTS = MAX_PAGE_COVERAGE_ATTEMPTS
 
         for seg_attempt in range(MAX_COMBINED_ATTEMPTS):
             if seg_attempt == 0:
                 seg_description = content_pages_prefix + (project["description"].strip() or DEFAULT_DESCRIPTION)
             else:
                 assert segmentation is not None
-                correction_parts = []
-                if tema_report is not None and not tema_report.is_valid:
-                    correction_parts.append(
-                        build_tema_coverage_retry_suffix(
-                            attempt=seg_attempt,
-                            segmentation=segmentation,
-                            report=tema_report,
-                        )
-                    )
-                if page_report is not None and not page_report.is_valid:
-                    correction_parts.append(
-                        build_page_coverage_retry_suffix(
-                            attempt=seg_attempt,
-                            segmentation=segmentation,
-                            report=page_report,
-                            content_page_set=content_page_set,
-                        )
-                    )
-                correction_suffix = "\n\n".join(correction_parts)
+                assert page_report is not None and not page_report.is_valid
+                correction_suffix = build_page_coverage_retry_suffix(
+                    attempt=seg_attempt,
+                    segmentation=segmentation,
+                    report=page_report,
+                    content_page_set=content_page_set,
+                )
                 base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
                 seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
@@ -1804,55 +1777,41 @@ async def _process_project(
             await _locked_apply_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
-            tema_report = validate_tema_partition(segmentation)
             page_report = (
                 validate_page_coverage(segmentation, content_page_set)
                 if is_pdf_seg
                 else None
             )
 
-            both_valid = tema_report.is_valid and (page_report is None or page_report.is_valid)
+            both_valid = page_report is None or page_report.is_valid
 
             if both_valid:
-                if tema_report.empty_temas_inventory:
-                    logger.warning(
-                        "[Process] Segmentación sin temas_identificados; se omite validación MECE de temas",
-                        extra={"project_id": project_id, "seg_attempt": seg_attempt},
-                    )
                 if seg_attempt > 0:
                     logger.info(
-                        "[Process] Segmentación corregida tras reintento (temas + páginas)",
+                        "[Process] Segmentación corregida tras reintento (páginas)",
                         extra={"project_id": project_id, "seg_attempt": seg_attempt},
                     )
                 break
 
             logger.warning(
-                "[Process] Validación fallida; se reintentará el segmentador si quedan intentos",
+                "[Process] Validación de páginas fallida; se reintentará el segmentador si quedan intentos",
                 extra={
                     "project_id": project_id,
                     "seg_attempt": seg_attempt,
-                    "tema_valid": tema_report.is_valid,
-                    "page_valid": page_report.is_valid if page_report else True,
-                    "tema_missing": len(tema_report.missing),
-                    "tema_duplicates": len(tema_report.duplicates),
-                    "page_part_errors": len(page_report.part_errors) if page_report else 0,
-                    "page_subpart_errors": len(page_report.subpart_errors) if page_report else 0,
+                    "page_valid": False,
+                    "page_part_errors": len(page_report.part_errors),
+                    "page_subpart_errors": len(page_report.subpart_errors),
                 },
             )
         else:
             assert segmentation is not None
             error_bits = []
-            if tema_report and not tema_report.is_valid:
-                if tema_report.missing:
-                    error_bits.append(f"{len(tema_report.missing)} tema(s) sin asignar")
-                if tema_report.duplicates:
-                    error_bits.append(f"{len(tema_report.duplicates)} tema(s) duplicados")
             if page_report and not page_report.is_valid:
                 if page_report.part_errors:
                     error_bits.append(f"{len(page_report.part_errors)} error(es) de rango en partes")
                 if page_report.subpart_errors:
                     error_bits.append(f"{len(page_report.subpart_errors)} error(es) de rango en subpartes")
-            detail = "; ".join(error_bits) if error_bits else "inconsistencias en segmentación"
+            detail = "; ".join(error_bits) if error_bits else "inconsistencias en rangos de página"
             logger.error(
                 "[Process] Segmentación abortada tras agotar reintentos",
                 extra={
@@ -1868,24 +1827,22 @@ async def _process_project(
                     "segmentation": segmentation,
                     "partes_contenido": {},
                     "status": "error",
-                    "error_message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
+                    "error_message": SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
                 },
             )
             await send_event(
                 project_id,
-                {"type": "error", "message": SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE},
+                {"type": "error", "message": SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE},
             )
             return
 
         seg_duration = (time.time() - seg_start) * 1000
 
         num_partes = len(segmentation.get("partes", []))
-        temas_identificados = len(segmentation.get("temas_identificados", []))
         logger.info(
-            f"[Process] Segmentación completada: {num_partes} partes, {temas_identificados} temas en {int(seg_duration)}ms",
+            f"[Process] Segmentación completada: {num_partes} partes en {int(seg_duration)}ms",
             extra={
                 "num_partes": num_partes,
-                "temas_identificados": temas_identificados,
                 "segmentation_duration_ms": int(seg_duration),
             }
         )
@@ -2252,72 +2209,43 @@ async def _process_project(
                     explainer_fn_or_sp = run_subpart_explainer_or
                     explainer_fn_sp = run_subpart_explainer
 
-                    def _make_audited_subpart_task(idx: int):
+                    def _make_subpart_task(idx: int):
                         sp_prompt = subpart_prompts[idx]
-                        subparte = subpartes[idx] if idx < len(subpartes) else None
-                        canonical_source_path = mistral_pdf_context.source_pdf_path if use_or_canonical else None
-                        canonical_cache_entry = mistral_pdf_context.cache_entry if use_or_canonical else None
-                        canonical_page_scope = tuple(openrouter_page_scopes[idx]) if use_or_canonical else ()
-
-                        async def _audited():
-                            def _audit_context() -> dict[str, str]:
-                                previous_sp, next_sp = _adjacent_subparts_for_audit(
-                                    partes_segmentadas=partes_segmentadas,
-                                    current_parte=parte,
-                                    subpart_idx=idx,
+                        if use_or:
+                            if use_or_canonical:
+                                return asyncio.to_thread(
+                                    explainer_fn_or_sp,
+                                    mistral_pdf_context.source_pdf_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    "application/pdf",
+                                    openrouter_api_key,
+                                    mistral_pdf_context.cache_entry,
+                                    tuple(openrouter_page_scopes[idx]),
                                 )
-                                return {
-                                    "current": build_subpart_scope_summary(subparte) if subparte else "",
-                                    "previous": build_subpart_scope_summary(previous_sp) if previous_sp else "",
-                                    "next": build_subpart_scope_summary(next_sp) if next_sp else "",
-                                }
-
-                            async def _call(prompt: str) -> tuple[dict[str, Any], Any]:
-                                if use_or:
-                                    if use_or_canonical:
-                                        return await asyncio.to_thread(
-                                            explainer_fn_or_sp,
-                                            canonical_source_path,
-                                            prompt,
-                                            explainer_model,
-                                            "application/pdf",
-                                            openrouter_api_key,
-                                            canonical_cache_entry,
-                                            canonical_page_scope,
-                                        )
-                                    return await asyncio.to_thread(
-                                        explainer_fn_or_sp,
-                                        segment_temp_path,
-                                        prompt,
-                                        explainer_model,
-                                        agent_mime_type,
-                                        openrouter_api_key,
-                                    )
-                                return await asyncio.to_thread(
-                                    explainer_fn_sp,
-                                    api_key,
-                                    agent_file_uri,
-                                    prompt,
-                                    MODEL_AGENTS,
-                                    agent_mime_type,
-                                )
-
-                            return await _run_subpart_explainer_with_scope_audit(
-                                run_explainer_call=_call,
-                                initial_prompt=sp_prompt,
-                                audit_context_builder=_audit_context,
-                                audit_api_key=api_key,
-                                audit_model=MODEL_SUBPART_SCOPE_AUDITOR,
+                            return asyncio.to_thread(
+                                explainer_fn_or_sp,
+                                segment_temp_path,
+                                sp_prompt,
+                                explainer_model,
+                                agent_mime_type,
+                                openrouter_api_key,
                             )
-
-                        return _audited()
+                        return asyncio.to_thread(
+                            explainer_fn_sp,
+                            api_key,
+                            agent_file_uri,
+                            sp_prompt,
+                            MODEL_AGENTS,
+                            agent_mime_type,
+                        )
 
                     if use_or_canonical:
                         if len(openrouter_page_scopes) != len(subpart_prompts):
                             raise RuntimeError(
                                 "Las páginas OpenRouter no coinciden con el número de subprompts generados."
                             )
-                    parallel_explainer = [_make_audited_subpart_task(i) for i in range(num_subparts)]
+                    parallel_explainer = [_make_subpart_task(i) for i in range(num_subparts)]
                 elif use_or:
                     explainer_fn_or = run_explainer_or
                     if use_or_canonical:
@@ -2378,10 +2306,7 @@ async def _process_project(
                             extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
                         )
                     else:
-                        if use_subpart_explainer:
-                            sp_data, _, _ = sp_result
-                        else:
-                            sp_data, _ = sp_result
+                        sp_data, _ = sp_result
                         subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
                 # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2402,29 +2327,13 @@ async def _process_project(
                 async with usage_lock:
                     for i, sp_result in enumerate(subpart_results):
                         if not isinstance(sp_result, Exception):
-                            if use_subpart_explainer:
-                                _sp_data, sp_usage, reviewer_usages = sp_result
-                                if sp_usage:
-                                    _update_usage(
-                                        sp_usage,
-                                        phase=f"part_{part_id}_explainer_sp{i+1}",
-                                        cost_model=explainer_model,
-                                    )
-                                for j, ru in enumerate(reviewer_usages):
-                                    if ru:
-                                        _update_usage(
-                                            ru,
-                                            phase=f"part_{part_id}_scope_audit_sp{i+1}_a{j+1}",
-                                            cost_model=MODEL_SUBPART_SCOPE_AUDITOR,
-                                        )
-                            else:
-                                sp_data, sp_usage = sp_result
-                                if sp_usage:
-                                    _update_usage(
-                                        sp_usage,
-                                        phase=f"part_{part_id}_explainer_sp{i+1}",
-                                        cost_model=explainer_model,
-                                    )
+                            _, sp_usage = sp_result
+                            if sp_usage:
+                                _update_usage(
+                                    sp_usage,
+                                    phase=f"part_{part_id}_explainer_sp{i+1}",
+                                    cost_model=explainer_model,
+                                )
                     if usage_rec:
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
                     if usage_res:
@@ -2790,7 +2699,8 @@ async def api_process_project(
 ):
     """Start processing a project using the user's own API key (BYOK)."""
     explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
-    explainer_model = _resolve_explainer_model(explainer_provider)
+    openrouter_model = payload.openrouter_model if payload else None
+    explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
         extra={
@@ -2798,6 +2708,7 @@ async def api_process_project(
             "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id,
             "endpoint": "POST /api/projects/{project_id}/process",
             "explainer_provider": explainer_provider,
+            "explainer_model": explainer_model,
         }
     )
 
@@ -2827,7 +2738,7 @@ async def api_process_project(
             logger.warning(f"[API] Usuario sin API key OpenRouter configurada: {user_id[:8]}...")
             raise HTTPException(
                 status_code=400,
-                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar MiniMax en el explainer.",
+                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar Xiaomi en el explainer.",
             )
         if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
             logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")
@@ -2848,8 +2759,13 @@ async def api_process_project(
             "explainer_model": explainer_model,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider)
-    return {"ok": True, "status": "started", "explainer_provider": explainer_provider}
+    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider, openrouter_model)
+    return {
+        "ok": True,
+        "status": "started",
+        "explainer_provider": explainer_provider,
+        "explainer_model": explainer_model,
+    }
 
 
 @app.get("/api/projects/{project_id}/events")

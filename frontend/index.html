@@ -227,9 +227,28 @@
                 <input type="radio" name="explainer-provider" id="explainer-provider-openrouter" value="openrouter" />
                 <span class="provider-card-main">
                   <span class="provider-card-title">OpenRouter</span>
-                  <span class="provider-card-sub">Qwen 3.6 Plus (qwen/qwen3.6-plus)</span>
+                  <span class="provider-card-sub">Xiaomi MiMo V2.5 Pro o MiMo V2.5</span>
                 </span>
               </label>
+            </div>
+            <div class="openrouter-model-panel hidden" id="openrouter-model-panel">
+              <label class="form-label">Modelo OpenRouter</label>
+              <div class="provider-grid openrouter-model-grid" id="openrouter-model-group">
+                <label class="provider-card" id="openrouter-model-card-pro" for="openrouter-model-pro">
+                  <input type="radio" name="openrouter-model" id="openrouter-model-pro" value="xiaomi/mimo-v2.5-pro" checked />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">MiMo V2.5 Pro</span>
+                    <span class="provider-card-sub">Más pulido y preciso. ID: xiaomi/mimo-v2.5-pro.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="openrouter-model-card-standard" for="openrouter-model-standard">
+                  <input type="radio" name="openrouter-model" id="openrouter-model-standard" value="xiaomi/mimo-v2.5" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">MiMo V2.5</span>
+                    <span class="provider-card-sub">Más completo y barato. ID: xiaomi/mimo-v2.5.</span>
+                  </span>
+                </label>
+              </div>
             </div>
             <p class="input-hint" id="explainer-provider-hint">
               La explicación usará Gemini. Segmentación, recorrido, recursos y formateo siguen funcionando con Gemini.
@@ -844,7 +863,7 @@
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de OpenRouter <span class="settings-badge-optional">Opcional</span></h4>
           <p class="settings-description">
-            Si la configuras, podrás elegir <strong>Qwen (qwen/qwen3.6-plus)</strong> para el explainer en cada ejecución.
+            Si la configuras, podrás elegir <strong>Xiaomi MiMo V2.5 Pro</strong> o <strong>Xiaomi MiMo V2.5</strong> para el explainer en cada ejecución.
             El OCR de PDFs usará <strong>Mistral nativo</strong> y el resto de agentes (segmentación, recorrido, recursos y formateo)
             siguen usando Gemini.
             Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
@@ -857,7 +876,7 @@
 
           <div id="openrouter-key-set" class="api-key-status hidden">
             <div class="status-badge status-success">✓ Configurada</div>
-            <p class="status-text">Qwen vía OpenRouter queda disponible para seleccionarlo al crear el proyecto.</p>
+            <p class="status-text">Xiaomi vía OpenRouter queda disponible para seleccionarlo al crear el proyecto.</p>
           </div>
 
           <form id="form-openrouter-key" class="settings-form">
@@ -880,7 +899,7 @@
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de Mistral <span class="settings-badge-optional">Necesaria para PDF + OpenRouter</span></h4>
           <p class="settings-description">
-            Si quieres usar <strong>Qwen vía OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
+            Si quieres usar <strong>Xiaomi vía OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
             Obtén tu API key en <a href="https://console.mistral.ai/" target="_blank" rel="noopener">console.mistral.ai</a>.
           </p>
 
@@ -941,6 +960,9 @@
 
   <!-- ===== TOAST ===== -->
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Subsection announcer (live region for screen readers) -->
+  <span id="subsection-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></span>
 
   <!-- marked.js: Markdown renderer for formatted explainer content -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>

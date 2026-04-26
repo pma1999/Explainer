@@ -31,6 +31,20 @@ PRICING = {
         "output_small": 0.29,  # $0.29 / 1M tokens
         "output_large": 0.29,
     },
+    "xiaomi/mimo-v2.5-pro": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 1.00,   # $1.00 / 1M tokens
+        "input_large": 1.00,
+        "output_small": 3.00,  # $3.00 / 1M tokens
+        "output_large": 3.00,
+    },
+    "xiaomi/mimo-v2.5": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 0.40,   # $0.40 / 1M tokens
+        "input_large": 0.40,
+        "output_small": 2.00,  # $2.00 / 1M tokens
+        "output_large": 2.00,
+    },
     "minimax/minimax-m2.7": {
         "input_small": 0.30,   # $0.30 / 1M tokens
         "input_large": 0.30,
@@ -45,6 +59,13 @@ PRICING = {
         "input_large": 1.30,
         "output_small": 1.95,
         "output_large": 3.90,
+    },
+    "deepseek/deepseek-v4-flash": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 0.14,
+        "input_large": 0.14,
+        "output_small": 0.28,
+        "output_large": 0.28,
     },
     # Valores por defecto para otros modelos
     "default": {

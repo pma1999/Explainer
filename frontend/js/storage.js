@@ -252,6 +252,37 @@ export function getFirstIncompletePart(project) {
   return partes.find((p) => !completed.has(p.numero))?.numero ?? null;
 }
 
+/**
+ * Returns the best resume target for a project.
+ * Priority: last_subsection (precise scroll target) > first incomplete part > first part.
+ * Validates that the referenced part still exists in segmentation.
+ * Returns null only when there are no parts at all.
+ */
+export function getResumeTarget(project) {
+  const partes = project?.segmentation?.partes || [];
+  if (partes.length === 0) return null;
+
+  const last = project?.reading_progress?.last_subsection;
+  if (last && last.part_id != null) {
+    const partExists = partes.some((p) => p.numero === last.part_id);
+    if (partExists) {
+      return {
+        partId: last.part_id,
+        tab: last.tab || 'explicacion',
+        subsectionId: last.subsection_id || null,
+      };
+    }
+  }
+
+  const completed = new Set(project?.reading_progress?.completed_parts || []);
+  const firstIncomplete = partes.find((p) => !completed.has(p.numero))?.numero;
+  if (firstIncomplete != null) {
+    return { partId: firstIncomplete, tab: 'explicacion', subsectionId: null };
+  }
+
+  return { partId: partes[0].numero, tab: 'explicacion', subsectionId: null };
+}
+
 export function payloadToJsonFile(payload, filename = 'explainer-sync.json') {
   return new File([JSON.stringify(payload, null, 2)], filename, { type: 'application/json' });
 }

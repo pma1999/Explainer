@@ -271,6 +271,39 @@ def test_calculate_cost_includes_tool_use_prompt_tokens():
     assert cost == 0.011
 
 
+def test_calculate_cost_has_deepseek_v4_flash_fallback_pricing():
+    usage = {
+        "prompt_token_count": 1_000_000,
+        "tool_use_prompt_token_count": 0,
+        "candidates_token_count": 1_000_000,
+        "thoughts_token_count": 0,
+    }
+    cost = calculate_cost("deepseek/deepseek-v4-flash", usage)
+    assert cost == 0.42
+
+
+def test_calculate_cost_has_xiaomi_mimo_v2_5_pro_fallback_pricing():
+    usage = {
+        "prompt_token_count": 1_000_000,
+        "tool_use_prompt_token_count": 0,
+        "candidates_token_count": 1_000_000,
+        "thoughts_token_count": 0,
+    }
+    cost = calculate_cost("xiaomi/mimo-v2.5-pro", usage)
+    assert cost == 4.0
+
+
+def test_calculate_cost_has_xiaomi_mimo_v2_5_fallback_pricing():
+    usage = {
+        "prompt_token_count": 1_000_000,
+        "tool_use_prompt_token_count": 0,
+        "candidates_token_count": 1_000_000,
+        "thoughts_token_count": 0,
+    }
+    cost = calculate_cost("xiaomi/mimo-v2.5", usage)
+    assert cost == 2.4
+
+
 def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkeypatch):
     project = {
         "id": "proj-web-1",

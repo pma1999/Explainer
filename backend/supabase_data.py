@@ -228,6 +228,43 @@ def update_reading_progress(
     return set_section_read_status(project_id, user_id, part_id, completed=True)
 
 
+def update_subsection_progress(
+    project_id: str,
+    user_id: str,
+    subsection_id: str,
+    part_id: int,
+    completed: Optional[bool] = None,
+    is_last_read: bool = False,
+) -> Optional[dict[str, Any]]:
+    """Update subsection progress inside reading_progress JSONB.
+    completed=True adds to completed_subsections; is_last_read=True updates last_subsection."""
+    project = get_project(project_id, user_id)
+    if not project:
+        return None
+
+    progress = project.get("reading_progress") or {}
+    completed_subsections = list(progress.get("completed_subsections") or [])
+
+    if completed is True and subsection_id not in completed_subsections:
+        completed_subsections.append(subsection_id)
+    elif completed is False and subsection_id in completed_subsections:
+        completed_subsections = [s for s in completed_subsections if s != subsection_id]
+
+    new_progress: dict[str, Any] = {
+        **progress,
+        "completed_subsections": completed_subsections,
+    }
+    if is_last_read:
+        new_progress["last_subsection"] = {
+            "part_id": part_id,
+            "subsection_id": subsection_id,
+            "tab": "explicacion",
+        }
+        new_progress["last_read_at"] = _now_iso()
+
+    return update_project(project_id, user_id, {"reading_progress": new_progress})
+
+
 def set_section_read_status(
     project_id: str,
     user_id: str,

@@ -4,8 +4,6 @@ MODEL_SEGMENTADOR = "gemini-3-flash-preview"   # Gemini 3 Flash — segmentation
 MODEL_EXPLAINER   = "gemini-3-flash-preview"   # Gemini 3 Flash — explainer agent
 MODEL_AGENTS      = "gemini-3.1-flash-lite-preview"  # Gemini 3.1 Flash Lite — recorrido & resources
 MODEL_CLASSIFIER  = "gemini-3-flash-preview"   # Gemini 3 Flash — content-page classifier
-MODEL_SUBPART_SCOPE_AUDITOR = "gemini-3.1-flash-lite-preview"  # subpart scope audit (JSON)
-
 # Structured JSON outputs: lower temperature reduces run-to-run variance and borderline flips.
 # Classifier ≈ extraction; segmentador keeps slight flexibility for pedagogical judgment.
 TEMPERATURE_PAGE_CLASSIFIER = 0.25

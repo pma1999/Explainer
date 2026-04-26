@@ -115,7 +115,7 @@ def test_fetch_missing_pages_once_deletes_remote_file_even_on_ocr_failure(tmp_pa
             raise RuntimeError("boom")
 
     class _FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **_kwargs):
             self.files = _FakeFiles()
             self.ocr = _FakeOcr()
 

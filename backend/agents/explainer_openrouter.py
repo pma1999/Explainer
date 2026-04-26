@@ -26,7 +26,7 @@ from backend.agents.explainer_prompts import (
 
 logger = get_logger("backend.agents.explainer_openrouter")
 
-OPENROUTER_MODEL_AGENTS = "qwen/qwen3.6-plus"
+OPENROUTER_MODEL_AGENTS = "xiaomi/mimo-v2.5-pro"
 OPENROUTER_PDF_PARSER_ENGINE = "mistral-ocr"
 OPENROUTER_PDF_PRIMING_MODEL = "x-ai/grok-4.1-fast"
 OPENROUTER_PDF_PRIMING_FALLBACK_MODEL = "google/gemini-3.1-flash-lite-preview"

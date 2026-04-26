@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 MAX_PAGE_COVERAGE_ATTEMPTS = 3
+MAX_PAGES_PER_SUBPART = 15
 
 SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE = (
     "La segmentación no pudo asignar correctamente los rangos de página "
@@ -237,6 +238,42 @@ def validate_page_coverage(
                     ),
                 ))
 
+    # ── Level 3: subpart max-pages check ─────────────────────────────────────
+    # Only check valid subparts (skip parts with level-1 errors).
+    # invalid_range subparts are already caught in level-2; here we only flag
+    # subparts whose range is valid but exceeds the per-subpart page budget.
+    errored_subpart_keys: set[tuple[int, int]] = {
+        (e.part_numero, e.subpart_numero)
+        for e in subpart_errors
+        if e.type == "invalid_range"
+    }
+    for parte in valid_parts:
+        p_num = int(parte["numero"])
+        if p_num in errored_part_numbers:
+            continue
+        for sp in (parte.get("subpartes") or []):
+            if not isinstance(sp, dict):
+                continue
+            sp_num = _try_int(sp.get("numero_subparte"))
+            sp_pi = _try_int(sp.get("pagina_inicio"))
+            sp_pf = _try_int(sp.get("pagina_fin"))
+            if sp_num is None or sp_pi is None or sp_pf is None:
+                continue
+            if (p_num, sp_num) in errored_subpart_keys:
+                continue
+            page_count = sp_pf - sp_pi + 1
+            if page_count > MAX_PAGES_PER_SUBPART:
+                subpart_errors.append(SubpartPageError(
+                    type="too_many_pages",
+                    part_numero=p_num,
+                    subpart_numero=sp_num,
+                    detail=(
+                        f"Parte {p_num} Subparte {sp_num}: abarca {page_count} páginas "
+                        f"(pág. {sp_pi}–{sp_pf}), supera el máximo permitido de {MAX_PAGES_PER_SUBPART}. "
+                        f"Subdivídela en 2 o más subpartes de ≤{MAX_PAGES_PER_SUBPART} páginas cada una."
+                    ),
+                ))
+
     is_valid = not part_errors and not subpart_errors
     return PageCoverageReport(
         is_valid=is_valid,
@@ -265,7 +302,7 @@ def _compact_page_list(pages: list[int]) -> str:
 
 
 def _compact_segmentation_ranges(segmentation: dict[str, Any], max_chars: int = 6000) -> str:
-    """Extract page-range and theme fields from segmentation for the retry message."""
+    """Extract page-range fields from segmentation for the retry message."""
     partes = segmentation.get("partes")
     slim: list[dict[str, Any]] = []
     if isinstance(partes, list):
@@ -275,7 +312,6 @@ def _compact_segmentation_ranges(segmentation: dict[str, Any], max_chars: int = 
             entry: dict[str, Any] = {
                 "numero": p.get("numero"),
                 "titulo": p.get("titulo"),
-                "temas_cubiertos": p.get("temas_cubiertos"),
                 "pagina_inicio": p.get("pagina_inicio"),
                 "pagina_fin": p.get("pagina_fin"),
             }
@@ -285,14 +321,11 @@ def _compact_segmentation_ranges(segmentation: dict[str, Any], max_chars: int = 
                 for sp in sps:
                     if not isinstance(sp, dict):
                         continue
-                    sp_entry: dict[str, Any] = {
+                    sp_entries.append({
                         "numero_subparte": sp.get("numero_subparte"),
                         "pagina_inicio": sp.get("pagina_inicio"),
                         "pagina_fin": sp.get("pagina_fin"),
-                    }
-                    if sp.get("temas_cubiertos") is not None:
-                        sp_entry["temas_cubiertos"] = sp.get("temas_cubiertos")
-                    sp_entries.append(sp_entry)
+                    })
                 entry["subpartes"] = sp_entries
             slim.append(entry)
     text = json.dumps(slim, ensure_ascii=False, indent=2)
@@ -312,34 +345,24 @@ def build_page_coverage_retry_suffix(
 
     Returns a string starting with <correccion_rangos_pagina> that describes
     each error and lists the requirements for a valid correction.
-
-    Includes an explicit semantic-anchoring block so the model preserves
-    temas_identificados and temas_cubiertos unchanged, fixing ONLY page ranges.
     """
     lines: list[str] = [
         "<correccion_rangos_pagina>",
         f"Intento de corrección: {attempt + 1}. Los rangos de página de la respuesta anterior no son correctos.",
         "",
         "INSTRUCCIÓN CRÍTICA: Esta es una corrección EXCLUSIVA de rangos de página.",
-        "Tu respuesta anterior tenía la estructura temática CORRECTA.",
-        "DEBES reproducir exactamente: temas_identificados, número de partes, títulos de partes",
-        "y subpartes, temas_cubiertos, y todos los demás campos textuales.",
-        "SOLO modifica los valores de pagina_inicio y pagina_fin donde se indican los errores.",
+        "Tu respuesta anterior tenía la estructura CORRECTA.",
+        "DEBES reproducir exactamente: número de partes, títulos de partes y subpartes, y todos los demás campos textuales.",
+        "SOLO modifica los valores de pagina_inicio y pagina_fin donde se indican los errores,",
+        "o añade subpartes nuevas donde se indique que una subparte tiene demasiadas páginas.",
         "",
     ]
 
-    # Anchor temas_identificados so the model cannot silently drop topics
-    temas_previos = segmentation.get("temas_identificados")
-    if isinstance(temas_previos, list) and temas_previos:
-        lines.append("TEMAS IDENTIFICADOS DE TU RESPUESTA ANTERIOR (copiar exactamente en temas_identificados, sin añadir ni eliminar):")
-        for i, t in enumerate(temas_previos, start=1):
-            lines.append(f"  {i}. {t}")
-        lines.append("")
-
-    lines += [
-        f"PÁGINAS DE CONTENIDO QUE DEBEN CUBRIRSE: {_compact_page_list(sorted(content_page_set))}",
-        "",
-    ]
+    if content_page_set:
+        lines += [
+            f"PÁGINAS DE CONTENIDO QUE DEBEN CUBRIRSE: {_compact_page_list(sorted(content_page_set))}",
+            "",
+        ]
 
     range_and_overlap_errors = [e for e in report.part_errors if e.type != "missing_content_pages"]
     missing_errors = [e for e in report.part_errors if e.type == "missing_content_pages"]
@@ -355,14 +378,29 @@ def build_page_coverage_retry_suffix(
             lines.append(f"COBERTURA INCOMPLETA: {e.detail}")
         lines.append("")
 
-    if report.subpart_errors:
+    # Split subpart errors into structural vs too-many-pages for clarity
+    structural_sp_errors = [e for e in report.subpart_errors if e.type != "too_many_pages"]
+    too_many_pages_errors = [e for e in report.subpart_errors if e.type == "too_many_pages"]
+
+    if structural_sp_errors:
         by_part: dict[int, list[SubpartPageError]] = {}
-        for e in report.subpart_errors:
+        for e in structural_sp_errors:
             by_part.setdefault(e.part_numero, []).append(e)
         lines.append("ERRORES EN RANGOS DE SUBPARTES:")
         for p_num in sorted(by_part):
             lines.append(f"  Parte {p_num}:")
             for e in by_part[p_num]:
+                lines.append(f"    - {e.detail}")
+        lines.append("")
+
+    if too_many_pages_errors:
+        lines.append(f"SUBPARTES CON DEMASIADAS PÁGINAS (máximo permitido: {MAX_PAGES_PER_SUBPART} páginas por subparte):")
+        by_part_tmp: dict[int, list[SubpartPageError]] = {}
+        for e in too_many_pages_errors:
+            by_part_tmp.setdefault(e.part_numero, []).append(e)
+        for p_num in sorted(by_part_tmp):
+            lines.append(f"  Parte {p_num}:")
+            for e in by_part_tmp[p_num]:
                 lines.append(f"    - {e.detail}")
         lines.append("")
 
@@ -376,8 +414,9 @@ def build_page_coverage_retry_suffix(
         "el final de la subparte anterior y el inicio de la siguiente — solo se permite UNA página compartida).",
         "  - Primera subparte de cada parte: pagina_inicio == parte.pagina_inicio.",
         "  - Última subparte de cada parte: pagina_fin == parte.pagina_fin.",
+        f"  - Ninguna subparte puede abarcar más de {MAX_PAGES_PER_SUBPART} páginas; si supera el límite, subdivídela en 2 o más subpartes contiguas dentro de la misma parte.",
         "",
-        "ESTRUCTURA DE TU RESPUESTA ANTERIOR (conserva todo; solo corrige pagina_inicio/pagina_fin):",
+        "ESTRUCTURA DE TU RESPUESTA ANTERIOR (conserva todo; solo corrige pagina_inicio/pagina_fin o añade subpartes donde se indique):",
         _compact_segmentation_ranges(segmentation),
         "</correccion_rangos_pagina>",
     ]

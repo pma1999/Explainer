@@ -67,6 +67,8 @@ test-results/
 playwright-report/
 blob-report/
 coverage/
+pytest_import_log.txt
+test_output/
 
 # Secrets (never commit)
 koyeb_secrets.txt
@@ -78,8 +80,6 @@ koyeb_secrets.txt
 # Temporary / dummy files
 dummy.txt
 dummy2.txt
-
-/test_output
 
 *.pdf
 .mcp.json

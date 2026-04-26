@@ -12,7 +12,7 @@ import {
   ensureProjectsFetched,
   invalidateProjectsCache,
   getCachedProjectAsync,
-  getFirstIncompletePart,
+  getResumeTarget,
   rehydrateProjectToServer,
   pinProjectOffline,
   unpinProjectOffline,
@@ -27,6 +27,10 @@ import {
   syncProcessingUIWithState,
   showProjectLoadingState,
   showSectionLoadingState,
+  renderSidebarNav,
+  updateUsageUI,
+  updateReformatBanner,
+  refreshGhostRailReadState,
 } from './projectView.js';
 import { stopPolling, closeSSEIfDifferent, startSSE, startProjectsListPolling } from './sse.js';
 
@@ -240,13 +244,14 @@ export async function openProjectView(projectId) {
     renderProjectView(cachedProject);
 
     if (!state.currentPartId && cachedProject.status === 'completed') {
-      const firstIncomplete = getFirstIncompletePart(cachedProject);
-      if (firstIncomplete && window.pushRoute) {
+      const target = getResumeTarget(cachedProject);
+      if (target && window.pushRoute) {
         window.pushRoute({
           view: 'project',
           projectId,
-          partId: firstIncomplete,
-          tab: 'explicacion',
+          partId: target.partId,
+          tab: target.tab,
+          subsectionId: target.subsectionId,
         });
       }
     }
@@ -281,13 +286,14 @@ export async function openProjectView(projectId) {
     renderProjectView(project);
 
     if (!state.currentPartId && project.status === 'completed') {
-      const firstIncomplete = getFirstIncompletePart(project);
-      if (firstIncomplete && window.pushRoute) {
+      const target = getResumeTarget(project);
+      if (target && window.pushRoute) {
         window.pushRoute({
           view: 'project',
           projectId,
-          partId: firstIncomplete,
-          tab: 'explicacion',
+          partId: target.partId,
+          tab: target.tab,
+          subsectionId: target.subsectionId,
         });
       }
     }
@@ -395,13 +401,14 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     } else if (partId) {
       if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
     } else if (localCached.status === 'completed') {
-      const firstIncomplete = getFirstIncompletePart(localCached);
-      if (firstIncomplete && window.pushRoute) {
+      const target = getResumeTarget(localCached);
+      if (target && window.pushRoute) {
         window.pushRoute({
           view: 'project',
           projectId,
-          partId: firstIncomplete,
-          tab: 'explicacion',
+          partId: target.partId,
+          tab: target.tab,
+          subsectionId: target.subsectionId,
         });
       }
     }
@@ -419,8 +426,21 @@ export async function restoreProjectView(projectId, partId, activeTab) {
   }
   const cachedHasSection = cached?.segmentation?.partes?.some((p) => p.numero === partId);
   const cachedNotProcessing = cached && !['pending', 'uploading', 'segmenting', 'processing'].includes(cached.status);
+  // The fast-path is non-destructive in its background refetch — it does NOT
+  // re-render panel-explicacion. So if cached lacks content for the active
+  // tab/part (e.g., a "lite" backup written under storage quota pressure, or
+  // a project we only ever saw in the projects list), entering the fast-path
+  // would render an empty panel and never recover. Fall through to cold-path
+  // in that case so the server response can paint the panel from scratch.
+  const cachedContenido = cached?.partes_contenido?.[String(partId)];
+  const tabAgentKey = resolvedTab === 'recorrido'
+    ? 'recorrido'
+    : resolvedTab === 'recursos'
+      ? 'resources'
+      : 'explainer';
+  const cachedHasTabContent = !!(cachedContenido && cachedContenido[tabAgentKey]);
 
-  if (partId && cached && cachedHasSection && cachedNotProcessing) {
+  if (partId && cached && cachedHasSection && cachedNotProcessing && cachedHasTabContent) {
     state.currentProject = cached;
     state.currentPartId = partId;
     state.activeTab = resolvedTab;
@@ -431,13 +451,32 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     if (!isOffline()) {
       api(`/api/projects/${projectId}`)
         .then(async (project) => {
-          state.currentProject = project;
           const local = (await loadBackupAsync(state.user?.id)).projects;
           const refreshed = mergeProjects([project], local);
           await syncProjectsToBackup(refreshed, state.user?.id);
-          renderProjectView(project);
-          selectPart(partId);
-          activateTab(resolvedTab);
+
+          // The user may have navigated to another project / part / tab during
+          // the refetch. If so, swap state without touching the DOM of the
+          // current view; otherwise patch the current view non-destructively.
+          if (
+            state.currentProjectId !== projectId
+            || state.currentPartId !== partId
+            || state.activeTab !== resolvedTab
+          ) {
+            state.currentProject = project;
+            setupSSEForProject(projectId, project);
+            return;
+          }
+
+          state.currentProject = project;
+
+          // Cheap, scoped UI refreshes — none of these touch panel-explicacion
+          // content, scroll position, or state.currentSubsectionId.
+          renderSidebarNav(project);
+          updateUsageUI(project.usage);
+          updateReformatBanner(project);
+          refreshGhostRailReadState();
+
           setupSSEForProject(projectId, project);
         })
         .catch(() => {});
@@ -464,13 +503,14 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     } else if (partId) {
       if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
     } else if (project.status === 'completed') {
-      const firstIncomplete = getFirstIncompletePart(project);
-      if (firstIncomplete && window.pushRoute) {
+      const target = getResumeTarget(project);
+      if (target && window.pushRoute) {
         window.pushRoute({
           view: 'project',
           projectId,
-          partId: firstIncomplete,
-          tab: 'explicacion',
+          partId: target.partId,
+          tab: target.tab,
+          subsectionId: target.subsectionId,
         });
       }
     }

@@ -18,10 +18,6 @@ import main
 from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrParsedPage
-from backend.segmentation_tema_coverage import (
-    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
-)
 
 
 def _usage(**kwargs):
@@ -205,13 +201,13 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             os.unlink(pdf_path)
 
 
-def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch):
-    """After MAX_SEGMENTATION_COVERAGE_ATTEMPTS invalid MECE outputs, project ends in error."""
+def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
+    """Theme assignment is not validated in the main PDF processing path."""
     pdf_path = _create_multi_page_pdf(5)
     try:
         project = {
-            "id": "proj-mece-fail",
-            "name": "MECE fail",
+            "id": "proj-no-tema-mece",
+            "name": "No tema MECE",
             "description": "",
             "pdf_filename": "test.pdf",
             "source_type": "pdf",
@@ -245,8 +241,9 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
 
         monkeypatch.setattr(genai, "Client", lambda api_key: object())
         monkeypatch.setattr(main, "upload_file_with_retry", lambda *a, **k: SimpleNamespace(uri="u://x", mime_type="application/pdf"))
+        monkeypatch.setattr(main, "run_page_classifier", lambda *a, **k: (frozenset({1, 2, 3, 4, 5}), _usage(), {}))
 
-        def _always_bad_segmentador(api_key, file_uri, description, model, mime_type, source_kind):
+        def _segmentador_with_unassigned_theme(api_key, file_uri, description, model, mime_type, source_kind):
             seg_calls.append(description)
             return (
                 {
@@ -261,11 +258,19 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
                             "contenido": "c",
                             "identificacion": "i",
                             "pagina_inicio": 1,
-                            "pagina_fin": 2,
+                            "pagina_fin": 5,
                             "temas_cubiertos": [],
                             "extension_estimada": "m",
                             "complejidad": "m",
                             "expansion_prevista": "a",
+                            "subpartes": [
+                                {
+                                    "numero_subparte": 1,
+                                    "titulo": "SP1",
+                                    "pagina_inicio": 1,
+                                    "pagina_fin": 5,
+                                }
+                            ],
                         }
                     ],
                     "consideraciones_estudiante": "c",
@@ -273,18 +278,21 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
                 _usage(total=10),
             )
 
-        monkeypatch.setattr(main, "run_segmentador", _always_bad_segmentador)
+        monkeypatch.setattr(main, "run_segmentador", _segmentador_with_unassigned_theme)
+        monkeypatch.setattr(main, "run_explainer", lambda *a, **k: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_recorrido", lambda *a, **k: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *a, **k: ({"ok": True}, _usage()))
 
-        asyncio.run(main._process_project("proj-mece-fail", "user-1"))
+        async def _fake_format(api_key, explainer_data):
+            return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
-        assert len(seg_calls) == MAX_SEGMENTATION_COVERAGE_ATTEMPTS
-        assert any(
-            p.get("status") == "error" and p.get("partes_contenido") == {} for p in updates
-        )
-        err = next(p for p in reversed(updates) if p.get("status") == "error")
-        assert err.get("error_message") == SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE
-        for i in range(1, MAX_SEGMENTATION_COVERAGE_ATTEMPTS):
-            assert "<correccion_asignacion_temas>" in seg_calls[i]
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        asyncio.run(main._process_project("proj-no-tema-mece", "user-1"))
+
+        assert len(seg_calls) == 1
+        assert all("<correccion_asignacion_temas>" not in call for call in seg_calls)
+        assert any(payload.get("status") == "completed" for payload in updates)
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
@@ -569,383 +577,6 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             os.unlink(pdf_path)
 
 
-def test_process_project_pdf_retries_subpart_when_scope_auditor_rejects(monkeypatch, caplog):
-    pdf_path = _create_multi_page_pdf(4)
-    try:
-        caplog.set_level("WARNING", logger="main")
-        project = {
-            "id": "proj-subpart-audit",
-            "name": "Doc PDF",
-            "description": "Procesar todo",
-            "pdf_filename": "test.pdf",
-            "source_type": "pdf",
-            "source_url": None,
-            "status": "pending",
-        }
-
-        prompts_seen = []
-        audit_attempts = {"count": 0}
-        formatter_calls = {"count": 0}
-
-        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
-        monkeypatch.setattr(main, "get_user_api_key", lambda uid, provider=None: "AIzaFakeKey")
-        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
-        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
-
-        async def _send_event(project_id, payload):
-            return None
-
-        class _DummySSE:
-            async def end_stream(self, project_id):
-                return None
-
-        monkeypatch.setattr(main, "send_event", _send_event)
-        monkeypatch.setattr(main, "sse_manager", _DummySSE())
-
-        from google import genai
-
-        monkeypatch.setattr(genai, "Client", lambda api_key: object())
-        monkeypatch.setattr(
-            main,
-            "upload_file_with_retry",
-            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
-        )
-        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}))
-
-        def _fake_segmentador(*args, **kwargs):
-            base = _part_pdf_fields(1, "Única", 1, 4)
-            base["temas_cubiertos"] = ["tema1", "tema2"]
-            base["subpartes"] = [
-                {
-                    "numero_subparte": 1,
-                    "titulo": "Primera",
-                    "contenido": "Contenido inicial",
-                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 1–2.",
-                    "pagina_inicio": 1,
-                    "pagina_fin": 2,
-                    "temas_cubiertos": ["tema1"],
-                    "delimitacion_explainer": {
-                        "inicio": {"encabezado": "1.1", "ancla_texto": "primer texto"},
-                        "fin": {"ancla_texto": "fin tema uno", "encabezado_siguiente_excluido": "1.2"},
-                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
-                    },
-                },
-                {
-                    "numero_subparte": 2,
-                    "titulo": "Segunda",
-                    "contenido": "Contenido final",
-                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 3–4.",
-                    "pagina_inicio": 3,
-                    "pagina_fin": 4,
-                    "temas_cubiertos": ["tema2"],
-                    "delimitacion_explainer": {
-                        "inicio": {"encabezado": "1.2", "ancla_texto": "segundo texto"},
-                        "fin": {"ancla_texto": "fin tema dos", "encabezado_siguiente_excluido": ""},
-                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
-                    },
-                },
-            ]
-            return (
-                {
-                    "analisis_texto": "Cuatro páginas",
-                    "temas_identificados": ["tema1", "tema2"],
-                    "decision_num_partes": 1,
-                    "decision_justificacion": "Una parte",
-                    "partes": [base],
-                    "consideraciones_estudiante": "Seguir el orden natural",
-                },
-                _usage(total=40),
-            )
-
-        monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
-
-        def _fake_subpart_explainer(api_key, file_uri, agent_prompt, model, mime_type):
-            prompts_seen.append(agent_prompt)
-            return (
-                {
-                    "desarrollo": [
-                        {
-                            "titulo_seccion": "Bloque",
-                            "explicacion_introductoria": "Contexto",
-                            "subsecciones": [
-                                {"titulo_subseccion": "Detalle", "explicacion_detallada": "Texto desarrollado"}
-                            ],
-                        }
-                    ]
-                },
-                _usage(total=22),
-            )
-
-        monkeypatch.setattr(main, "run_subpart_explainer", _fake_subpart_explainer)
-        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
-        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
-
-        async def _fake_format(api_key, explainer_data):
-            formatter_calls["count"] += 1
-            return explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}
-
-        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
-
-        def _fake_auditor(**kwargs):
-            from backend.subpart_scope_auditor import SubpartScopeAuditReport
-
-            audit_attempts["count"] += 1
-            if audit_attempts["count"] == 1:
-                return (
-                    SubpartScopeAuditReport(
-                        is_valid=False,
-                        invades_previous=(),
-                        invades_next=("tema2",),
-                        missing_current=("tema1",),
-                        rationale="Invade la siguiente subparte.",
-                    ),
-                    _usage(total=7),
-                )
-            return (
-                SubpartScopeAuditReport(
-                    is_valid=True,
-                    invades_previous=(),
-                    invades_next=(),
-                    missing_current=(),
-                    rationale="OK",
-                ),
-                _usage(total=7),
-            )
-
-        monkeypatch.setattr(main, "run_subpart_scope_auditor", _fake_auditor)
-
-        asyncio.run(main._process_project("proj-subpart-audit", "user-123"))
-
-        assert len(prompts_seen) >= 2
-        retry_prompt = next(prompt for prompt in prompts_seen if "<reescritura_alcance_subparte>" in prompt)
-        assert "<reescritura_alcance_subparte>" in retry_prompt
-        assert "Texto desarrollado" in retry_prompt
-        assert "Invade la siguiente subparte." in retry_prompt
-        assert "REESCRIBE desde cero el campo `desarrollo`." in retry_prompt
-        assert "SUBPARTE ACTUAL (fuente de verdad):" in retry_prompt
-        assert (
-            "SUBPARTE ANTERIOR (NO desarrollar):" in retry_prompt
-            or "SUBPARTE SIGUIENTE (NO desarrollar):" in retry_prompt
-        )
-        assert formatter_calls["count"] == 1
-        assert not any("Error inesperado al formatear parte" in message for message in caplog.messages)
-    finally:
-        if os.path.isfile(pdf_path):
-            os.unlink(pdf_path)
-
-
-def test_process_project_pdf_openrouter_retry_reuses_cache_and_includes_rewrite_brief(monkeypatch, caplog):
-    pdf_path = _create_multi_page_pdf(4)
-    try:
-        caplog.set_level("WARNING", logger="main")
-        project = {
-            "id": "proj-openrouter-subpart-audit",
-            "name": "Doc PDF",
-            "description": "Procesar todo",
-            "pdf_filename": "test.pdf",
-            "source_type": "pdf",
-            "source_url": None,
-            "status": "pending",
-        }
-
-        prompts_seen = []
-        openrouter_calls = []
-        audit_attempts = {"count": 0}
-        formatter_calls = {"count": 0}
-        shared_cache_entry = PdfOcrCacheEntry(
-            source_sha256="sha256",
-            engine="mistral-native",
-            cache_path="cache.json",
-            cache_hit=True,
-            expected_page_numbers=(1, 2, 3, 4),
-            cached_page_numbers=(1, 2, 3, 4),
-            page_index=(
-                PdfOcrParsedPage(page_number=1, markdown="Page 1"),
-                PdfOcrParsedPage(page_number=2, markdown="Page 2"),
-                PdfOcrParsedPage(page_number=3, markdown="Page 3"),
-                PdfOcrParsedPage(page_number=4, markdown="Page 4"),
-            ),
-        )
-
-        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
-        monkeypatch.setattr(
-            main,
-            "get_user_api_key",
-            lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
-        )
-        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
-        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
-
-        async def _send_event(project_id, payload):
-            return None
-
-        class _DummySSE:
-            async def end_stream(self, project_id):
-                return None
-
-        monkeypatch.setattr(main, "send_event", _send_event)
-        monkeypatch.setattr(main, "sse_manager", _DummySSE())
-
-        from google import genai
-
-        monkeypatch.setattr(genai, "Client", lambda api_key: object())
-        monkeypatch.setattr(
-            main,
-            "upload_file_with_retry",
-            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
-        )
-        monkeypatch.setattr(
-            main,
-            "run_page_classifier",
-            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
-        )
-        monkeypatch.setattr(
-            main,
-            "_prepare_mistral_pdf_ocr_context",
-            lambda **kwargs: main.PreparedPdfOcrContext(
-                source_pdf_path=pdf_path,
-                cache_entry=shared_cache_entry,
-            ),
-        )
-
-        def _fake_segmentador(*args, **kwargs):
-            base = _part_pdf_fields(1, "Única", 1, 4)
-            base["temas_cubiertos"] = ["tema1"]
-            base["subpartes"] = [
-                {
-                    "numero_subparte": 1,
-                    "titulo": "Única subparte",
-                    "contenido": "Contenido único",
-                    "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 1–4.",
-                    "pagina_inicio": 1,
-                    "pagina_fin": 4,
-                    "temas_cubiertos": ["tema1"],
-                    "delimitacion_explainer": {
-                        "inicio": {"encabezado": "1.1", "ancla_texto": "primer texto"},
-                        "fin": {"ancla_texto": "fin tema uno", "encabezado_siguiente_excluido": ""},
-                        "transicion_compartida": {"hay_transicion": False, "pagina": 0, "hasta_texto_inclusive": "", "desde_texto_inclusive": ""},
-                    },
-                }
-            ]
-            return (
-                {
-                    "analisis_texto": "Cuatro páginas",
-                    "temas_identificados": ["tema1"],
-                    "decision_num_partes": 1,
-                    "decision_justificacion": "Una parte",
-                    "partes": [base],
-                    "consideraciones_estudiante": "Seguir el orden natural",
-                },
-                _usage(total=40),
-            )
-
-        monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
-        monkeypatch.setattr(
-            main,
-            "run_subpart_explainer",
-            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini subpart explainer no debería ejecutarse")),
-        )
-
-        def _fake_openrouter_subpart_explainer(
-            source_path,
-            agent_prompt,
-            model,
-            mime_type,
-            api_key,
-            cache_entry=None,
-            page_numbers=(),
-        ):
-            prompts_seen.append(agent_prompt)
-            openrouter_calls.append(
-                {
-                    "source_path": source_path,
-                    "model": model,
-                    "mime_type": mime_type,
-                    "cache_entry": cache_entry,
-                    "page_numbers": tuple(page_numbers),
-                }
-            )
-            return (
-                {
-                    "desarrollo": [
-                        {
-                            "titulo_seccion": "Bloque OpenRouter",
-                            "explicacion_introductoria": "Contexto OpenRouter",
-                            "subsecciones": [
-                                {
-                                    "titulo_subseccion": "Detalle OpenRouter",
-                                    "explicacion_detallada": "Texto OpenRouter previo",
-                                }
-                            ],
-                        }
-                    ]
-                },
-                _usage(total=31),
-            )
-
-        monkeypatch.setattr(main, "run_subpart_explainer_or", _fake_openrouter_subpart_explainer)
-        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
-        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
-
-        async def _fake_format(api_key, explainer_data):
-            formatter_calls["count"] += 1
-            return explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0}
-
-        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
-
-        def _fake_auditor(**kwargs):
-            from backend.subpart_scope_auditor import SubpartScopeAuditReport
-
-            audit_attempts["count"] += 1
-            if audit_attempts["count"] == 1:
-                return (
-                    SubpartScopeAuditReport(
-                        is_valid=False,
-                        invades_previous=(),
-                        invades_next=("tema_ajeno",),
-                        missing_current=("tema1",),
-                        rationale="El desarrollo mezcla alcance ajeno.",
-                    ),
-                    _usage(total=9),
-                )
-            return (
-                SubpartScopeAuditReport(
-                    is_valid=True,
-                    invades_previous=(),
-                    invades_next=(),
-                    missing_current=(),
-                    rationale="OK",
-                ),
-                _usage(total=9),
-            )
-
-        monkeypatch.setattr(main, "run_subpart_scope_auditor", _fake_auditor)
-
-        asyncio.run(
-            main._process_project(
-                "proj-openrouter-subpart-audit",
-                "user-123",
-                explainer_provider="openrouter",
-            )
-        )
-
-        assert len(openrouter_calls) == 2
-        assert openrouter_calls[0]["cache_entry"] is shared_cache_entry
-        assert openrouter_calls[1]["cache_entry"] is shared_cache_entry
-        assert openrouter_calls[0]["page_numbers"] == (1, 2, 3, 4)
-        assert openrouter_calls[1]["page_numbers"] == (1, 2, 3, 4)
-        retry_prompt = prompts_seen[1]
-        assert "<reescritura_alcance_subparte>" in retry_prompt
-        assert "Texto OpenRouter previo" in retry_prompt
-        assert "El desarrollo mezcla alcance ajeno." in retry_prompt
-        assert "REESCRIBE desde cero el campo `desarrollo`." in retry_prompt
-        assert formatter_calls["count"] == 1
-        assert not any("Error inesperado al formatear parte" in message for message in caplog.messages)
-    finally:
-        if os.path.isfile(pdf_path):
-            os.unlink(pdf_path)
 
 
 def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_context(monkeypatch):

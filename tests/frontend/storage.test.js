@@ -12,6 +12,7 @@ import {
   getCachedApiKeyStatus,
   setCachedApiKeyStatus,
   getFirstIncompletePart,
+  getResumeTarget,
 } from '../../frontend/js/storage.js';
 import { API_KEY_CACHE_KEY_PREFIX } from '../../frontend/js/state.js';
 
@@ -246,6 +247,129 @@ describe('storage.js', () => {
         reading_progress: { completed_parts: [1] },
       };
       expect(getFirstIncompletePart(project)).toBeNull();
+    });
+  });
+
+  describe('getResumeTarget', () => {
+    it('returns null for empty project / no parts', () => {
+      expect(getResumeTarget({})).toBeNull();
+      expect(getResumeTarget({ segmentation: { partes: [] } })).toBeNull();
+      expect(getResumeTarget(null)).toBeNull();
+    });
+
+    it('prefers last_subsection when part exists', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }, { numero: 3 }] },
+        reading_progress: {
+          completed_parts: [1],
+          last_subsection: {
+            part_id: 2,
+            subsection_id: 'subsec-2-1-3',
+            tab: 'explicacion',
+          },
+        },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 2,
+        tab: 'explicacion',
+        subsectionId: 'subsec-2-1-3',
+      });
+    });
+
+    it('preserves a non-default tab from last_subsection', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }] },
+        reading_progress: {
+          last_subsection: {
+            part_id: 2,
+            subsection_id: 'subsec-2-0-0',
+            tab: 'recorrido',
+          },
+        },
+      };
+      expect(getResumeTarget(project).tab).toBe('recorrido');
+    });
+
+    it('defaults tab to explicacion when last_subsection.tab is missing', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }] },
+        reading_progress: {
+          last_subsection: { part_id: 1, subsection_id: 'subsec-1-0-0' },
+        },
+      };
+      expect(getResumeTarget(project).tab).toBe('explicacion');
+    });
+
+    it('handles null subsection_id (part-level resume only)', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }] },
+        reading_progress: {
+          last_subsection: { part_id: 2, subsection_id: null, tab: 'explicacion' },
+        },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 2,
+        tab: 'explicacion',
+        subsectionId: null,
+      });
+    });
+
+    it('falls back to first incomplete when last_subsection part was deleted', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }, { numero: 3 }] },
+        reading_progress: {
+          completed_parts: [1],
+          last_subsection: {
+            part_id: 99,
+            subsection_id: 'subsec-99-0-0',
+            tab: 'explicacion',
+          },
+        },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 2,
+        tab: 'explicacion',
+        subsectionId: null,
+      });
+    });
+
+    it('falls back to first incomplete when last_subsection is absent', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }] },
+        reading_progress: { completed_parts: [1] },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 2,
+        tab: 'explicacion',
+        subsectionId: null,
+      });
+    });
+
+    it('falls back to first part when all parts completed and no last_subsection', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 5 }, { numero: 6 }] },
+        reading_progress: { completed_parts: [5, 6] },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 5,
+        tab: 'explicacion',
+        subsectionId: null,
+      });
+    });
+
+    it('ignores last_subsection with null part_id', () => {
+      const project = {
+        segmentation: { partes: [{ numero: 1 }, { numero: 2 }] },
+        reading_progress: {
+          completed_parts: [],
+          last_subsection: { part_id: null, subsection_id: null, tab: 'explicacion' },
+        },
+      };
+      expect(getResumeTarget(project)).toEqual({
+        partId: 1,
+        tab: 'explicacion',
+        subsectionId: null,
+      });
     });
   });
 });

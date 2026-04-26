@@ -87,20 +87,3 @@ def build_subpart_negative_scope_block(subparte: dict[str, Any], all_subpartes: 
             for tema in temas:
                 lines.append(f"    - {tema}")
     return "\n".join(lines)
-
-
-def build_subpart_scope_summary(subparte: dict[str, Any] | None) -> str:
-    if not subparte:
-        return ""
-    lines = [
-        f"Título: {subparte.get('titulo', '')}",
-        f"Contenido: {subparte.get('contenido', '')}",
-    ]
-    temas = subparte.get("temas_cubiertos") or []
-    if temas:
-        lines.append("Temas propios:")
-        for tema in temas:
-            lines.append(f"- {tema}")
-    lines.append("")
-    lines.append(build_subpart_scope_contract_block(subparte))
-    return "\n".join(lines)

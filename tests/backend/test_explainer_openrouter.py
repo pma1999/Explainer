@@ -29,6 +29,10 @@ def _write_text_source(content: str = "Contenido de prueba.") -> str:
     return str(source)
 
 
+def test_default_openrouter_explainer_model_is_xiaomi_mimo_v2_5_pro():
+    assert module.OPENROUTER_MODEL_AGENTS == "xiaomi/mimo-v2.5-pro"
+
+
 def test_run_explainer_or_uses_json_schema_for_supported_models(monkeypatch):
     source_path = _write_text_source()
     captured_call: dict = {}
@@ -75,11 +79,11 @@ def test_run_explainer_or_uses_json_schema_for_supported_models(monkeypatch):
 
 def test_run_subpart_explainer_or_returns_validated_desarrollo(monkeypatch):
     source_path = _write_text_source()
+    captured_call: dict = {}
 
-    monkeypatch.setattr(
-        module,
-        "call_openrouter_chat",
-        lambda **kwargs: (
+    def _fake_call(**kwargs):
+        captured_call.update(kwargs)
+        return (
             {
                 "desarrollo": [
                     {
@@ -95,8 +99,9 @@ def test_run_subpart_explainer_or_returns_validated_desarrollo(monkeypatch):
                 ]
             },
             _usage(),
-        ),
-    )
+        )
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_call)
 
     result, _ = module.run_subpart_explainer_or(
         source_path=source_path,
@@ -119,6 +124,8 @@ def test_run_subpart_explainer_or_returns_validated_desarrollo(monkeypatch):
             }
         ]
     }
+    assert captured_call["model"] == "xiaomi/mimo-v2.5-pro"
+    assert captured_call["response_format"] == "json_object"
 
 
 def test_run_subpart_explainer_or_uses_json_schema_for_supported_models(monkeypatch):

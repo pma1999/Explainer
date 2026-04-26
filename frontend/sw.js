@@ -11,7 +11,7 @@
    Para forzar actualización: cambia CACHE_VERSION
    ============================================================ */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const STATIC_CACHE = `explainer-static-${CACHE_VERSION}`;
 const FONTS_CACHE = `explainer-fonts-${CACHE_VERSION}`;
 const CDN_CACHE = `explainer-cdn-${CACHE_VERSION}`;
