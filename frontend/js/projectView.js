@@ -27,6 +27,12 @@ export function setSaveViewStateCallback(fn) {
   _saveViewState = fn;
 }
 
+// Tracks the partId actually rendered into panel-explicacion. Decoupled
+// from state.currentPartId because most callers pre-assign state.currentPartId
+// BEFORE calling selectPart — using state would make the idempotency guard
+// see a "match" when the panel still shows the previous part.
+let _renderedPartId = null;
+
 const SHARED_CTA_FLOATING_DISMISSED_KEY = 'explainer.sharedCtaFloatingDismissed';
 
 function isSidebarVisible() {
@@ -684,6 +690,25 @@ export function updateGhostRailActive(subsectionId) {
   });
 }
 
+/**
+ * Refreshes only the .is-read class on existing rail nodes from the current
+ * reading_progress.completed_subsections. Does NOT rebuild the rail and does
+ * NOT touch any other DOM — safe to call from a background server refetch
+ * without disturbing scroll position or active subsection.
+ */
+export function refreshGhostRailReadState() {
+  const rail = document.querySelector('.ghost-rail');
+  if (!rail) return;
+  const completed = new Set(
+    state.currentProject?.reading_progress?.completed_subsections || [],
+  );
+  rail.querySelectorAll('.ghost-rail-node').forEach((node) => {
+    const id = node.dataset.subsectionId;
+    if (!id) return;
+    node.classList.toggle('is-read', completed.has(id));
+  });
+}
+
 function renderSmartBar(partId, explainerData) {
   const content = document.getElementById('part-content');
   if (!content) return;
@@ -987,6 +1012,21 @@ export function activateTab(tabName) {
 }
 
 export function selectPart(partId) {
+  // Idempotent: if THIS exact partId is already rendered into panel-explicacion,
+  // bail out. Re-running selectPart for the same part would otherwise wipe
+  // scrollTop, currentSubsectionId, the ghost rail / smart-bar, and re-fire
+  // the observer — destroying any restored scroll position. We track the
+  // rendered partId in a module variable instead of state.currentPartId
+  // because most callers pre-assign state.currentPartId before calling here,
+  // which would defeat a state-based guard.
+  if (
+    _renderedPartId === partId
+    && state.currentProject
+    && document.querySelector('#panel-explicacion .explainer-content, #panel-explicacion .explainer-section')
+  ) {
+    return;
+  }
+
   // Clean up subsection UI from previous part
   document.querySelector('.ghost-rail')?.remove();
   document.querySelector('.smart-bar')?.remove();
@@ -1056,6 +1096,7 @@ export function selectPart(partId) {
     setTimeout(window.initSubsectionObserver, 0);
   }
 
+  _renderedPartId = partId;
   saveViewState();
 }
 
@@ -1158,6 +1199,11 @@ export async function handleReformat() {
 }
 
 export function renderProjectView(project) {
+  // Any time we (re-)render a project's layout, force the next selectPart()
+  // call to do a full render — the panel-explicacion may still hold content
+  // from a previous project (renderProjectView itself does not clear it).
+  _renderedPartId = null;
+
   $('sidebar-project-name').textContent = project.name;
   $('sidebar-status').innerHTML = `<span class="card-status-badge status-${project.status}">${statusLabel(project.status)}</span>`;
 

@@ -119,6 +119,11 @@ function setActiveSubsection(id) {
   _subsectionLastActivatedAt = now;
   state.currentSubsectionId = id;
 
+  // Keep sessionStorage view-state in sync so cold-open restores land at the
+  // correct subsection. Cheap (writes a tiny JSON blob) and runs at most
+  // once per subsection change, throttled by IntersectionObserver gating.
+  saveViewState();
+
   // Update UI
   updateGhostRailActive(id);
   updateSmartBarText(id);
@@ -176,12 +181,30 @@ function saveViewState() {
   if (!state.user?.id) return;
 
   const activeView = document.querySelector('.view.active')?.id || 'view-landing';
+
+  // Merge with the previous sessionStorage value so we never overwrite a
+  // non-null subsectionId with null. The IntersectionObserver writes
+  // state.currentSubsectionId asynchronously, but selectPart/activateTab
+  // call saveViewState BEFORE the observer has had a chance to fire — that
+  // would otherwise persist subsectionId: null and break cold-open restore.
+  let prev = null;
+  try {
+    prev = JSON.parse(sessionStorage.getItem('explainer.viewState') || 'null');
+  } catch (_) {}
+  const samePart = prev
+    && prev.userId === state.user.id
+    && prev.projectId === state.currentProjectId
+    && prev.partId === state.currentPartId
+    && prev.activeTab === state.activeTab;
+  const subsectionId = state.currentSubsectionId
+    || (samePart ? prev.subsectionId : null);
+
   const viewState = {
     userId: state.user.id,
     view: activeView,
     projectId: state.currentProjectId,
     partId: state.currentPartId,
-    subsectionId: state.currentSubsectionId,
+    subsectionId,
     activeTab: state.activeTab,
     savedAt: new Date().toISOString(),
   };

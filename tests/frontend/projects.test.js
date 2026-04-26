@@ -22,11 +22,15 @@ const renderProjectView = vi.fn();
 const selectPart = vi.fn();
 const activateTab = vi.fn();
 const syncProcessingUIWithState = vi.fn();
+const renderSidebarNav = vi.fn();
+const updateUsageUI = vi.fn();
+const updateReformatBanner = vi.fn();
+const refreshGhostRailReadState = vi.fn();
 const loadBackupAsync = vi.fn(async () => ({ projects: [] }));
 const syncProjectsToBackup = vi.fn(async () => ({ ok: true }));
 const ensureProjectsFetched = vi.fn(async () => []);
 const getCachedProjectAsync = vi.fn();
-const getFirstIncompletePart = vi.fn(() => null);
+const getResumeTarget = vi.fn(() => null);
 const mergeProjects = vi.fn((serverProjects, localProjects) => [...serverProjects, ...localProjects]);
 const invalidateProjectsCache = vi.fn();
 const rehydrateProjectToServer = vi.fn();
@@ -54,8 +58,12 @@ vi.mock('../../frontend/js/storage.js', () => ({
   ensureProjectsFetched,
   invalidateProjectsCache,
   getCachedProjectAsync,
-  getFirstIncompletePart,
+  getResumeTarget,
   rehydrateProjectToServer,
+  pinProjectOffline: vi.fn(),
+  unpinProjectOffline: vi.fn(),
+  getOfflinePins: vi.fn(async () => []),
+  isProjectPinned: vi.fn(async () => false),
 }));
 vi.mock('../../frontend/js/projectView.js', () => ({
   renderProjectView,
@@ -64,6 +72,10 @@ vi.mock('../../frontend/js/projectView.js', () => ({
   syncProcessingUIWithState,
   showProjectLoadingState,
   showSectionLoadingState,
+  renderSidebarNav,
+  updateUsageUI,
+  updateReformatBanner,
+  refreshGhostRailReadState,
 }));
 vi.mock('../../frontend/js/sse.js', () => ({
   stopPolling,
@@ -91,11 +103,15 @@ describe('projects.js boot behavior', () => {
     ensureProjectsFetched.mockReset();
     ensureProjectsFetched.mockResolvedValue([]);
     getCachedProjectAsync.mockReset();
-    getFirstIncompletePart.mockReset();
-    getFirstIncompletePart.mockReturnValue(null);
+    getResumeTarget.mockReset();
+    getResumeTarget.mockReturnValue(null);
     mergeProjects.mockClear();
     invalidateProjectsCache.mockReset();
     rehydrateProjectToServer.mockReset();
+    renderSidebarNav.mockReset();
+    updateUsageUI.mockReset();
+    updateReformatBanner.mockReset();
+    refreshGhostRailReadState.mockReset();
     startSSE.mockReset();
     stopPolling.mockReset();
     closeSSEIfDifferent.mockReset();
