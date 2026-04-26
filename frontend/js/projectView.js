@@ -729,6 +729,7 @@ function renderSmartBar(subsections) {
   const existing = content.querySelector('.smart-bar');
   if (existing) existing.remove();
   content.classList.remove('has-mobile-subsection-nav');
+  document.body.classList.remove('has-mobile-subsection-nav');
 
   if (subsections.length === 0) return;
 

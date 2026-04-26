@@ -16,6 +16,7 @@ function setupExplicacionPanel() {
   document.body.querySelectorAll('#content-explicacion').forEach((n) => n.remove());
   document.body.querySelectorAll('#part-content').forEach((n) => n.remove());
   document.body.querySelectorAll('.subsection-sheet-overlay').forEach((n) => n.remove());
+  document.body.classList.remove('has-mobile-subsection-nav');
 
   // Outer #part-content where the smart bar lives
   const outer = document.createElement('div');
@@ -95,6 +96,23 @@ describe('renderSmartBar (via renderTab)', () => {
     renderTab('explicacion', empty);
     expect(document.querySelector('.smart-bar')).toBeNull();
     expect(document.getElementById('part-content').classList.contains('has-mobile-subsection-nav')).toBe(false);
+    expect(document.body.classList.contains('has-mobile-subsection-nav')).toBe(false);
+  });
+
+  it('clears stale mobile navigation classes when re-rendering without subsections', () => {
+    renderTab('explicacion', sampleData);
+    expect(document.querySelector('.smart-bar')).not.toBeNull();
+    expect(document.body.classList.contains('has-mobile-subsection-nav')).toBe(true);
+
+    const empty = {
+      status: 'completed',
+      explainer: { introduccion: 'only intro', desarrollo: [], conexiones_contextuales: [] },
+    };
+    renderTab('explicacion', empty);
+
+    expect(document.querySelector('.smart-bar')).toBeNull();
+    expect(document.getElementById('part-content').classList.contains('has-mobile-subsection-nav')).toBe(false);
+    expect(document.body.classList.contains('has-mobile-subsection-nav')).toBe(false);
   });
 
   it('returns early when explainer is markdown fallback', () => {
