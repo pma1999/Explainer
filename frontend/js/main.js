@@ -238,6 +238,10 @@ function navigateFromRoute(route) {
           state.activeTab = tab;
           selectPart(partId);
           activateTab(tab);
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
           return;
         }
         if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
