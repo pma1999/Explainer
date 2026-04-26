@@ -123,6 +123,13 @@ function setActiveSubsection(id) {
   updateGhostRailActive(id);
   updateSmartBarText(id);
 
+  // Announce to screen readers
+  const announcer = document.getElementById('subsection-announcer');
+  const targetHeading = document.getElementById(id);
+  if (announcer && targetHeading) {
+    announcer.textContent = `Ahora en: ${targetHeading.textContent}`;
+  }
+
   // Update URL quietly
   if (window.replaceRoute && state.currentProjectId && state.currentPartId) {
     window.replaceRoute({
