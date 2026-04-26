@@ -32,6 +32,7 @@ export function setSaveViewStateCallback(fn) {
 // BEFORE calling selectPart — using state would make the idempotency guard
 // see a "match" when the panel still shows the previous part.
 let _renderedPartId = null;
+let _renderedSubsections = [];
 
 const SHARED_CTA_FLOATING_DISMISSED_KEY = 'explainer.sharedCtaFloatingDismissed';
 
@@ -590,17 +591,9 @@ function renderExplainer(data, partId) {
   return html;
 }
 
-function renderGhostRail(partId, explainerData) {
-  const panel = document.getElementById('panel-explicacion');
-  if (!panel) return;
+function buildSubsectionList(partId, explainerData) {
+  if (!explainerData || explainerData._format === 'markdown') return [];
 
-  // Remove existing rail (idempotent re-render)
-  const existing = panel.querySelector('.ghost-rail');
-  if (existing) existing.remove();
-
-  if (!explainerData || explainerData._format === 'markdown') return;
-
-  // Build flat list of subsections in DOM order
   const subsections = [];
   if (Array.isArray(explainerData.desarrollo)) {
     explainerData.desarrollo.forEach((section, sIdx) => {
@@ -622,6 +615,25 @@ function renderGhostRail(partId, explainerData) {
       });
     });
   }
+  return subsections;
+}
+
+function clearSubsectionNavigation() {
+  document.querySelector('.ghost-rail')?.remove();
+  document.querySelector('.smart-bar')?.remove();
+  document.getElementById('part-content')?.classList.remove('has-mobile-subsection-nav');
+  document.body.classList.remove('has-mobile-subsection-nav');
+  _renderedSubsections = [];
+}
+
+function renderGhostRail(subsections) {
+  const panel = document.getElementById('panel-explicacion');
+  if (!panel) return;
+
+  // Remove existing rail (idempotent re-render)
+  const existing = panel.querySelector('.ghost-rail');
+  if (existing) existing.remove();
+
   if (subsections.length === 0) return;
 
   const rail = document.createElement('div');
@@ -660,7 +672,7 @@ function renderGhostRail(partId, explainerData) {
     rail.appendChild(node);
   });
 
-  // Insert rail at the end of panel so it overlays content (CSS in Task 8)
+  // Insert rail at the end of panel so it overlays content.
   panel.appendChild(rail);
 }
 
@@ -709,38 +721,15 @@ export function refreshGhostRailReadState() {
   });
 }
 
-function renderSmartBar(partId, explainerData) {
+function renderSmartBar(subsections) {
   const content = document.getElementById('part-content');
   if (!content) return;
 
   // Remove existing
   const existing = content.querySelector('.smart-bar');
   if (existing) existing.remove();
+  content.classList.remove('has-mobile-subsection-nav');
 
-  if (!explainerData || explainerData._format === 'markdown') return;
-
-  // Build flat list (same logic as rail)
-  const subsections = [];
-  if (Array.isArray(explainerData.desarrollo)) {
-    explainerData.desarrollo.forEach((section, sIdx) => {
-      if (Array.isArray(section.subsecciones)) {
-        section.subsecciones.forEach((sub, subIdx) => {
-          subsections.push({
-            id: `subsec-${partId}-${sIdx}-${subIdx}`,
-            title: sub.titulo_subseccion || '',
-          });
-        });
-      }
-    });
-  }
-  if (Array.isArray(explainerData.conexiones_contextuales)) {
-    explainerData.conexiones_contextuales.forEach((cx, cxIdx) => {
-      subsections.push({
-        id: `subsec-${partId}-cx-${cxIdx}`,
-        title: cx.seccion_temario_relacionada || '',
-      });
-    });
-  }
   if (subsections.length === 0) return;
 
   const bar = document.createElement('div');
@@ -750,7 +739,6 @@ function renderSmartBar(partId, explainerData) {
   bar.dataset.count = String(subsections.length);
   bar.innerHTML = `
     <div class="smart-bar-progress"></div>
-    <button type="button" class="smart-bar-peek-hitarea" aria-label="Mostrar navegación de subsecciones"></button>
     <button type="button" class="smart-bar-prev" aria-label="Subsección anterior">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
     </button>
@@ -765,17 +753,14 @@ function renderSmartBar(partId, explainerData) {
   const prevBtn = bar.querySelector('.smart-bar-prev');
   const nextBtn = bar.querySelector('.smart-bar-next');
   const titleBtn = bar.querySelector('.smart-bar-title');
-  const peekBtn = bar.querySelector('.smart-bar-peek-hitarea');
 
   prevBtn.addEventListener('click', () => navigateSubsection(-1));
   nextBtn.addEventListener('click', () => navigateSubsection(1));
   titleBtn.addEventListener('click', () => openSubsectionSheet(subsections));
-  peekBtn.addEventListener('click', () => {
-    bar.classList.remove('retracted');
-    bar.dataset.manualExpandedUntil = String(Date.now() + 1200);
-  });
 
   content.appendChild(bar);
+  content.classList.add('has-mobile-subsection-nav');
+  document.body.classList.add('has-mobile-subsection-nav');
   updateSmartBarText(state.currentSubsectionId);
 }
 
@@ -786,23 +771,14 @@ export function updateSmartBarText(subsectionId) {
   const prevBtn = bar.querySelector('.smart-bar-prev');
   const nextBtn = bar.querySelector('.smart-bar-next');
 
-  const subsections = [];
-  const rail = document.querySelector('.ghost-rail');
-  if (rail) {
-    rail.querySelectorAll('.ghost-rail-node').forEach((n) => {
-      subsections.push({
-        id: n.dataset.subsectionId,
-        title: n.querySelector('.ghost-rail-label')?.textContent || '',
-      });
-    });
-  }
+  const subsections = _renderedSubsections;
 
   const idx = subsections.findIndex((s) => s.id === subsectionId);
   if (titleText) {
-    titleText.textContent = idx !== -1 ? subsections[idx].title : '—';
+    titleText.textContent = idx !== -1 ? subsections[idx].title : 'Índice de subsecciones';
   }
   if (prevBtn) prevBtn.disabled = idx <= 0;
-  if (nextBtn) nextBtn.disabled = idx === -1 || idx >= subsections.length - 1;
+  if (nextBtn) nextBtn.disabled = subsections.length === 0 || idx >= subsections.length - 1;
 
   // Update progress hairline
   const progress = bar.querySelector('.smart-bar-progress');
@@ -813,26 +789,45 @@ export function updateSmartBarText(subsectionId) {
 }
 
 function navigateSubsection(delta) {
-  const subsections = [];
-  document.querySelectorAll('.ghost-rail-node').forEach((n) => {
-    subsections.push(n.dataset.subsectionId);
-  });
-  const idx = subsections.findIndex((id) => id === state.currentSubsectionId);
-  const next = subsections[idx + delta];
+  const idx = _renderedSubsections.findIndex((sub) => sub.id === state.currentSubsectionId);
+  const next = _renderedSubsections[idx + delta];
   if (next) {
-    const target = document.getElementById(next);
+    const target = document.getElementById(next.id);
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
 function openSubsectionSheet(subsections) {
-  // Simple sheet using existing modal/overlay patterns in the app
+  const previouslyFocused = document.activeElement;
   const overlay = document.createElement('div');
   overlay.className = 'subsection-sheet-overlay';
   const sheet = document.createElement('div');
   sheet.className = 'subsection-sheet';
-  sheet.innerHTML = `<div class="subsection-sheet-handle"></div><div class="subsection-sheet-list"></div>`;
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  sheet.setAttribute('aria-labelledby', 'subsection-sheet-title');
+  sheet.innerHTML = `
+    <div class="subsection-sheet-handle"></div>
+    <div class="subsection-sheet-header">
+      <h2 id="subsection-sheet-title" class="subsection-sheet-title">Subsecciones</h2>
+      <button type="button" class="subsection-sheet-close" aria-label="Cerrar índice">×</button>
+    </div>
+    <div class="subsection-sheet-list"></div>
+  `;
   const list = sheet.querySelector('.subsection-sheet-list');
+  const closeBtn = sheet.querySelector('.subsection-sheet-close');
+
+  const closeSheet = () => {
+    document.removeEventListener('keydown', onKeydown);
+    overlay.remove();
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+      previouslyFocused.focus();
+    }
+  };
+
+  const onKeydown = (e) => {
+    if (e.key === 'Escape') closeSheet();
+  };
 
   subsections.forEach((sub, i) => {
     const item = document.createElement('button');
@@ -843,17 +838,23 @@ function openSubsectionSheet(subsections) {
     item.addEventListener('click', () => {
       const target = document.getElementById(sub.id);
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      overlay.remove();
+      closeSheet();
     });
     list.appendChild(item);
   });
 
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
+    if (e.target === overlay) closeSheet();
   });
+  closeBtn.addEventListener('click', closeSheet);
 
   overlay.appendChild(sheet);
   document.body.appendChild(overlay);
+  document.addEventListener('keydown', onKeydown);
+  const focusTarget = sheet.querySelector('.subsection-sheet-item.active')
+    || sheet.querySelector('.subsection-sheet-item')
+    || closeBtn;
+  focusTarget?.focus();
 }
 
 function renderRecorrido(data) {
@@ -967,6 +968,7 @@ export function renderTab(tabName, contenido) {
   if (!contenido) {
     hide(loading);
     contentEl.innerHTML = '';
+    if (tabName === 'explicacion') clearSubsectionNavigation();
     return;
   }
 
@@ -976,6 +978,7 @@ export function renderTab(tabName, contenido) {
   if (contenido.status === 'processing') {
     show(loading);
     contentEl.innerHTML = '';
+    if (tabName === 'explicacion') clearSubsectionNavigation();
     return;
   }
 
@@ -983,18 +986,21 @@ export function renderTab(tabName, contenido) {
 
   if (!data) {
     contentEl.innerHTML = '';
+    if (tabName === 'explicacion') clearSubsectionNavigation();
     return;
   }
 
   if (data.error) {
     contentEl.innerHTML = `<div class="error-state"><div class="error-state-title">Error en la generación</div>${escHtml(data.error)}</div>`;
+    if (tabName === 'explicacion') clearSubsectionNavigation();
     return;
   }
 
   if (tabName === 'explicacion') {
     contentEl.innerHTML = renderExplainer(data, state.currentPartId);
-    renderGhostRail(state.currentPartId, data);
-    renderSmartBar(state.currentPartId, data);
+    _renderedSubsections = buildSubsectionList(state.currentPartId, data);
+    renderGhostRail(_renderedSubsections);
+    renderSmartBar(_renderedSubsections);
     // Defer positioning until DOM is laid out
     requestAnimationFrame(() => requestAnimationFrame(positionGhostRailNodes));
   } else if (tabName === 'recorrido') {
@@ -1014,6 +1020,16 @@ export function activateTab(tabName) {
     panel.classList.toggle('active', isActive);
     panel.classList.toggle('hidden', !isActive);
   });
+  const isExplanation = tabName === 'explicacion';
+  const rail = document.querySelector('.ghost-rail');
+  const bar = document.querySelector('.smart-bar');
+  if (rail) rail.style.display = isExplanation ? '' : 'none';
+  if (bar) bar.style.display = isExplanation ? '' : 'none';
+  document.body.classList.toggle('has-mobile-subsection-nav', isExplanation && !!bar);
+  document.getElementById('part-content')?.classList.toggle(
+    'has-mobile-subsection-nav',
+    isExplanation && !!bar,
+  );
   saveViewState();
 }
 
@@ -1034,8 +1050,7 @@ export function selectPart(partId) {
   }
 
   // Clean up subsection UI from previous part
-  document.querySelector('.ghost-rail')?.remove();
-  document.querySelector('.smart-bar')?.remove();
+  clearSubsectionNavigation();
   state.currentSubsectionId = null;
 
   state.lastPartChangeAt = Date.now();

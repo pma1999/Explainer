@@ -79,11 +79,12 @@ describe('renderSmartBar (via renderTab)', () => {
     expect(bar.getAttribute('aria-label')).toBe('Navegación de subsección');
     expect(bar.dataset.count).toBe('4'); // 2 + 1 + 1
     expect(bar.querySelector('.smart-bar-progress')).not.toBeNull();
-    expect(bar.querySelector('.smart-bar-peek-hitarea')).not.toBeNull();
+    expect(bar.querySelector('.smart-bar-peek-hitarea')).toBeNull();
     expect(bar.querySelector('.smart-bar-prev')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-next')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-title')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-title-text')).not.toBeNull();
+    expect(outer.classList.contains('has-mobile-subsection-nav')).toBe(true);
   });
 
   it('returns early when explainer has no subsections and no conexiones', () => {
@@ -93,6 +94,7 @@ describe('renderSmartBar (via renderTab)', () => {
     };
     renderTab('explicacion', empty);
     expect(document.querySelector('.smart-bar')).toBeNull();
+    expect(document.getElementById('part-content').classList.contains('has-mobile-subsection-nav')).toBe(false);
   });
 
   it('returns early when explainer is markdown fallback', () => {
@@ -111,15 +113,15 @@ describe('renderSmartBar (via renderTab)', () => {
     expect(bars.length).toBe(1);
   });
 
-  it('prev button is disabled and title is em-dash when no current subsection', () => {
+  it('keeps the dock actionable when no current subsection is known yet', () => {
     renderTab('explicacion', sampleData);
     const bar = document.querySelector('.smart-bar');
     const prev = bar.querySelector('.smart-bar-prev');
     const next = bar.querySelector('.smart-bar-next');
     const text = bar.querySelector('.smart-bar-title-text');
     expect(prev.disabled).toBe(true);
-    expect(next.disabled).toBe(true);
-    expect(text.textContent).toBe('—');
+    expect(next.disabled).toBe(false);
+    expect(text.textContent).toBe('Índice de subsecciones');
   });
 });
 
@@ -131,7 +133,7 @@ describe('updateSmartBarText', () => {
     renderTab('explicacion', sampleData);
   });
 
-  it('sets title to the matching ghost-rail label', () => {
+  it('sets title to the matching subsection label', () => {
     updateSmartBarText('subsec-1-1-0');
     const text = document.querySelector('.smart-bar-title-text');
     expect(text.textContent).toBe('Sub C');
@@ -157,12 +159,12 @@ describe('updateSmartBarText', () => {
     expect(progress.style.width).toBe('50%'); // 2/4 = 50%
   });
 
-  it('progress is 0% and title em-dash when subsection unknown', () => {
+  it('progress is 0% and title opens the index when subsection is unknown', () => {
     updateSmartBarText('not-found');
     const progress = document.querySelector('.smart-bar-progress');
     const text = document.querySelector('.smart-bar-title-text');
     expect(progress.style.width).toBe('0%');
-    expect(text.textContent).toBe('—');
+    expect(text.textContent).toBe('Índice de subsecciones');
   });
 
   it('is a no-op when smart bar is not mounted', () => {
@@ -206,6 +208,15 @@ describe('navigateSubsection (via prev/next click)', () => {
     expect(spy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
   });
 
+  it('clicking next without a current subsection scrolls to the first subsection', () => {
+    const target = document.getElementById('subsec-1-0-0');
+    expect(target).not.toBeNull();
+    const spy = vi.spyOn(target, 'scrollIntoView');
+
+    document.querySelector('.smart-bar-next').click();
+    expect(spy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
   it('clicking next at last subsection does nothing', () => {
     state.currentSubsectionId = 'subsec-1-cx-0';
     updateSmartBarText('subsec-1-cx-0');
@@ -237,7 +248,11 @@ describe('openSubsectionSheet (via title click)', () => {
     expect(overlay).not.toBeNull();
     const sheet = overlay.querySelector('.subsection-sheet');
     expect(sheet).not.toBeNull();
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    expect(sheet.getAttribute('aria-modal')).toBe('true');
     expect(sheet.querySelector('.subsection-sheet-handle')).not.toBeNull();
+    expect(sheet.querySelector('.subsection-sheet-title').textContent).toBe('Subsecciones');
+    expect(sheet.querySelector('.subsection-sheet-close')).not.toBeNull();
 
     const items = overlay.querySelectorAll('.subsection-sheet-item');
     expect(items.length).toBe(4);
@@ -270,13 +285,6 @@ describe('openSubsectionSheet (via title click)', () => {
     expect(document.querySelector('.subsection-sheet-overlay')).toBeNull();
   });
 
-  it('clicking peek hitarea expands a retracted smart bar', () => {
-    const bar = document.querySelector('.smart-bar');
-    bar.classList.add('retracted');
-    document.querySelector('.smart-bar-peek-hitarea').click();
-    expect(bar.classList.contains('retracted')).toBe(false);
-  });
-
   it('clicking the backdrop (overlay itself) closes the sheet', () => {
     document.querySelector('.smart-bar-title').click();
     const overlay = document.querySelector('.subsection-sheet-overlay');
@@ -284,6 +292,22 @@ describe('openSubsectionSheet (via title click)', () => {
 
     // Simulate a click whose target IS the overlay (not a child)
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(document.querySelector('.subsection-sheet-overlay')).toBeNull();
+  });
+
+  it('clicking the close button closes the sheet', () => {
+    document.querySelector('.smart-bar-title').click();
+    document.querySelector('.subsection-sheet-close').click();
+
+    expect(document.querySelector('.subsection-sheet-overlay')).toBeNull();
+  });
+
+  it('pressing Escape closes the sheet', () => {
+    document.querySelector('.smart-bar-title').click();
+    expect(document.querySelector('.subsection-sheet-overlay')).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
     expect(document.querySelector('.subsection-sheet-overlay')).toBeNull();
   });
