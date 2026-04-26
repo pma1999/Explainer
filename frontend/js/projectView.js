@@ -982,6 +982,11 @@ export function activateTab(tabName) {
 }
 
 export function selectPart(partId) {
+  // Clean up subsection UI from previous part
+  document.querySelector('.ghost-rail')?.remove();
+  document.querySelector('.smart-bar')?.remove();
+  state.currentSubsectionId = null;
+
   state.lastPartChangeAt = Date.now();
   state.currentPartId = partId;
 
