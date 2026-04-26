@@ -546,6 +546,32 @@ function initDescriptionExpand() {
   });
 }
 
+function initSmartBarScrollBehavior() {
+  const main = document.getElementById('project-main');
+  if (!main) return;
+  let lastScrollY = 0;
+  let ticking = false;
+
+  main.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const y = main.scrollTop;
+      const delta = y - lastScrollY;
+      const bar = document.querySelector('.smart-bar');
+      if (bar) {
+        if (delta > 5) {
+          bar.classList.add('retracted');
+        } else if (delta < -10) {
+          bar.classList.remove('retracted');
+        }
+      }
+      lastScrollY = y;
+      ticking = false;
+    });
+  }, { passive: true });
+}
+
 function bootstrap() {
   setViewChangeCallback(saveViewState);
 
@@ -651,6 +677,7 @@ function bootstrap() {
   });
   initFullProjectExport();
   initReadingProgressBar();
+  initSmartBarScrollBehavior();
   initSidebarMobile();
   initSidebarCollapse();
   initPartNavigation();
