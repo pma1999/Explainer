@@ -229,3 +229,58 @@ def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch
     assert captured["expected_page_numbers"] == (1, 3)
     assert context.source_pdf_path == "document-numbered.pdf"
     assert context.cache_entry is fake_cache_entry
+
+
+def test_adjacent_subparts_for_audit_uses_next_part_first_subpart_for_tail_boundary():
+    import main as m
+
+    partes_segmentadas = [
+        {"numero": 1, "subpartes": [{"numero_subparte": 1, "titulo": "1.1"}, {"numero_subparte": 2, "titulo": "1.2"}]},
+        {"numero": 2, "subpartes": [{"numero_subparte": 1, "titulo": "2.1"}, {"numero_subparte": 2, "titulo": "2.2"}]},
+    ]
+
+    prev_sp, next_sp = m._adjacent_subparts_for_audit(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=partes_segmentadas[0],
+        subpart_idx=1,
+    )
+
+    assert prev_sp is partes_segmentadas[0]["subpartes"][0]
+    assert next_sp is partes_segmentadas[1]["subpartes"][0]
+
+
+def test_adjacent_subparts_for_audit_uses_previous_part_last_subpart_for_head_boundary():
+    import main as m
+
+    partes_segmentadas = [
+        {"numero": 1, "subpartes": [{"numero_subparte": 1, "titulo": "1.1"}, {"numero_subparte": 2, "titulo": "1.2"}]},
+        {"numero": 2, "subpartes": [{"numero_subparte": 1, "titulo": "2.1"}, {"numero_subparte": 2, "titulo": "2.2"}]},
+    ]
+
+    prev_sp, next_sp = m._adjacent_subparts_for_audit(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=partes_segmentadas[1],
+        subpart_idx=0,
+    )
+
+    assert prev_sp is partes_segmentadas[0]["subpartes"][1]
+    assert next_sp is partes_segmentadas[1]["subpartes"][1]
+
+
+def test_adjacent_subparts_for_audit_uses_segmentation_order_and_skips_parts_without_subparts():
+    import main as m
+
+    partes_segmentadas = [
+        {"numero": 10, "subpartes": [{"numero_subparte": 1, "titulo": "10.1"}]},
+        {"numero": 20, "subpartes": []},
+        {"numero": 40, "subpartes": [{"numero_subparte": 1, "titulo": "40.1"}]},
+    ]
+
+    prev_sp, next_sp = m._adjacent_subparts_for_audit(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=partes_segmentadas[0],
+        subpart_idx=0,
+    )
+
+    assert prev_sp is None
+    assert next_sp is partes_segmentadas[2]["subpartes"][0]
