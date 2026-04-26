@@ -29,9 +29,35 @@ let _lastSubsectionId = null;
 let _subsectionAccumulator = new Map(); // id -> accumulated ms
 let _subsectionLastActivatedAt = 0;
 
-async function saveSubsectionProgress(payload) {
-  // TODO(Task 13): fully implement saveSubsectionProgress
-  console.debug('[saveSubsectionProgress] stub called with', payload);
+async function saveSubsectionProgress({ subsection_id, part_id, tab, completed, is_last_read }) {
+  if (!state.currentProjectId || !state.user?.id) return;
+  if (state.isSharedView) return; // No server persistence for shared views
+
+  const payload = { subsection_id, part_id, tab };
+  if (completed !== undefined) payload.completed = completed;
+  if (is_last_read !== undefined) payload.is_last_read = is_last_read;
+
+  try {
+    const updated = await api(`/api/projects/${state.currentProjectId}/progress/subsection`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (updated?.reading_progress && state.currentProject) {
+      state.currentProject.reading_progress = updated.reading_progress;
+    }
+  } catch (err) {
+    // Silently fail — local session state already holds the truth
+    if (is_last_read) {
+      // Optimistically update local project object so offline works
+      const rp = state.currentProject.reading_progress || {};
+      state.currentProject.reading_progress = {
+        ...rp,
+        last_subsection: { part_id, subsection_id, tab },
+        last_read_at: new Date().toISOString(),
+      };
+    }
+  }
 }
 
 function initSubsectionObserver() {
