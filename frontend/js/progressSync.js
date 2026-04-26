@@ -175,6 +175,7 @@ export function recordSubsectionProgress({
   if (!changed) return false;
 
   state.currentProject.reading_progress = progress;
+  state.currentProject.updated_at = nowIso;
   scheduleLocalProgressBackup();
 
   if (!state.user?.id || state.isSharedView) return true;

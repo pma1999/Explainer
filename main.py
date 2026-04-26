@@ -33,7 +33,6 @@ from backend.supabase_data import (
     revoke_share_token,
     list_projects_summary,
     update_project,
-    set_section_read_status,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -102,7 +101,7 @@ from backend.subpart_scope import (
     build_subpart_negative_scope_block,
     build_subpart_scope_contract_block,
 )
-from backend.project_progress import handle_update_subsection_progress
+from backend.project_progress import handle_update_section_progress, handle_update_subsection_progress
 
 
 # Configurar logging al importar el módulo
@@ -488,36 +487,7 @@ async def api_update_progress(
 ):
     """Mark or unmark a section as read. Body: { "part_id": 3, "completed": true|false }.
     If completed is omitted, defaults to True (mark as read)."""
-    part_id = body.get("part_id")
-    if part_id is None:
-        raise HTTPException(status_code=400, detail="part_id requerido")
-    try:
-        part_id = int(part_id)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="part_id debe ser un número")
-
-    completed = body.get("completed", True)
-    if not isinstance(completed, bool):
-        completed = True
-
-    project = get_project(project_id, user_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-
-    partes = project.get("segmentation") or {}
-    partes_list = partes.get("partes") or []
-    if not any(p.get("numero") == part_id for p in partes_list):
-        raise HTTPException(status_code=400, detail="Sección no encontrada")
-
-    contenido = project.get("partes_contenido") or {}
-    part_status = contenido.get(str(part_id), {}).get("status")
-    if part_status != "completed":
-        raise HTTPException(status_code=400, detail="El contenido de esta sección aún no está listo")
-
-    updated = set_section_read_status(project_id, user_id, part_id, completed, project=project)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    return updated
+    return handle_update_section_progress(user_id, project_id, body)
 
 
 @app.patch("/api/projects/{project_id}/progress/subsection")

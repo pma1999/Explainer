@@ -8,6 +8,8 @@ from fastapi import HTTPException
 from backend.supabase_data import (
     _sanitize_project_for_shared,
     _update_reading_progress_minimal,
+    apply_section_progress_rpc,
+    apply_subsection_progress_rpc,
     create_share_token,
     get_project,
     revoke_share_token,
@@ -16,7 +18,7 @@ from backend.supabase_data import (
     update_subsection_progress,
     update_subsection_progress_batch,
 )
-from backend.project_progress import handle_update_subsection_progress
+from backend.project_progress import handle_update_section_progress, handle_update_subsection_progress
 
 
 class TestSanitizeProjectForShared:
@@ -202,88 +204,99 @@ class TestApiUpdateSubsectionProgress:
 
     def test_400_when_subsection_id_missing(self):
         body = {"part_id": 1}
-        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
-            with pytest.raises(HTTPException) as exc_info:
-                handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "subsection_id y part_id requeridos" in exc_info.value.detail
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_subsection_progress("user-1", "p1", body)
+        assert exc_info.value.status_code == 400
+        assert "subsection_id y part_id requeridos" in exc_info.value.detail
 
     def test_400_when_part_id_missing(self):
         body = {"subsection_id": "subsec-1-0-0"}
-        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
-            with pytest.raises(HTTPException) as exc_info:
-                handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "subsection_id y part_id requeridos" in exc_info.value.detail
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_subsection_progress("user-1", "p1", body)
+        assert exc_info.value.status_code == 400
+        assert "subsection_id y part_id requeridos" in exc_info.value.detail
 
     def test_400_when_part_id_not_a_number(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": "abc"}
-        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
-            with pytest.raises(HTTPException) as exc_info:
-                handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "part_id debe ser un número" in exc_info.value.detail
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_subsection_progress("user-1", "p1", body)
+        assert exc_info.value.status_code == 400
+        assert "part_id debe ser un número" in exc_info.value.detail
 
     def test_400_when_completed_not_bool(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": "yes"}
-        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
-            with pytest.raises(HTTPException) as exc_info:
-                handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "completed debe ser boolean" in exc_info.value.detail
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_subsection_progress("user-1", "p1", body)
+        assert exc_info.value.status_code == 400
+        assert "completed debe ser boolean" in exc_info.value.detail
 
     def test_404_when_project_not_found(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
-        with patch("backend.project_progress.get_project_progress_context", return_value=None):
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="not_found"):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 404
-            assert "Proyecto no encontrado" in exc_info.value.detail
+        assert exc_info.value.status_code == 404
+        assert "Proyecto no encontrado" in exc_info.value.detail
 
     def test_400_when_part_not_found(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
-        project = {"id": "p1", "segmentation": {"partes": [{"numero": 2, "titulo": "P2"}]}}
-        with patch("backend.project_progress.get_project_progress_context", return_value=project):
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="part_not_found"):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "Sección no encontrada" in exc_info.value.detail
+        assert exc_info.value.status_code == 400
+        assert "Sección no encontrada" in exc_info.value.detail
 
     def test_400_when_subsection_id_does_not_belong_to_part(self):
         body = {"subsection_id": "subsec-2-0-0", "part_id": 1, "completed": True}
-        project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project_progress_context", return_value=project):
+        with patch("backend.project_progress.apply_subsection_progress_rpc") as mock_rpc:
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
-            assert exc_info.value.status_code == 400
-            assert "subsection_id no pertenece a la sección" in exc_info.value.detail
+        assert exc_info.value.status_code == 400
+        assert "subsection_id no pertenece a la sección" in exc_info.value.detail
+        mock_rpc.assert_not_called()
 
     def test_200_successful_update(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True, "is_last_read": True}
-        project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project_progress_context", return_value=project):
-            with patch(
-                "backend.project_progress.update_subsection_progress",
-                return_value={"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}},
-            ):
-                result = handle_update_subsection_progress("user-1", "p1", body)
-        assert result == {"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}}
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="ok") as mock_rpc:
+            result = handle_update_subsection_progress("user-1", "p1", body)
+        assert result == {"ok": True}
+        mock_rpc.assert_called_once_with(
+            "p1",
+            "user-1",
+            1,
+            tab="explicacion",
+            completed_subsection_ids=["subsec-1-0-0"],
+            uncompleted_subsection_ids=[],
+            last_subsection_id="subsec-1-0-0",
+        )
 
     def test_is_last_read_defaults_to_false(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
-        project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project_progress_context", return_value=project):
-            with patch("backend.project_progress.update_subsection_progress", return_value={"ok": True}) as mock_update:
-                handle_update_subsection_progress("user-1", "p1", body)
-        mock_update.assert_called_once_with(
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="ok") as mock_rpc:
+            handle_update_subsection_progress("user-1", "p1", body)
+        mock_rpc.assert_called_once_with(
             "p1",
             "user-1",
-            "subsec-1-0-0",
             1,
-            completed=True,
-            is_last_read=False,
             tab="explicacion",
-            project=project,
+            completed_subsection_ids=["subsec-1-0-0"],
+            uncompleted_subsection_ids=[],
+            last_subsection_id=None,
+        )
+
+    def test_completed_false_uses_uncompleted_subsection_ids(self):
+        body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": False}
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="ok") as mock_rpc:
+            result = handle_update_subsection_progress("user-1", "p1", body)
+        assert result == {"ok": True}
+        mock_rpc.assert_called_once_with(
+            "p1",
+            "user-1",
+            1,
+            tab="explicacion",
+            completed_subsection_ids=[],
+            uncompleted_subsection_ids=["subsec-1-0-0"],
+            last_subsection_id=None,
         )
 
     def test_batch_payload_updates_multiple_ids(self):
@@ -292,21 +305,56 @@ class TestApiUpdateSubsectionProgress:
             "tab": "explicacion",
             "last_subsection_id": "subsec-1-0-2",
             "completed_subsection_ids": ["subsec-1-0-0", "subsec-1-0-1", "subsec-1-0-0"],
+            "uncompleted_subsection_ids": ["subsec-1-0-3", "subsec-1-0-3"],
         }
-        project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project_progress_context", return_value=project):
-            with patch("backend.project_progress.update_subsection_progress_batch", return_value={"ok": True}) as mock_update:
-                result = handle_update_subsection_progress("user-1", "p1", body)
+        with patch("backend.project_progress.apply_subsection_progress_rpc", return_value="ok") as mock_rpc:
+            result = handle_update_subsection_progress("user-1", "p1", body)
         assert result == {"ok": True}
-        mock_update.assert_called_once_with(
+        mock_rpc.assert_called_once_with(
             "p1",
             "user-1",
             1,
             tab="explicacion",
             completed_subsection_ids=["subsec-1-0-0", "subsec-1-0-1"],
+            uncompleted_subsection_ids=["subsec-1-0-3"],
             last_subsection_id="subsec-1-0-2",
-            project=project,
         )
+
+
+class TestApiUpdateSectionProgress:
+    """Tests for PATCH /api/projects/{id}/progress endpoint."""
+
+    def test_400_when_part_id_missing(self):
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_section_progress("user-1", "p1", {})
+        assert exc_info.value.status_code == 400
+        assert "part_id requerido" in exc_info.value.detail
+
+    def test_400_when_part_id_not_a_number(self):
+        with pytest.raises(HTTPException) as exc_info:
+            handle_update_section_progress("user-1", "p1", {"part_id": "abc"})
+        assert exc_info.value.status_code == 400
+        assert "part_id debe ser un número" in exc_info.value.detail
+
+    def test_200_calls_section_rpc(self):
+        with patch("backend.project_progress.apply_section_progress_rpc", return_value="ok") as mock_rpc:
+            result = handle_update_section_progress("user-1", "p1", {"part_id": "1", "completed": False})
+        assert result == {"ok": True}
+        mock_rpc.assert_called_once_with("p1", "user-1", 1, completed=False)
+
+    def test_404_when_project_not_found(self):
+        with patch("backend.project_progress.apply_section_progress_rpc", return_value="not_found"):
+            with pytest.raises(HTTPException) as exc_info:
+                handle_update_section_progress("user-1", "p1", {"part_id": 1})
+        assert exc_info.value.status_code == 404
+        assert "Proyecto no encontrado" in exc_info.value.detail
+
+    def test_400_when_content_not_ready(self):
+        with patch("backend.project_progress.apply_section_progress_rpc", return_value="content_not_ready"):
+            with pytest.raises(HTTPException) as exc_info:
+                handle_update_section_progress("user-1", "p1", {"part_id": 1})
+        assert exc_info.value.status_code == 400
+        assert "aún no está listo" in exc_info.value.detail
 
 
 class TestUpdateSubsectionProgress:
@@ -483,3 +531,62 @@ class TestUpdateSubsectionProgress:
         assert table.update.call_args.kwargs["returning"].value == "minimal"
         first_eq.eq.assert_called_once_with("user_id", "user-1")
         execute.assert_called_once()
+
+
+class TestProgressRpcHelpers:
+    """Tests for compact Supabase RPC progress writes."""
+
+    def test_apply_subsection_progress_rpc_calls_supabase_rpc(self):
+        response = MagicMock(data="ok")
+        rpc_builder = MagicMock()
+        rpc_builder.execute.return_value = response
+        client = MagicMock()
+        client.rpc.return_value = rpc_builder
+
+        with patch("backend.supabase_data._client", return_value=client):
+            status = apply_subsection_progress_rpc(
+                "p1",
+                "user-1",
+                1,
+                tab="recorrido",
+                completed_subsection_ids=["subsec-1-0-0"],
+                uncompleted_subsection_ids=["subsec-1-0-1"],
+                last_subsection_id="subsec-1-0-2",
+            )
+
+        assert status == "ok"
+        client.rpc.assert_called_once_with(
+            "apply_project_subsection_progress",
+            {
+                "p_project_id": "p1",
+                "p_user_id": "user-1",
+                "p_part_id": 1,
+                "p_tab": "recorrido",
+                "p_completed_subsection_ids": ["subsec-1-0-0"],
+                "p_uncompleted_subsection_ids": ["subsec-1-0-1"],
+                "p_last_subsection_id": "subsec-1-0-2",
+            },
+        )
+        rpc_builder.execute.assert_called_once()
+
+    def test_apply_section_progress_rpc_calls_supabase_rpc(self):
+        response = MagicMock(data=[{"apply_project_section_progress": "noop"}])
+        rpc_builder = MagicMock()
+        rpc_builder.execute.return_value = response
+        client = MagicMock()
+        client.rpc.return_value = rpc_builder
+
+        with patch("backend.supabase_data._client", return_value=client):
+            status = apply_section_progress_rpc("p1", "user-1", 2, completed=False)
+
+        assert status == "noop"
+        client.rpc.assert_called_once_with(
+            "apply_project_section_progress",
+            {
+                "p_project_id": "p1",
+                "p_user_id": "user-1",
+                "p_part_id": 2,
+                "p_completed": False,
+            },
+        )
+        rpc_builder.execute.assert_called_once()

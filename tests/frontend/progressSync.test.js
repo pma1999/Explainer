@@ -37,10 +37,7 @@ describe('progressSync', () => {
     vi.resetModules();
     resetProject();
     api.mockReset();
-    api.mockResolvedValue({
-      reading_progress: state.currentProject.reading_progress,
-      updated_at: '2024-01-02T00:00:00Z',
-    });
+    api.mockResolvedValue({ ok: true });
     loadBackupAsync.mockReset();
     loadBackupAsync.mockResolvedValue({ projects: [state.currentProject] });
     syncProjectsToBackup.mockReset();
@@ -68,6 +65,7 @@ describe('progressSync', () => {
       tab: 'explicacion',
     });
     expect(state.currentProject.reading_progress.last_read_at).toBeTruthy();
+    expect(state.currentProject.updated_at).not.toBe('2024-01-01T00:00:00Z');
   });
 
   it('batches rapid subsection changes into one flush', async () => {
@@ -176,5 +174,20 @@ describe('progressSync', () => {
 
     expect(api).toHaveBeenCalledTimes(2);
     expect(JSON.parse(api.mock.calls[1][1].body).last_subsection_id).toBe('subsec-1-0-1');
+  });
+
+  it('keeps local progress when the server returns a compact ok response', async () => {
+    progressSync.recordSubsectionProgress({
+      subsection_id: 'subsec-1-0-0',
+      part_id: 1,
+      tab: 'explicacion',
+      is_last_read: true,
+    });
+
+    await progressSync.flushSubsectionProgress({ force: true });
+
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(state.currentProject.reading_progress.last_subsection.subsection_id).toBe('subsec-1-0-0');
+    expect(state.currentProject.reading_progress.last_read_at).toBeTruthy();
   });
 });

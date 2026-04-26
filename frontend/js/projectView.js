@@ -130,6 +130,20 @@ function saveViewState() {
   if (_saveViewState) _saveViewState();
 }
 
+function applySectionReadProgress(project, partId, completed, nowIso = new Date().toISOString()) {
+  const progress = { ...(project.reading_progress || {}) };
+  const completedParts = new Set(progress.completed_parts || []);
+  if (completed) {
+    completedParts.add(partId);
+  } else {
+    completedParts.delete(partId);
+  }
+  progress.completed_parts = [...completedParts].sort((a, b) => Number(a) - Number(b));
+  progress.last_read_at = nowIso;
+  project.reading_progress = progress;
+  project.updated_at = nowIso;
+}
+
 /** Mark a section as read. Fire-and-forget. */
 export async function markSectionComplete(partId) {
   if (!state.currentProjectId || !state.currentProject || !state.user?.id) return;
@@ -138,6 +152,11 @@ export async function markSectionComplete(partId) {
   if (!contenido || contenido.status !== 'completed') return;
   const completed = new Set(project?.reading_progress?.completed_parts || []);
   if (completed.has(partId)) return;
+
+  const prevProgress = project.reading_progress;
+  const prevUpdatedAt = project.updated_at;
+  applySectionReadProgress(project, partId, true);
+  renderSidebarNav(state.currentProject);
 
   try {
     const updated = await api(`/api/projects/${state.currentProjectId}/progress`, {
@@ -150,7 +169,11 @@ export async function markSectionComplete(partId) {
       if (updated.updated_at) state.currentProject.updated_at = updated.updated_at;
       renderSidebarNav(state.currentProject);
     }
-  } catch (_) {}
+  } catch (_) {
+    state.currentProject.reading_progress = prevProgress;
+    state.currentProject.updated_at = prevUpdatedAt;
+    renderSidebarNav(state.currentProject);
+  }
 }
 
 const _toggleInProgress = new Set();
@@ -166,22 +189,11 @@ export async function toggleSectionComplete(partId, completed) {
   if (!completed && !completedSet.has(partId)) return;
   if (_toggleInProgress.has(partId)) return;
 
-  const prevCompleted = [...(project?.reading_progress?.completed_parts || [])];
+  const prevProgress = project.reading_progress;
+  const prevUpdatedAt = project.updated_at;
 
   // Optimistic update: apply immediately for instant feedback
-  if (completed) {
-    const next = new Set(prevCompleted);
-    next.add(partId);
-    state.currentProject.reading_progress = {
-      ...state.currentProject.reading_progress,
-      completed_parts: [...next].sort((a, b) => a - b),
-    };
-  } else {
-    state.currentProject.reading_progress = {
-      ...state.currentProject.reading_progress,
-      completed_parts: prevCompleted.filter((p) => p !== partId),
-    };
-  }
+  applySectionReadProgress(state.currentProject, partId, completed);
   renderSidebarNav(state.currentProject);
   updateToggleCompleteButton();
   setToggleDisabledForPart(partId, true);
@@ -200,10 +212,8 @@ export async function toggleSectionComplete(partId, completed) {
       updateToggleCompleteButton();
     }
   } catch (_) {
-    state.currentProject.reading_progress = {
-      ...state.currentProject.reading_progress,
-      completed_parts: prevCompleted,
-    };
+    state.currentProject.reading_progress = prevProgress;
+    state.currentProject.updated_at = prevUpdatedAt;
     renderSidebarNav(state.currentProject);
     updateToggleCompleteButton();
     toast('Error al actualizar el progreso', 'error');

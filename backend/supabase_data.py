@@ -186,6 +186,71 @@ def _update_reading_progress_minimal(
     return _progress_response(reading_progress, updated_at)
 
 
+def _coerce_rpc_status(data: Any) -> str:
+    if isinstance(data, str):
+        return data
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict):
+            for value in first.values():
+                if isinstance(value, str):
+                    return value
+    if data is None:
+        return "error"
+    return str(data)
+
+
+def _progress_rpc_status(function_name: str, params: dict[str, Any]) -> str:
+    response = _client().rpc(function_name, params).execute()
+    return _coerce_rpc_status(getattr(response, "data", None) if response else None)
+
+
+def apply_subsection_progress_rpc(
+    project_id: str,
+    user_id: str,
+    part_id: int,
+    *,
+    tab: str = "explicacion",
+    completed_subsection_ids: list[str] | None = None,
+    uncompleted_subsection_ids: list[str] | None = None,
+    last_subsection_id: str | None = None,
+) -> str:
+    """Apply subsection progress inside Postgres and return a compact status."""
+    return _progress_rpc_status(
+        "apply_project_subsection_progress",
+        {
+            "p_project_id": project_id,
+            "p_user_id": user_id,
+            "p_part_id": part_id,
+            "p_tab": tab or "explicacion",
+            "p_completed_subsection_ids": completed_subsection_ids or [],
+            "p_uncompleted_subsection_ids": uncompleted_subsection_ids or [],
+            "p_last_subsection_id": last_subsection_id,
+        },
+    )
+
+
+def apply_section_progress_rpc(
+    project_id: str,
+    user_id: str,
+    part_id: int,
+    *,
+    completed: bool = True,
+) -> str:
+    """Apply section progress inside Postgres and return a compact status."""
+    return _progress_rpc_status(
+        "apply_project_section_progress",
+        {
+            "p_project_id": project_id,
+            "p_user_id": user_id,
+            "p_part_id": part_id,
+            "p_completed": completed,
+        },
+    )
+
+
 def _dedupe_preserve_order(values: list[Any]) -> list[Any]:
     out: list[Any] = []
     seen = set()
