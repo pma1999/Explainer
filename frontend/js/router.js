@@ -1,7 +1,7 @@
 /* ============================================================
    EXPLAINER — Hash-based Router (ES Module)
-   URL format: #/ | #/projects | #/p/{projectId} | #/p/{projectId}/s/{partId}/t/{tab}
-   Shared: #/s/{token} | #/s/{token}/s/{partId}/t/{tab}
+   URL format: #/ | #/projects | #/p/{projectId} | #/p/{projectId}/s/{partId}/t/{tab}[/u/{subsectionId}]
+   Shared: #/s/{token} | #/s/{token}/s/{partId}/t/{tab}[/u/{subsectionId}]
    ============================================================ */
 
 export const VALID_TABS = ['explicacion', 'recorrido', 'recursos'];
@@ -9,7 +9,7 @@ export const VALID_TABS = ['explicacion', 'recorrido', 'recursos'];
 /**
  * Parse the current location hash into a route object.
  * @param {string} [hash] - Optional hash string (defaults to location.hash)
- * @returns {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string } | null}
+ * @returns {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string, subsectionId?: string } | null}
  */
 export function parseRoute(hash) {
   const h = (hash !== undefined ? hash : (typeof location !== 'undefined' ? location.hash : '')) || '';
@@ -83,7 +83,7 @@ export function parseRoute(hash) {
 
 /**
  * Build hash string from route object.
- * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string }} route
+ * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string, subsectionId?: string }} route
  * @returns {string}
  */
 export function buildHash(route) {
@@ -121,7 +121,7 @@ export function buildHash(route) {
 
 /**
  * Update location.hash (adds history entry).
- * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string }} route
+ * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string, subsectionId?: string }} route
  */
 export function pushRoute(route) {
   const hash = buildHash(route);
@@ -132,7 +132,7 @@ export function pushRoute(route) {
 
 /**
  * Replace location.hash without adding history entry.
- * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string }} route
+ * @param {{ view: string, projectId?: string, shareToken?: string, partId?: number, tab?: string, subsectionId?: string }} route
  */
 export function replaceRoute(route) {
   const hash = buildHash(route);
