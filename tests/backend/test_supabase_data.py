@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
+from fastapi import HTTPException
+
 from backend.supabase_data import (
     _sanitize_project_for_shared,
     create_share_token,
@@ -198,7 +200,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_subsection_id_missing(self):
         body = {"part_id": 1}
         with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id y part_id requeridos" in exc_info.value.detail
@@ -206,7 +208,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_part_id_missing(self):
         body = {"subsection_id": "subsec-1-0-0"}
         with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id y part_id requeridos" in exc_info.value.detail
@@ -214,7 +216,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_part_id_not_a_number(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": "abc"}
         with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "part_id debe ser un número" in exc_info.value.detail
@@ -222,7 +224,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_completed_not_bool(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": "yes"}
         with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "completed debe ser boolean" in exc_info.value.detail
@@ -230,7 +232,7 @@ class TestApiUpdateSubsectionProgress:
     def test_404_when_project_not_found(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         with patch("backend.project_progress.get_project", return_value=None):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 404
             assert "Proyecto no encontrado" in exc_info.value.detail
@@ -239,7 +241,7 @@ class TestApiUpdateSubsectionProgress:
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 2, "titulo": "P2"}]}}
         with patch("backend.project_progress.get_project", return_value=project):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "Sección no encontrada" in exc_info.value.detail
@@ -248,7 +250,7 @@ class TestApiUpdateSubsectionProgress:
         body = {"subsection_id": "subsec-2-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
         with patch("backend.project_progress.get_project", return_value=project):
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
             assert "subsection_id no pertenece a la sección" in exc_info.value.detail
