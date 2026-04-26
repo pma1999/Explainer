@@ -636,27 +636,68 @@ function initDescriptionExpand() {
 function initSmartBarScrollBehavior() {
   const main = document.getElementById('project-main');
   if (!main) return;
-  let lastScrollY = 0;
+  let lastScrollY = null;
+  let accumDown = 0;
+  let accumUp = 0;
   let ticking = false;
+  const RETRACT_THRESHOLD = 24;
+  const EXPAND_THRESHOLD = 12;
 
-  main.addEventListener('scroll', () => {
+  const getScrollY = () => {
+    // Primary: internal project scroller. Fallback: window scroll for mobile
+    // browsers that can leak scroll to the viewport.
+    if (main && main.scrollHeight > main.clientHeight) return main.scrollTop;
+    return window.scrollY || document.documentElement.scrollTop || 0;
+  };
+
+  const updateByScroll = (y) => {
+    if (lastScrollY === null) {
+      lastScrollY = y;
+      return;
+    }
+    const delta = y - lastScrollY;
+    const bar = document.querySelector('.smart-bar');
+    if (!bar) {
+      lastScrollY = y;
+      return;
+    }
+
+    const now = Date.now();
+    const manualExpandedUntil = Number(bar.dataset.manualExpandedUntil || 0);
+    const manualLockActive = now < manualExpandedUntil;
+
+    if (delta > 0) {
+      accumDown += delta;
+      accumUp = 0;
+      if (!manualLockActive && accumDown >= RETRACT_THRESHOLD) {
+        bar.classList.add('retracted');
+        accumDown = 0;
+      }
+    } else if (delta < 0) {
+      accumUp += Math.abs(delta);
+      accumDown = 0;
+      if (accumUp >= EXPAND_THRESHOLD) {
+        bar.classList.remove('retracted');
+        delete bar.dataset.manualExpandedUntil;
+        accumUp = 0;
+      }
+    }
+
+    lastScrollY = y;
+  };
+
+  const onScroll = () => {
     if (ticking) return;
     ticking = true;
     requestAnimationFrame(() => {
-      const y = main.scrollTop;
-      const delta = y - lastScrollY;
-      const bar = document.querySelector('.smart-bar');
-      if (bar) {
-        if (delta > 5) {
-          bar.classList.add('retracted');
-        } else if (delta < -10) {
-          bar.classList.remove('retracted');
-        }
-      }
-      lastScrollY = y;
+      updateByScroll(getScrollY());
       ticking = false;
     });
-  }, { passive: true });
+  };
+
+  lastScrollY = getScrollY();
+  main.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('scroll', onScroll, { passive: true });
 }
 
 function initSubsectionKeyboardNav() {

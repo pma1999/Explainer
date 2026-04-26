@@ -4646,6 +4646,24 @@ body.is-offline .project-card[data-pinned="true"] {
   transform: translateY(calc(100% - 2px));
 }
 
+.smart-bar-peek-hitarea {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.smart-bar.retracted .smart-bar-peek-hitarea {
+  display: block;
+}
+
 .smart-bar-progress {
   position: absolute;
   top: 0;
