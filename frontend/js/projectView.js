@@ -664,6 +664,147 @@ export function updateGhostRailActive(subsectionId) {
   });
 }
 
+function renderSmartBar(partId, explainerData) {
+  const content = document.getElementById('part-content');
+  if (!content) return;
+
+  // Remove existing
+  const existing = content.querySelector('.smart-bar');
+  if (existing) existing.remove();
+
+  if (!explainerData || explainerData._format === 'markdown') return;
+
+  // Build flat list (same logic as rail)
+  const subsections = [];
+  if (Array.isArray(explainerData.desarrollo)) {
+    explainerData.desarrollo.forEach((section, sIdx) => {
+      if (Array.isArray(section.subsecciones)) {
+        section.subsecciones.forEach((sub, subIdx) => {
+          subsections.push({
+            id: `subsec-${partId}-${sIdx}-${subIdx}`,
+            title: sub.titulo_subseccion || '',
+          });
+        });
+      }
+    });
+  }
+  if (Array.isArray(explainerData.conexiones_contextuales)) {
+    explainerData.conexiones_contextuales.forEach((cx, cxIdx) => {
+      subsections.push({
+        id: `subsec-${partId}-cx-${cxIdx}`,
+        title: cx.seccion_temario_relacionada || '',
+      });
+    });
+  }
+  if (subsections.length === 0) return;
+
+  const bar = document.createElement('div');
+  bar.className = 'smart-bar';
+  bar.setAttribute('role', 'navigation');
+  bar.setAttribute('aria-label', 'Navegación de subsección');
+  bar.dataset.count = String(subsections.length);
+  bar.innerHTML = `
+    <div class="smart-bar-progress"></div>
+    <button type="button" class="smart-bar-prev" aria-label="Subsección anterior">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <button type="button" class="smart-bar-title" aria-label="Abrir índice de subsecciones">
+      <span class="smart-bar-title-text">—</span>
+    </button>
+    <button type="button" class="smart-bar-next" aria-label="Subsección siguiente">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6 3L11 8L6 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  `;
+
+  const prevBtn = bar.querySelector('.smart-bar-prev');
+  const nextBtn = bar.querySelector('.smart-bar-next');
+  const titleBtn = bar.querySelector('.smart-bar-title');
+
+  prevBtn.addEventListener('click', () => navigateSubsection(-1));
+  nextBtn.addEventListener('click', () => navigateSubsection(1));
+  titleBtn.addEventListener('click', () => openSubsectionSheet(subsections));
+
+  content.appendChild(bar);
+  updateSmartBarText(state.currentSubsectionId);
+}
+
+export function updateSmartBarText(subsectionId) {
+  const bar = document.querySelector('.smart-bar');
+  if (!bar) return;
+  const titleText = bar.querySelector('.smart-bar-title-text');
+  const prevBtn = bar.querySelector('.smart-bar-prev');
+  const nextBtn = bar.querySelector('.smart-bar-next');
+
+  const subsections = [];
+  const rail = document.querySelector('.ghost-rail');
+  if (rail) {
+    rail.querySelectorAll('.ghost-rail-node').forEach((n) => {
+      subsections.push({
+        id: n.dataset.subsectionId,
+        title: n.querySelector('.ghost-rail-label')?.textContent || '',
+      });
+    });
+  }
+
+  const idx = subsections.findIndex((s) => s.id === subsectionId);
+  if (titleText) {
+    titleText.textContent = idx !== -1 ? subsections[idx].title : '—';
+  }
+  if (prevBtn) prevBtn.disabled = idx <= 0;
+  if (nextBtn) nextBtn.disabled = idx === -1 || idx >= subsections.length - 1;
+
+  // Update progress hairline
+  const progress = bar.querySelector('.smart-bar-progress');
+  if (progress && subsections.length > 0) {
+    const pct = idx >= 0 ? ((idx + 1) / subsections.length) * 100 : 0;
+    progress.style.width = pct + '%';
+  }
+}
+
+function navigateSubsection(delta) {
+  const subsections = [];
+  document.querySelectorAll('.ghost-rail-node').forEach((n) => {
+    subsections.push(n.dataset.subsectionId);
+  });
+  const idx = subsections.findIndex((id) => id === state.currentSubsectionId);
+  const next = subsections[idx + delta];
+  if (next) {
+    const target = document.getElementById(next);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function openSubsectionSheet(subsections) {
+  // Simple sheet using existing modal/overlay patterns in the app
+  const overlay = document.createElement('div');
+  overlay.className = 'subsection-sheet-overlay';
+  const sheet = document.createElement('div');
+  sheet.className = 'subsection-sheet';
+  sheet.innerHTML = `<div class="subsection-sheet-handle"></div><div class="subsection-sheet-list"></div>`;
+  const list = sheet.querySelector('.subsection-sheet-list');
+
+  subsections.forEach((sub, i) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'subsection-sheet-item';
+    if (sub.id === state.currentSubsectionId) item.classList.add('active');
+    item.innerHTML = `<span class="subsection-sheet-num">${i + 1}</span><span class="subsection-sheet-label">${escHtml(sub.title)}</span>`;
+    item.addEventListener('click', () => {
+      const target = document.getElementById(sub.id);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      overlay.remove();
+    });
+    list.appendChild(item);
+  });
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+}
+
 function renderRecorrido(data) {
   let html = '';
   if (data.recorrido_anotado && data.recorrido_anotado.length > 0) {
@@ -802,6 +943,7 @@ export function renderTab(tabName, contenido) {
   if (tabName === 'explicacion') {
     contentEl.innerHTML = renderExplainer(data, state.currentPartId);
     renderGhostRail(state.currentPartId, data);
+    renderSmartBar(state.currentPartId, data);
   } else if (tabName === 'recorrido') {
     contentEl.innerHTML = renderRecorrido(data);
   } else {
