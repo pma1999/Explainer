@@ -38,6 +38,9 @@ export function parseRoute(hash) {
         route.tab = tab;
       }
     }
+    if (route.partId && segments[6] === 'u' && segments[7]) {
+      route.subsectionId = segments[7];
+    }
     if (route.partId && !route.tab) {
       route.tab = 'explicacion';
     }
@@ -62,6 +65,10 @@ export function parseRoute(hash) {
       if (VALID_TABS.includes(tab)) {
         route.tab = tab;
       }
+    }
+
+    if (route.partId && segments[6] === 'u' && segments[7]) {
+      route.subsectionId = segments[7];
     }
 
     if (route.partId && !route.tab) {
@@ -90,6 +97,9 @@ export function buildHash(route) {
     if (route.partId) {
       hash += `/s/${route.partId}`;
       hash += `/t/${route.tab && VALID_TABS.includes(route.tab) ? route.tab : 'explicacion'}`;
+      if (route.subsectionId) {
+        hash += `/u/${route.subsectionId}`;
+      }
     }
     return hash;
   }
@@ -99,6 +109,9 @@ export function buildHash(route) {
     if (route.partId) {
       hash += `/s/${route.partId}`;
       hash += `/t/${route.tab && VALID_TABS.includes(route.tab) ? route.tab : 'explicacion'}`;
+      if (route.subsectionId) {
+        hash += `/u/${route.subsectionId}`;
+      }
     }
     return hash;
   }
