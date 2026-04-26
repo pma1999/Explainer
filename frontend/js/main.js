@@ -572,6 +572,24 @@ function initSmartBarScrollBehavior() {
   }, { passive: true });
 }
 
+function initSubsectionKeyboardNav() {
+  document.addEventListener('keydown', (e) => {
+    if (state.activeTab !== 'explicacion') return;
+    if (!e.altKey) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+
+    const subsections = Array.from(document.querySelectorAll('h4.explainer-subsection-title')).map(h => h.id);
+    const idx = subsections.findIndex(id => id === state.currentSubsectionId);
+    const delta = e.key === 'ArrowDown' ? 1 : -1;
+    const next = subsections[idx + delta];
+    if (next) {
+      const target = document.getElementById(next);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+}
+
 function bootstrap() {
   setViewChangeCallback(saveViewState);
 
@@ -678,6 +696,7 @@ function bootstrap() {
   initFullProjectExport();
   initReadingProgressBar();
   initSmartBarScrollBehavior();
+  initSubsectionKeyboardNav();
   initSidebarMobile();
   initSidebarCollapse();
   initPartNavigation();
