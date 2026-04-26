@@ -7,11 +7,14 @@ from fastapi import HTTPException
 
 from backend.supabase_data import (
     _sanitize_project_for_shared,
+    _update_reading_progress_minimal,
     create_share_token,
     get_project,
     revoke_share_token,
     get_project_by_share_token,
+    set_section_read_status,
     update_subsection_progress,
+    update_subsection_progress_batch,
 )
 from backend.project_progress import handle_update_subsection_progress
 
@@ -199,7 +202,7 @@ class TestApiUpdateSubsectionProgress:
 
     def test_400_when_subsection_id_missing(self):
         body = {"part_id": 1}
-        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
+        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -207,7 +210,7 @@ class TestApiUpdateSubsectionProgress:
 
     def test_400_when_part_id_missing(self):
         body = {"subsection_id": "subsec-1-0-0"}
-        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
+        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -215,7 +218,7 @@ class TestApiUpdateSubsectionProgress:
 
     def test_400_when_part_id_not_a_number(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": "abc"}
-        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
+        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -223,7 +226,7 @@ class TestApiUpdateSubsectionProgress:
 
     def test_400_when_completed_not_bool(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": "yes"}
-        with patch("backend.project_progress.get_project", return_value={"id": "p1"}):
+        with patch("backend.project_progress.get_project_progress_context", return_value={"id": "p1"}):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -231,7 +234,7 @@ class TestApiUpdateSubsectionProgress:
 
     def test_404_when_project_not_found(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
-        with patch("backend.project_progress.get_project", return_value=None):
+        with patch("backend.project_progress.get_project_progress_context", return_value=None):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 404
@@ -240,7 +243,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_part_not_found(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 2, "titulo": "P2"}]}}
-        with patch("backend.project_progress.get_project", return_value=project):
+        with patch("backend.project_progress.get_project_progress_context", return_value=project):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -249,7 +252,7 @@ class TestApiUpdateSubsectionProgress:
     def test_400_when_subsection_id_does_not_belong_to_part(self):
         body = {"subsection_id": "subsec-2-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project", return_value=project):
+        with patch("backend.project_progress.get_project_progress_context", return_value=project):
             with pytest.raises(HTTPException) as exc_info:
                 handle_update_subsection_progress("user-1", "p1", body)
             assert exc_info.value.status_code == 400
@@ -258,7 +261,7 @@ class TestApiUpdateSubsectionProgress:
     def test_200_successful_update(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True, "is_last_read": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project", return_value=project):
+        with patch("backend.project_progress.get_project_progress_context", return_value=project):
             with patch(
                 "backend.project_progress.update_subsection_progress",
                 return_value={"reading_progress": {"completed_subsections": ["subsec-1-0-0"]}},
@@ -269,30 +272,59 @@ class TestApiUpdateSubsectionProgress:
     def test_is_last_read_defaults_to_false(self):
         body = {"subsection_id": "subsec-1-0-0", "part_id": 1, "completed": True}
         project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
-        with patch("backend.project_progress.get_project", return_value=project):
+        with patch("backend.project_progress.get_project_progress_context", return_value=project):
             with patch("backend.project_progress.update_subsection_progress", return_value={"ok": True}) as mock_update:
                 handle_update_subsection_progress("user-1", "p1", body)
-        mock_update.assert_called_once_with("p1", "user-1", "subsec-1-0-0", 1, completed=True, is_last_read=False)
+        mock_update.assert_called_once_with(
+            "p1",
+            "user-1",
+            "subsec-1-0-0",
+            1,
+            completed=True,
+            is_last_read=False,
+            tab="explicacion",
+            project=project,
+        )
+
+    def test_batch_payload_updates_multiple_ids(self):
+        body = {
+            "part_id": 1,
+            "tab": "explicacion",
+            "last_subsection_id": "subsec-1-0-2",
+            "completed_subsection_ids": ["subsec-1-0-0", "subsec-1-0-1", "subsec-1-0-0"],
+        }
+        project = {"id": "p1", "segmentation": {"partes": [{"numero": 1, "titulo": "P1"}]}}
+        with patch("backend.project_progress.get_project_progress_context", return_value=project):
+            with patch("backend.project_progress.update_subsection_progress_batch", return_value={"ok": True}) as mock_update:
+                result = handle_update_subsection_progress("user-1", "p1", body)
+        assert result == {"ok": True}
+        mock_update.assert_called_once_with(
+            "p1",
+            "user-1",
+            1,
+            tab="explicacion",
+            completed_subsection_ids=["subsec-1-0-0", "subsec-1-0-1"],
+            last_subsection_id="subsec-1-0-2",
+            project=project,
+        )
 
 
 class TestUpdateSubsectionProgress:
     """Tests for update_subsection_progress with mocked Supabase."""
 
     def test_returns_none_when_project_not_found(self):
-        with patch("backend.supabase_data.get_project", return_value=None):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=None):
             result = update_subsection_progress("proj-1", "user-1", "subsec-1-0-0", 1, completed=True)
         assert result is None
 
     def test_adds_subsection_to_completed(self):
         project = {"id": "p1", "reading_progress": {"completed_parts": [1]}}
-        captured = {}
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
 
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, completed=True)
         assert result is not None
         rp = result["reading_progress"]
@@ -300,30 +332,29 @@ class TestUpdateSubsectionProgress:
         assert rp["completed_parts"] == [1]
 
     def test_does_not_duplicate_completed(self):
-        project = {"id": "p1", "reading_progress": {"completed_subsections": ["subsec-1-0-0"]}}
-        captured = {}
+        project = {
+            "id": "p1",
+            "reading_progress": {"completed_subsections": ["subsec-1-0-0"]},
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
-
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal") as mock_write:
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, completed=True)
         assert result is not None
         rp = result["reading_progress"]
         assert rp["completed_subsections"].count("subsec-1-0-0") == 1
+        assert result["updated_at"] == "2024-01-01T00:00:00Z"
+        mock_write.assert_not_called()
 
     def test_removes_from_completed(self):
         project = {"id": "p1", "reading_progress": {"completed_subsections": ["subsec-1-0-0", "subsec-2-0-0"]}}
-        captured = {}
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
 
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, completed=False)
         assert result is not None
         rp = result["reading_progress"]
@@ -332,14 +363,12 @@ class TestUpdateSubsectionProgress:
 
     def test_sets_last_subsection_when_is_last_read(self):
         project = {"id": "p1", "reading_progress": {}}
-        captured = {}
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
 
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, is_last_read=True)
         assert result is not None
         rp = result["reading_progress"]
@@ -350,14 +379,12 @@ class TestUpdateSubsectionProgress:
 
     def test_preserves_existing_progress_keys(self):
         project = {"id": "p1", "reading_progress": {"completed_parts": [1, 2], "last_read_at": "2024-01-01T00:00:00Z"}}
-        captured = {}
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
 
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, completed=True)
         assert result is not None
         rp = result["reading_progress"]
@@ -367,16 +394,92 @@ class TestUpdateSubsectionProgress:
 
     def test_no_last_subsection_when_not_is_last_read(self):
         project = {"id": "p1", "reading_progress": {"last_subsection": {"part_id": 2, "subsection_id": "subsec-2-0-0", "tab": "explicacion"}}}
-        captured = {}
 
-        def capture_update(pid, uid, updates):
-            captured["updates"] = updates
-            return {"id": "p1", "reading_progress": updates.get("reading_progress", {})}
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
 
-        with patch("backend.supabase_data.get_project", return_value=project):
-            with patch("backend.supabase_data.update_project", side_effect=capture_update):
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
                 result = update_subsection_progress("p1", "user-1", "subsec-1-0-0", 1, completed=True, is_last_read=False)
         assert result is not None
         rp = result["reading_progress"]
         assert "last_read_at" not in rp
         assert rp["last_subsection"]["subsection_id"] == "subsec-2-0-0"
+
+    def test_batch_adds_completed_and_last_subsection_once(self):
+        project = {
+            "id": "p1",
+            "reading_progress": {"completed_subsections": ["subsec-1-0-0"]},
+        }
+
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
+
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
+                result = update_subsection_progress_batch(
+                    "p1",
+                    "user-1",
+                    1,
+                    completed_subsection_ids=["subsec-1-0-0", "subsec-1-0-1"],
+                    last_subsection_id="subsec-1-0-2",
+                )
+
+        rp = result["reading_progress"]
+        assert rp["completed_subsections"] == ["subsec-1-0-0", "subsec-1-0-1"]
+        assert rp["last_subsection"]["subsection_id"] == "subsec-1-0-2"
+        assert rp["last_subsection"]["part_id"] == 1
+        assert "last_read_at" in rp
+
+    def test_set_section_read_status_preserves_subsection_progress(self):
+        project = {
+            "id": "p1",
+            "reading_progress": {
+                "completed_subsections": ["subsec-1-0-0"],
+                "last_subsection": {
+                    "part_id": 1,
+                    "subsection_id": "subsec-1-0-0",
+                    "tab": "explicacion",
+                },
+            },
+        }
+
+        def capture_write(pid, uid, reading_progress, *, updated_at=None):
+            return {"reading_progress": reading_progress, "updated_at": updated_at}
+
+        with patch("backend.supabase_data.get_project_progress_context", return_value=project):
+            with patch("backend.supabase_data._update_reading_progress_minimal", side_effect=capture_write):
+                result = set_section_read_status("p1", "user-1", 1, True)
+
+        rp = result["reading_progress"]
+        assert rp["completed_parts"] == [1]
+        assert rp["completed_subsections"] == ["subsec-1-0-0"]
+        assert rp["last_subsection"]["subsection_id"] == "subsec-1-0-0"
+
+    def test_minimal_progress_write_uses_return_minimal(self):
+        execute = MagicMock()
+        second_eq = MagicMock()
+        second_eq.execute = execute
+        first_eq = MagicMock()
+        first_eq.eq.return_value = second_eq
+        update_builder = MagicMock()
+        update_builder.eq.return_value = first_eq
+        table = MagicMock()
+        table.update.return_value = update_builder
+
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = table
+            result = _update_reading_progress_minimal(
+                "p1",
+                "user-1",
+                {"completed_subsections": ["subsec-1-0-0"]},
+                updated_at="2024-01-01T00:00:00Z",
+            )
+
+        assert result == {
+            "reading_progress": {"completed_subsections": ["subsec-1-0-0"]},
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+        assert table.update.call_args.kwargs["returning"].value == "minimal"
+        first_eq.eq.assert_called_once_with("user_id", "user-1")
+        execute.assert_called_once()

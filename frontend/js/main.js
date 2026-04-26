@@ -20,45 +20,14 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText, refreshGhostRailReadState } from './projectView.js';
 import { initPWA } from './pwa.js';
+import { initProgressSyncLifecycle, recordSubsectionProgress, flushSubsectionProgress } from './progressSync.js';
 
 let _subsectionObserver = null;
-let _subsectionDebounce = null;
 let _lastSubsectionId = null;
 let _subsectionAccumulator = new Map(); // id -> accumulated ms
 let _subsectionLastActivatedAt = 0;
-
-async function saveSubsectionProgress({ subsection_id, part_id, tab, completed, is_last_read }) {
-  if (!state.currentProjectId || !state.user?.id) return;
-  if (state.isSharedView) return; // No server persistence for shared views
-
-  const payload = { subsection_id, part_id: Number(part_id), tab };
-  if (completed !== undefined) payload.completed = completed;
-  if (is_last_read !== undefined) payload.is_last_read = is_last_read;
-
-  try {
-    const updated = await api(`/api/projects/${state.currentProjectId}/progress/subsection`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (updated?.reading_progress && state.currentProject) {
-      state.currentProject.reading_progress = updated.reading_progress;
-    }
-  } catch (err) {
-    if (!state.currentProject) return;
-    if (is_last_read) {
-      // Optimistically update local project object so offline works
-      const rp = state.currentProject.reading_progress || {};
-      state.currentProject.reading_progress = {
-        ...rp,
-        last_subsection: { part_id, subsection_id, tab },
-        last_read_at: new Date().toISOString(),
-      };
-    }
-  }
-}
 
 function initSubsectionObserver() {
   disconnectSubsectionObserver();
@@ -88,10 +57,6 @@ function initSubsectionObserver() {
 }
 
 function disconnectSubsectionObserver() {
-  if (_subsectionDebounce) {
-    clearTimeout(_subsectionDebounce);
-    _subsectionDebounce = null;
-  }
   if (_subsectionObserver) {
     _subsectionObserver.disconnect();
     _subsectionObserver = null;
@@ -123,6 +88,12 @@ function setActiveSubsection(id) {
   // correct subsection. Cheap (writes a tiny JSON blob) and runs at most
   // once per subsection change, throttled by IntersectionObserver gating.
   saveViewState();
+  recordSubsectionProgress({
+    subsection_id: id,
+    part_id: state.currentPartId,
+    tab: state.activeTab,
+    is_last_read: true,
+  });
 
   // Update UI
   updateGhostRailActive(id);
@@ -146,18 +117,6 @@ function setActiveSubsection(id) {
       subsectionId: id,
     });
   }
-
-  // Debounced persistence
-  if (_subsectionDebounce) clearTimeout(_subsectionDebounce);
-  _subsectionDebounce = setTimeout(() => {
-    saveSubsectionProgress({
-      subsection_id: id,
-      part_id: state.currentPartId,
-      tab: state.activeTab,
-      is_last_read: true,
-    });
-    _subsectionDebounce = null;
-  }, 2000);
 }
 
 function maybeMarkSubsectionRead(id) {
@@ -166,12 +125,13 @@ function maybeMarkSubsectionRead(id) {
   const completed = new Set(progress.completed_subsections || []);
   if (completed.has(id)) return;
 
-  saveSubsectionProgress({
+  recordSubsectionProgress({
     subsection_id: id,
     part_id: state.currentPartId,
     tab: state.activeTab,
     completed: true,
   });
+  refreshGhostRailReadState();
 }
 
 window.initSubsectionObserver = initSubsectionObserver;
@@ -213,6 +173,7 @@ function saveViewState() {
 
 function navigateFromRoute(route) {
   if (!route) return;
+  flushSubsectionProgress({ force: true, keepalive: true }).catch(() => {});
 
   if (route.view === 'shared' && route.shareToken) {
     if (state.isSharedView && state.shareToken === route.shareToken && state.currentProject) {
@@ -657,6 +618,9 @@ function bootstrap() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
+      if (tab !== state.activeTab) {
+        flushSubsectionProgress({ force: true, keepalive: true }).catch(() => {});
+      }
       if (state.currentPartId && window.pushRoute) {
         if (state.isSharedView && state.shareToken) {
           window.pushRoute({
@@ -729,6 +693,7 @@ function bootstrap() {
   });
 
   $('btn-back-to-projects').addEventListener('click', () => {
+    flushSubsectionProgress({ force: true, keepalive: true }).catch(() => {});
     if (state.isSharedView) {
       exitSharedView();
       showView('view-auth');
@@ -756,6 +721,7 @@ function bootstrap() {
   });
 
   initSettings();
+  initProgressSyncLifecycle();
   initVisibilityHandling();
   initShareModal();
   initSharedCtaListeners();

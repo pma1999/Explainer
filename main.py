@@ -34,7 +34,6 @@ from backend.supabase_data import (
     list_projects_summary,
     update_project,
     set_section_read_status,
-    update_subsection_progress,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -515,7 +514,7 @@ async def api_update_progress(
     if part_status != "completed":
         raise HTTPException(status_code=400, detail="El contenido de esta sección aún no está listo")
 
-    updated = set_section_read_status(project_id, user_id, part_id, completed)
+    updated = set_section_read_status(project_id, user_id, part_id, completed, project=project)
     if not updated:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return updated

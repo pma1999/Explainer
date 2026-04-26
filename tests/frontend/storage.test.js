@@ -92,6 +92,33 @@ describe('storage.js', () => {
       expect(p.source_text).toBe('cached');
     });
 
+    it('preserves newer local reading_progress when server summary is newer', () => {
+      const local = {
+        id: '1',
+        name: 'Local',
+        updated_at: '2024-01-01T00:00:00Z',
+        reading_progress: {
+          last_read_at: '2024-01-05T12:00:00Z',
+          last_subsection: { part_id: 2, subsection_id: 'subsec-2-0-1', tab: 'explicacion' },
+        },
+        partes_contenido: { 2: { explainer: { foo: 'bar' } } },
+      };
+      const server = {
+        id: '1',
+        name: 'Server summary',
+        updated_at: '2024-01-03T00:00:00Z',
+        list_summary: true,
+        reading_progress: {
+          last_read_at: '2024-01-04T12:00:00Z',
+          last_subsection: { part_id: 1, subsection_id: 'subsec-1-0-0', tab: 'explicacion' },
+        },
+      };
+
+      const merged = mergeProjects([server], [local]);
+      expect(merged[0].reading_progress.last_subsection.subsection_id).toBe('subsec-2-0-1');
+      expect(merged[0].partes_contenido).toEqual({ 2: { explainer: { foo: 'bar' } } });
+    });
+
     it('when local is newer, keeps local unchanged', () => {
       const local = {
         id: '1',

@@ -147,6 +147,7 @@ export async function markSectionComplete(partId) {
     });
     if (updated?.reading_progress) {
       state.currentProject.reading_progress = updated.reading_progress;
+      if (updated.updated_at) state.currentProject.updated_at = updated.updated_at;
       renderSidebarNav(state.currentProject);
     }
   } catch (_) {}
@@ -194,6 +195,7 @@ export async function toggleSectionComplete(partId, completed) {
     });
     if (updated?.reading_progress) {
       state.currentProject.reading_progress = updated.reading_progress;
+      if (updated.updated_at) state.currentProject.updated_at = updated.updated_at;
       renderSidebarNav(state.currentProject);
       updateToggleCompleteButton();
     }

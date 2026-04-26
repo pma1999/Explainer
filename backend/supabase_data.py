@@ -14,6 +14,11 @@ from supabase import create_client, Client
 
 from backend.crypto import encrypt_user_api_key, decrypt_user_api_key
 
+try:
+    from postgrest.types import ReturnMethod
+except Exception:  # pragma: no cover - defensive for older supabase installs
+    ReturnMethod = None
+
 logger = logging.getLogger("backend.supabase_data")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -64,6 +69,7 @@ PROJECT_LIST_SUMMARY_SELECT = (
     "file_uri,status,segmentation,usage,reading_progress,error_message,"
     "share_token,created_at,updated_at"
 )
+PROJECT_PROGRESS_SELECT = "id,segmentation,reading_progress,updated_at"
 
 
 def _row_to_list_summary(row: dict[str, Any]) -> dict[str, Any]:
@@ -107,6 +113,138 @@ def list_projects_summary(user_id: str) -> list[dict[str, Any]]:
     )
     rows = (r.data or []) if r else []
     return [_row_to_list_summary(row) for row in rows]
+
+
+def _format_datetime_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _row_to_progress_context(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "segmentation": row.get("segmentation") or {},
+        "reading_progress": row.get("reading_progress") or {},
+        "updated_at": _format_datetime_value(row.get("updated_at")),
+    }
+
+
+def get_project_progress_context(project_id: str, user_id: str) -> Optional[dict[str, Any]]:
+    """Load only the fields needed to validate and update reading progress."""
+    client = _client()
+    r = (
+        client.table("projects")
+        .select(PROJECT_PROGRESS_SELECT)
+        .eq("id", project_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    if r is None:
+        logger.warning(
+            "Supabase progress select returned None from execute() (project_id=%s)",
+            project_id,
+        )
+        return None
+    if not r.data:
+        return None
+    return _row_to_progress_context(r.data)
+
+
+def _progress_response(reading_progress: dict[str, Any], updated_at: str | None) -> dict[str, Any]:
+    return {
+        "reading_progress": reading_progress or {},
+        "updated_at": updated_at,
+    }
+
+
+def _update_reading_progress_minimal(
+    project_id: str,
+    user_id: str,
+    reading_progress: dict[str, Any],
+    *,
+    updated_at: str | None = None,
+) -> dict[str, Any]:
+    """Persist reading_progress without asking PostgREST to return the full row."""
+    updated_at = updated_at or _now_iso()
+    payload = {
+        "reading_progress": reading_progress,
+        "updated_at": updated_at,
+    }
+    table = _client().table("projects")
+    if ReturnMethod is not None:
+        try:
+            request = table.update(payload, returning=ReturnMethod.minimal)
+        except TypeError:  # pragma: no cover - compatibility with old clients
+            request = table.update(payload)
+    else:  # pragma: no cover
+        request = table.update(payload)
+    request.eq("id", project_id).eq("user_id", user_id).execute()
+    return _progress_response(reading_progress, updated_at)
+
+
+def _dedupe_preserve_order(values: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    seen = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _subsection_progress_update(
+    project_id: str,
+    user_id: str,
+    project: dict[str, Any],
+    *,
+    part_id: int,
+    tab: str = "explicacion",
+    completed_subsection_ids: list[str] | None = None,
+    uncompleted_subsection_ids: list[str] | None = None,
+    last_subsection_id: str | None = None,
+) -> dict[str, Any]:
+    progress: dict[str, Any] = dict(project.get("reading_progress") or {})
+    completed = _dedupe_preserve_order(list(progress.get("completed_subsections") or []))
+    changed = False
+
+    if completed_subsection_ids:
+        for subsection_id in completed_subsection_ids:
+            if subsection_id not in completed:
+                completed.append(subsection_id)
+                changed = True
+
+    if uncompleted_subsection_ids:
+        remove_set = set(uncompleted_subsection_ids)
+        next_completed = [subsection_id for subsection_id in completed if subsection_id not in remove_set]
+        if next_completed != completed:
+            completed = next_completed
+            changed = True
+
+    if changed or "completed_subsections" in progress:
+        progress["completed_subsections"] = completed
+
+    if last_subsection_id:
+        next_last = {
+            "part_id": part_id,
+            "subsection_id": last_subsection_id,
+            "tab": tab or "explicacion",
+        }
+        if progress.get("last_subsection") != next_last:
+            progress["last_subsection"] = next_last
+            changed = True
+
+    if not changed:
+        return _progress_response(progress, project.get("updated_at"))
+
+    updated_at = _now_iso()
+    if last_subsection_id:
+        progress["last_read_at"] = updated_at
+    return _update_reading_progress_minimal(project_id, user_id, progress, updated_at=updated_at)
 
 
 def create_project(
@@ -235,34 +373,52 @@ def update_subsection_progress(
     part_id: int,
     completed: Optional[bool] = None,
     is_last_read: bool = False,
+    tab: str = "explicacion",
+    project: dict[str, Any] | None = None,
 ) -> Optional[dict[str, Any]]:
     """Update subsection progress inside reading_progress JSONB.
     completed=True adds to completed_subsections; is_last_read=True updates last_subsection."""
-    project = get_project(project_id, user_id)
+    project = project or get_project_progress_context(project_id, user_id)
     if not project:
         return None
+    completed_ids = [subsection_id] if completed is True else None
+    uncompleted_ids = [subsection_id] if completed is False else None
+    last_subsection_id = subsection_id if is_last_read else None
+    return _subsection_progress_update(
+        project_id,
+        user_id,
+        project,
+        part_id=part_id,
+        tab=tab,
+        completed_subsection_ids=completed_ids,
+        uncompleted_subsection_ids=uncompleted_ids,
+        last_subsection_id=last_subsection_id,
+    )
 
-    progress = project.get("reading_progress") or {}
-    completed_subsections = list(progress.get("completed_subsections") or [])
 
-    if completed is True and subsection_id not in completed_subsections:
-        completed_subsections.append(subsection_id)
-    elif completed is False and subsection_id in completed_subsections:
-        completed_subsections = [s for s in completed_subsections if s != subsection_id]
-
-    new_progress: dict[str, Any] = {
-        **progress,
-        "completed_subsections": completed_subsections,
-    }
-    if is_last_read:
-        new_progress["last_subsection"] = {
-            "part_id": part_id,
-            "subsection_id": subsection_id,
-            "tab": "explicacion",
-        }
-        new_progress["last_read_at"] = _now_iso()
-
-    return update_project(project_id, user_id, {"reading_progress": new_progress})
+def update_subsection_progress_batch(
+    project_id: str,
+    user_id: str,
+    part_id: int,
+    *,
+    tab: str = "explicacion",
+    completed_subsection_ids: list[str] | None = None,
+    last_subsection_id: str | None = None,
+    project: dict[str, Any] | None = None,
+) -> Optional[dict[str, Any]]:
+    """Apply a compact batch of subsection progress changes."""
+    project = project or get_project_progress_context(project_id, user_id)
+    if not project:
+        return None
+    return _subsection_progress_update(
+        project_id,
+        user_id,
+        project,
+        part_id=part_id,
+        tab=tab,
+        completed_subsection_ids=completed_subsection_ids,
+        last_subsection_id=last_subsection_id,
+    )
 
 
 def set_section_read_status(
@@ -270,28 +426,37 @@ def set_section_read_status(
     user_id: str,
     part_id: int,
     completed: bool,
+    project: dict[str, Any] | None = None,
 ) -> Optional[dict[str, Any]]:
     """Set section read status. completed=True adds to completed_parts, completed=False removes.
     Returns updated project or None if not found."""
-    project = get_project(project_id, user_id)
+    project = project or get_project_progress_context(project_id, user_id)
     if not project:
         return None
-    progress = project.get("reading_progress") or {}
+    progress = dict(project.get("reading_progress") or {})
     completed_list = list(progress.get("completed_parts") or [])
 
     if completed:
         if part_id in completed_list:
-            return project
+            return _progress_response(progress, project.get("updated_at"))
         completed_list.append(part_id)
         completed_list.sort()
     else:
+        if part_id not in completed_list:
+            return _progress_response(progress, project.get("updated_at"))
         completed_list = [p for p in completed_list if p != part_id]
 
     new_progress = {
+        **progress,
         "completed_parts": completed_list,
         "last_read_at": _now_iso(),
     }
-    return update_project(project_id, user_id, {"reading_progress": new_progress})
+    return _update_reading_progress_minimal(
+        project_id,
+        user_id,
+        new_progress,
+        updated_at=new_progress["last_read_at"],
+    )
 
 
 def delete_project(project_id: str, user_id: str) -> bool:

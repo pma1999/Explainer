@@ -28,6 +28,22 @@ function _projectTimeMs(project) {
   return new Date(project.updated_at || project.created_at || 0).getTime();
 }
 
+function _readingProgressTimeMs(project) {
+  const value = project?.reading_progress?.last_read_at;
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function _bestReadingProgress(primary, secondary) {
+  const primaryProgress = primary?.reading_progress;
+  const secondaryProgress = secondary?.reading_progress;
+  if (!secondaryProgress) return primaryProgress;
+  if (!primaryProgress) return secondaryProgress;
+  return _readingProgressTimeMs(secondary) > _readingProgressTimeMs(primary)
+    ? secondaryProgress
+    : primaryProgress;
+}
+
 /**
  * Merge two project records for the same id. Prefers newer updated_at.
  * If the newer record is a server list_summary, preserve partes_contenido and source_text
@@ -49,10 +65,14 @@ export function mergePairProjects(a, b) {
   }
 
   if (!newer.list_summary) {
-    return newer;
+    return {
+      ...newer,
+      reading_progress: _bestReadingProgress(newer, older),
+    };
   }
 
   const out = { ...newer };
+  out.reading_progress = _bestReadingProgress(newer, older);
   if (
     !Object.prototype.hasOwnProperty.call(newer, 'partes_contenido') &&
     older &&
