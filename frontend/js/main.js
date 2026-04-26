@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText } from './projectView.js';
 import { initPWA } from './pwa.js';
 
 let _subsectionObserver = null;
@@ -36,6 +36,9 @@ async function saveSubsectionProgress(payload) {
 
 function initSubsectionObserver() {
   disconnectSubsectionObserver();
+  _subsectionAccumulator.clear();
+  _lastSubsectionId = null;
+  _subsectionLastActivatedAt = 0;
   if (state.activeTab !== 'explicacion') return;
   const main = document.getElementById('project-main');
   const panel = document.getElementById('panel-explicacion');
@@ -59,6 +62,10 @@ function initSubsectionObserver() {
 }
 
 function disconnectSubsectionObserver() {
+  if (_subsectionDebounce) {
+    clearTimeout(_subsectionDebounce);
+    _subsectionDebounce = null;
+  }
   if (_subsectionObserver) {
     _subsectionObserver.disconnect();
     _subsectionObserver = null;
@@ -87,10 +94,8 @@ function setActiveSubsection(id) {
   state.currentSubsectionId = id;
 
   // Update UI
-  import('./projectView.js').then(({ updateGhostRailActive, updateSmartBarText }) => {
-    updateGhostRailActive(id);
-    updateSmartBarText(id);
-  });
+  updateGhostRailActive(id);
+  updateSmartBarText(id);
 
   // Update URL quietly
   if (window.replaceRoute && state.currentProjectId && state.currentPartId) {
