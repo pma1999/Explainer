@@ -626,10 +626,15 @@ function renderGhostRail(partId, explainerData) {
   line.className = 'ghost-rail-line';
   rail.appendChild(line);
 
+  const completed = new Set(state.currentProject?.reading_progress?.completed_subsections || []);
+
   subsections.forEach((sub, i) => {
     const node = document.createElement('button');
     node.type = 'button';
     node.className = 'ghost-rail-node';
+    if (completed.has(sub.id)) {
+      node.classList.add('is-read');
+    }
     node.dataset.subsectionId = sub.id;
     node.setAttribute('aria-label', `Subsección ${i + 1}: ${sub.title}`);
     node.style.animationDelay = `${i * 40}ms`;

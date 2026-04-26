@@ -4597,7 +4597,7 @@ body.is-offline .project-card[data-pinned="true"] {
   right: 14px;
   top: 50%;
   transform: translateY(-50%);
-  font-family: var(--font-ui-r);
+  font-family: var(--font-ui);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
