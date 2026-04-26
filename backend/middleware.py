@@ -29,10 +29,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Política de seguridad de contenido (básica)
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "connect-src 'self' https://generativelanguage.googleapis.com;"
+            "connect-src 'self' https://generativelanguage.googleapis.com https://*.supabase.co wss://*.supabase.co;"
         )
 
         # Forzar HTTPS

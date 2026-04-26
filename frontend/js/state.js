@@ -12,6 +12,7 @@ export const state = {
   currentProjectId: null,
   currentProject: null,
   currentPartId: null,
+  currentSubsectionId: null,
   activeTab: 'explicacion',
   isSharedView: false,
   shareToken: null,

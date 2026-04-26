@@ -20,18 +20,191 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText } from './projectView.js';
 import { initPWA } from './pwa.js';
+
+let _subsectionObserver = null;
+let _subsectionDebounce = null;
+let _lastSubsectionId = null;
+let _subsectionAccumulator = new Map(); // id -> accumulated ms
+let _subsectionLastActivatedAt = 0;
+
+async function saveSubsectionProgress({ subsection_id, part_id, tab, completed, is_last_read }) {
+  if (!state.currentProjectId || !state.user?.id) return;
+  if (state.isSharedView) return; // No server persistence for shared views
+
+  const payload = { subsection_id, part_id: Number(part_id), tab };
+  if (completed !== undefined) payload.completed = completed;
+  if (is_last_read !== undefined) payload.is_last_read = is_last_read;
+
+  try {
+    const updated = await api(`/api/projects/${state.currentProjectId}/progress/subsection`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (updated?.reading_progress && state.currentProject) {
+      state.currentProject.reading_progress = updated.reading_progress;
+    }
+  } catch (err) {
+    if (!state.currentProject) return;
+    if (is_last_read) {
+      // Optimistically update local project object so offline works
+      const rp = state.currentProject.reading_progress || {};
+      state.currentProject.reading_progress = {
+        ...rp,
+        last_subsection: { part_id, subsection_id, tab },
+        last_read_at: new Date().toISOString(),
+      };
+    }
+  }
+}
+
+function initSubsectionObserver() {
+  disconnectSubsectionObserver();
+  _subsectionAccumulator.clear();
+  _lastSubsectionId = null;
+  _subsectionLastActivatedAt = 0;
+  if (state.activeTab !== 'explicacion') return;
+  const main = document.getElementById('project-main');
+  const panel = document.getElementById('panel-explicacion');
+  if (!main || !panel) return;
+
+  const targets = panel.querySelectorAll('h4.explainer-subsection-title');
+  if (targets.length === 0) return;
+
+  _subsectionObserver = new IntersectionObserver((entries) => {
+    const active = entries
+      .filter(e => e.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (active) setActiveSubsection(active.target.id);
+  }, {
+    root: main,
+    rootMargin: '-35% 0px -55% 0px',
+    threshold: [0, 0.25, 0.5, 0.75, 1],
+  });
+
+  targets.forEach(t => _subsectionObserver.observe(t));
+}
+
+function disconnectSubsectionObserver() {
+  if (_subsectionDebounce) {
+    clearTimeout(_subsectionDebounce);
+    _subsectionDebounce = null;
+  }
+  if (_subsectionObserver) {
+    _subsectionObserver.disconnect();
+    _subsectionObserver = null;
+  }
+}
+
+function setActiveSubsection(id) {
+  if (id === _lastSubsectionId) {
+    // Still same subsection; update accumulator time
+    return;
+  }
+
+  // Finalize time for previous subsection
+  const now = Date.now();
+  if (_lastSubsectionId && _subsectionLastActivatedAt) {
+    const elapsed = now - _subsectionLastActivatedAt;
+    const prevTotal = (_subsectionAccumulator.get(_lastSubsectionId) || 0) + elapsed;
+    _subsectionAccumulator.set(_lastSubsectionId, prevTotal);
+    if (prevTotal >= 3000) {
+      maybeMarkSubsectionRead(_lastSubsectionId);
+    }
+  }
+
+  _lastSubsectionId = id;
+  _subsectionLastActivatedAt = now;
+  state.currentSubsectionId = id;
+
+  // Keep sessionStorage view-state in sync so cold-open restores land at the
+  // correct subsection. Cheap (writes a tiny JSON blob) and runs at most
+  // once per subsection change, throttled by IntersectionObserver gating.
+  saveViewState();
+
+  // Update UI
+  updateGhostRailActive(id);
+  updateSmartBarText(id);
+
+  // Announce to screen readers
+  const announcer = document.getElementById('subsection-announcer');
+  const targetHeading = document.getElementById(id);
+  if (announcer && targetHeading) {
+    announcer.textContent = `Ahora en: ${targetHeading.textContent}`;
+  }
+
+  // Update URL quietly
+  if (window.replaceRoute && state.currentProjectId && state.currentPartId) {
+    window.replaceRoute({
+      view: state.isSharedView ? 'shared' : 'project',
+      projectId: state.currentProjectId,
+      shareToken: state.shareToken,
+      partId: state.currentPartId,
+      tab: state.activeTab,
+      subsectionId: id,
+    });
+  }
+
+  // Debounced persistence
+  if (_subsectionDebounce) clearTimeout(_subsectionDebounce);
+  _subsectionDebounce = setTimeout(() => {
+    saveSubsectionProgress({
+      subsection_id: id,
+      part_id: state.currentPartId,
+      tab: state.activeTab,
+      is_last_read: true,
+    });
+    _subsectionDebounce = null;
+  }, 2000);
+}
+
+function maybeMarkSubsectionRead(id) {
+  if (!state.currentProject) return;
+  const progress = state.currentProject.reading_progress || {};
+  const completed = new Set(progress.completed_subsections || []);
+  if (completed.has(id)) return;
+
+  saveSubsectionProgress({
+    subsection_id: id,
+    part_id: state.currentPartId,
+    tab: state.activeTab,
+    completed: true,
+  });
+}
+
+window.initSubsectionObserver = initSubsectionObserver;
+window.disconnectSubsectionObserver = disconnectSubsectionObserver;
 
 function saveViewState() {
   if (!state.user?.id) return;
 
   const activeView = document.querySelector('.view.active')?.id || 'view-landing';
+
+  // Merge with the previous sessionStorage value so we never overwrite a
+  // non-null subsectionId with null. The IntersectionObserver writes
+  // state.currentSubsectionId asynchronously, but selectPart/activateTab
+  // call saveViewState BEFORE the observer has had a chance to fire — that
+  // would otherwise persist subsectionId: null and break cold-open restore.
+  let prev = null;
+  try {
+    prev = JSON.parse(sessionStorage.getItem('explainer.viewState') || 'null');
+  } catch (_) {}
+  const samePart = prev
+    && prev.userId === state.user.id
+    && prev.projectId === state.currentProjectId
+    && prev.partId === state.currentPartId
+    && prev.activeTab === state.activeTab;
+  const subsectionId = state.currentSubsectionId
+    || (samePart ? prev.subsectionId : null);
+
   const viewState = {
     userId: state.user.id,
     view: activeView,
     projectId: state.currentProjectId,
     partId: state.currentPartId,
+    subsectionId,
     activeTab: state.activeTab,
     savedAt: new Date().toISOString(),
   };
@@ -48,12 +221,23 @@ function navigateFromRoute(route) {
         state.activeTab = route.tab || 'explicacion';
         selectPart(route.partId);
         activateTab(state.activeTab);
+        if (route.subsectionId) {
+          const el = document.getElementById(route.subsectionId);
+          if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }
       } else {
         state.currentPartId = null;
         renderProjectView(state.currentProject);
       }
     } else {
-      loadSharedProject(route.shareToken, route.partId, route.tab);
+      loadSharedProject(route.shareToken, route.partId, route.tab)
+        .then(() => {
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
+        })
+        .catch(() => {});
     }
     return;
   }
@@ -84,13 +268,24 @@ function navigateFromRoute(route) {
           state.activeTab = tab;
           selectPart(partId);
           activateTab(tab);
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
           return;
         }
         if (window.replaceRoute) window.replaceRoute({ view: 'project', projectId });
         openProjectView(projectId);
         return;
       }
-      restoreProjectView(projectId, partId, tab).catch(() => {});
+      restoreProjectView(projectId, partId, tab)
+        .then(() => {
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
+        })
+        .catch(() => {});
       return;
     }
 
@@ -191,14 +386,22 @@ async function initApp() {
         if (viewState.view === 'view-project' && viewState.projectId) {
           state.currentProjectId = viewState.projectId;
           state.currentPartId = viewState.partId || null;
+          state.currentSubsectionId = viewState.subsectionId || null;
           state.activeTab = viewState.activeTab || 'explicacion';
-          await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab);
+          await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab)
+            .then(() => {
+              if (viewState.subsectionId) {
+                const el = document.getElementById(viewState.subsectionId);
+                if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+              }
+            });
           if (window.replaceRoute) {
             window.replaceRoute({
               view: 'project',
               projectId: viewState.projectId,
               partId: viewState.partId,
               tab: viewState.activeTab || 'explicacion',
+              subsectionId: viewState.subsectionId,
             });
           }
           return;
@@ -370,8 +573,8 @@ function initCopyLink() {
   btn.addEventListener('click', async () => {
     if (!state.currentPartId) return;
     const route = state.isSharedView && state.shareToken
-      ? { view: 'shared', shareToken: state.shareToken, partId: state.currentPartId, tab: state.activeTab }
-      : { view: 'project', projectId: state.currentProjectId, partId: state.currentPartId, tab: state.activeTab };
+      ? { view: 'shared', shareToken: state.shareToken, partId: state.currentPartId, tab: state.activeTab, subsectionId: state.currentSubsectionId }
+      : { view: 'project', projectId: state.currentProjectId, partId: state.currentPartId, tab: state.activeTab, subsectionId: state.currentSubsectionId };
     const url = location.origin + location.pathname + (typeof window.buildHash === 'function'
       ? window.buildHash(route)
       : location.hash || '#/');
@@ -430,6 +633,50 @@ function initDescriptionExpand() {
   });
 }
 
+function initSmartBarScrollBehavior() {
+  const main = document.getElementById('project-main');
+  if (!main) return;
+  let lastScrollY = 0;
+  let ticking = false;
+
+  main.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const y = main.scrollTop;
+      const delta = y - lastScrollY;
+      const bar = document.querySelector('.smart-bar');
+      if (bar) {
+        if (delta > 5) {
+          bar.classList.add('retracted');
+        } else if (delta < -10) {
+          bar.classList.remove('retracted');
+        }
+      }
+      lastScrollY = y;
+      ticking = false;
+    });
+  }, { passive: true });
+}
+
+function initSubsectionKeyboardNav() {
+  document.addEventListener('keydown', (e) => {
+    if (state.activeTab !== 'explicacion') return;
+    if (!e.altKey) return;
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+
+    const subsections = Array.from(document.querySelectorAll('h4.explainer-subsection-title')).map(h => h.id);
+    const idx = subsections.findIndex(id => id === state.currentSubsectionId);
+    const delta = e.key === 'ArrowDown' ? 1 : -1;
+    const next = subsections[idx + delta];
+    if (next) {
+      const target = document.getElementById(next);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+}
+
 function bootstrap() {
   setViewChangeCallback(saveViewState);
 
@@ -457,6 +704,16 @@ function bootstrap() {
       } else {
         activateTab(tab);
       }
+      if (tab === 'explicacion') {
+        setTimeout(initSubsectionObserver, 0);
+      } else {
+        disconnectSubsectionObserver();
+      }
+
+      const rail = document.querySelector('.ghost-rail');
+      const bar = document.querySelector('.smart-bar');
+      if (rail) rail.style.display = tab === 'explicacion' ? '' : 'none';
+      if (bar) bar.style.display = tab === 'explicacion' ? '' : 'none';
     });
   });
 
@@ -525,8 +782,13 @@ function bootstrap() {
   initSharedCtaListeners();
   initObsidianExport();
   window.addEventListener('resize', updateSharedCtaFloatingVisibility);
+  window.addEventListener('resize', () => {
+    if (state.activeTab === 'explicacion') positionGhostRailNodes();
+  });
   initFullProjectExport();
   initReadingProgressBar();
+  initSmartBarScrollBehavior();
+  initSubsectionKeyboardNav();
   initSidebarMobile();
   initSidebarCollapse();
   initPartNavigation();

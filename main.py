@@ -34,6 +34,7 @@ from backend.supabase_data import (
     list_projects_summary,
     update_project,
     set_section_read_status,
+    update_subsection_progress,
     delete_project,
     export_projects_payload,
     import_projects_payload,
@@ -102,6 +103,7 @@ from backend.subpart_scope import (
     build_subpart_negative_scope_block,
     build_subpart_scope_contract_block,
 )
+from backend.project_progress import handle_update_subsection_progress
 
 
 # Configurar logging al importar el módulo
@@ -517,6 +519,19 @@ async def api_update_progress(
     if not updated:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     return updated
+
+
+@app.patch("/api/projects/{project_id}/progress/subsection")
+async def api_update_subsection_progress(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    body: dict = Body(...),
+):
+    """Update subsection progress. Body: {
+        subsection_id: str, part_id: int,
+        completed?: bool, is_last_read?: bool
+    }."""
+    return handle_update_subsection_progress(user_id, project_id, body)
 
 
 @app.delete("/api/projects/{project_id}")

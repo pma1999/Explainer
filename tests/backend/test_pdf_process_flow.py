@@ -18,10 +18,6 @@ import main
 from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrParsedPage
-from backend.segmentation_tema_coverage import (
-    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
-)
 
 
 def _usage(**kwargs):
@@ -205,13 +201,13 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             os.unlink(pdf_path)
 
 
-def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch):
-    """After MAX_SEGMENTATION_COVERAGE_ATTEMPTS invalid MECE outputs, project ends in error."""
+def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
+    """Theme assignment is not validated in the main PDF processing path."""
     pdf_path = _create_multi_page_pdf(5)
     try:
         project = {
-            "id": "proj-mece-fail",
-            "name": "MECE fail",
+            "id": "proj-no-tema-mece",
+            "name": "No tema MECE",
             "description": "",
             "pdf_filename": "test.pdf",
             "source_type": "pdf",
@@ -245,8 +241,9 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
 
         monkeypatch.setattr(genai, "Client", lambda api_key: object())
         monkeypatch.setattr(main, "upload_file_with_retry", lambda *a, **k: SimpleNamespace(uri="u://x", mime_type="application/pdf"))
+        monkeypatch.setattr(main, "run_page_classifier", lambda *a, **k: (frozenset({1, 2, 3, 4, 5}), _usage(), {}))
 
-        def _always_bad_segmentador(api_key, file_uri, description, model, mime_type, source_kind):
+        def _segmentador_with_unassigned_theme(api_key, file_uri, description, model, mime_type, source_kind):
             seg_calls.append(description)
             return (
                 {
@@ -261,11 +258,19 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
                             "contenido": "c",
                             "identificacion": "i",
                             "pagina_inicio": 1,
-                            "pagina_fin": 2,
+                            "pagina_fin": 5,
                             "temas_cubiertos": [],
                             "extension_estimada": "m",
                             "complejidad": "m",
                             "expansion_prevista": "a",
+                            "subpartes": [
+                                {
+                                    "numero_subparte": 1,
+                                    "titulo": "SP1",
+                                    "pagina_inicio": 1,
+                                    "pagina_fin": 5,
+                                }
+                            ],
                         }
                     ],
                     "consideraciones_estudiante": "c",
@@ -273,18 +278,21 @@ def test_process_project_pdf_aborts_when_tema_mece_fails_all_retries(monkeypatch
                 _usage(total=10),
             )
 
-        monkeypatch.setattr(main, "run_segmentador", _always_bad_segmentador)
+        monkeypatch.setattr(main, "run_segmentador", _segmentador_with_unassigned_theme)
+        monkeypatch.setattr(main, "run_explainer", lambda *a, **k: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_recorrido", lambda *a, **k: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *a, **k: ({"ok": True}, _usage()))
 
-        asyncio.run(main._process_project("proj-mece-fail", "user-1"))
+        async def _fake_format(api_key, explainer_data):
+            return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
-        assert len(seg_calls) == MAX_SEGMENTATION_COVERAGE_ATTEMPTS
-        assert any(
-            p.get("status") == "error" and p.get("partes_contenido") == {} for p in updates
-        )
-        err = next(p for p in reversed(updates) if p.get("status") == "error")
-        assert err.get("error_message") == SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE
-        for i in range(1, MAX_SEGMENTATION_COVERAGE_ATTEMPTS):
-            assert "<correccion_asignacion_temas>" in seg_calls[i]
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        asyncio.run(main._process_project("proj-no-tema-mece", "user-1"))
+
+        assert len(seg_calls) == 1
+        assert all("<correccion_asignacion_temas>" not in call for call in seg_calls)
+        assert any(payload.get("status") == "completed" for payload in updates)
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
