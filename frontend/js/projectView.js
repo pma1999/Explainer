@@ -584,6 +584,86 @@ function renderExplainer(data, partId) {
   return html;
 }
 
+function renderGhostRail(partId, explainerData) {
+  const panel = document.getElementById('panel-explicacion');
+  if (!panel) return;
+
+  // Remove existing rail (idempotent re-render)
+  const existing = panel.querySelector('.ghost-rail');
+  if (existing) existing.remove();
+
+  if (!explainerData || explainerData._format === 'markdown') return;
+
+  // Build flat list of subsections in DOM order
+  const subsections = [];
+  if (Array.isArray(explainerData.desarrollo)) {
+    explainerData.desarrollo.forEach((section, sIdx) => {
+      if (Array.isArray(section.subsecciones)) {
+        section.subsecciones.forEach((sub, subIdx) => {
+          subsections.push({
+            id: `subsec-${partId}-${sIdx}-${subIdx}`,
+            title: sub.titulo_subseccion || '',
+          });
+        });
+      }
+    });
+  }
+  if (Array.isArray(explainerData.conexiones_contextuales)) {
+    explainerData.conexiones_contextuales.forEach((cx, cxIdx) => {
+      subsections.push({
+        id: `subsec-${partId}-cx-${cxIdx}`,
+        title: cx.seccion_temario_relacionada || '',
+      });
+    });
+  }
+  if (subsections.length === 0) return;
+
+  const rail = document.createElement('div');
+  rail.className = 'ghost-rail';
+  rail.setAttribute('aria-label', 'Navegación de subsecciones');
+
+  const line = document.createElement('div');
+  line.className = 'ghost-rail-line';
+  rail.appendChild(line);
+
+  subsections.forEach((sub, i) => {
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = 'ghost-rail-node';
+    node.dataset.subsectionId = sub.id;
+    node.setAttribute('aria-label', `Subsección ${i + 1}: ${sub.title}`);
+    node.style.animationDelay = `${i * 40}ms`;
+
+    const label = document.createElement('span');
+    label.className = 'ghost-rail-label';
+    label.textContent = sub.title;
+    node.appendChild(label);
+
+    node.addEventListener('click', () => {
+      const target = document.getElementById(sub.id);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+
+    rail.appendChild(node);
+  });
+
+  // Insert rail at the end of panel so it overlays content (CSS in Task 8)
+  panel.appendChild(rail);
+}
+
+export function updateGhostRailActive(subsectionId) {
+  const rail = document.querySelector('.ghost-rail');
+  if (!rail) return;
+  rail.querySelectorAll('.ghost-rail-node').forEach((node) => {
+    const isActive = node.dataset.subsectionId === subsectionId;
+    node.classList.toggle('active', isActive);
+    const label = node.querySelector('.ghost-rail-label');
+    if (label) label.classList.toggle('active', isActive);
+  });
+}
+
 function renderRecorrido(data) {
   let html = '';
   if (data.recorrido_anotado && data.recorrido_anotado.length > 0) {
@@ -721,6 +801,7 @@ export function renderTab(tabName, contenido) {
 
   if (tabName === 'explicacion') {
     contentEl.innerHTML = renderExplainer(data, state.currentPartId);
+    renderGhostRail(state.currentPartId, data);
   } else if (tabName === 'recorrido') {
     contentEl.innerHTML = renderRecorrido(data);
   } else {
