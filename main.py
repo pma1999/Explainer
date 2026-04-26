@@ -772,6 +772,52 @@ def _find_parte_by_numero(partes: list[dict], numero: int) -> dict | None:
     return None
 
 
+def _adjacent_subparts_for_audit(
+    *,
+    partes_segmentadas: list[dict],
+    current_parte: dict,
+    subpart_idx: int,
+) -> tuple[dict | None, dict | None]:
+    """Return previous/next subpart for auditing, crossing part boundaries when needed.
+
+    Resolution order:
+    1) Neighbor inside the same part.
+    2) Nearest previous/next part (by segmentation order) that contains subparts.
+    """
+    current_subpartes = current_parte.get("subpartes") or []
+    previous_sp = current_subpartes[subpart_idx - 1] if subpart_idx > 0 else None
+    next_sp = current_subpartes[subpart_idx + 1] if subpart_idx + 1 < len(current_subpartes) else None
+
+    if previous_sp is not None and next_sp is not None:
+        return previous_sp, next_sp
+
+    part_pos = next((i for i, p in enumerate(partes_segmentadas) if p is current_parte), -1)
+    if part_pos < 0:
+        current_num = current_parte.get("numero")
+        part_pos = next(
+            (i for i, p in enumerate(partes_segmentadas) if p.get("numero") == current_num),
+            -1,
+        )
+    if part_pos < 0:
+        return previous_sp, next_sp
+
+    if previous_sp is None:
+        for pos in range(part_pos - 1, -1, -1):
+            candidate_subparts = partes_segmentadas[pos].get("subpartes") or []
+            if candidate_subparts:
+                previous_sp = candidate_subparts[-1]
+                break
+
+    if next_sp is None:
+        for pos in range(part_pos + 1, len(partes_segmentadas)):
+            candidate_subparts = partes_segmentadas[pos].get("subpartes") or []
+            if candidate_subparts:
+                next_sp = candidate_subparts[0]
+                break
+
+    return previous_sp, next_sp
+
+
 def _assemble_part_explainer(
     parte: dict,
     subpart_desarrollos: list[list[dict]],
