@@ -174,6 +174,7 @@ function saveViewState() {
     view: activeView,
     projectId: state.currentProjectId,
     partId: state.currentPartId,
+    subsectionId: state.currentSubsectionId,
     activeTab: state.activeTab,
     savedAt: new Date().toISOString(),
   };
@@ -190,12 +191,23 @@ function navigateFromRoute(route) {
         state.activeTab = route.tab || 'explicacion';
         selectPart(route.partId);
         activateTab(state.activeTab);
+        if (route.subsectionId) {
+          const el = document.getElementById(route.subsectionId);
+          if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }
       } else {
         state.currentPartId = null;
         renderProjectView(state.currentProject);
       }
     } else {
-      loadSharedProject(route.shareToken, route.partId, route.tab);
+      loadSharedProject(route.shareToken, route.partId, route.tab)
+        .then(() => {
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
+        })
+        .catch(() => {});
     }
     return;
   }
@@ -232,7 +244,14 @@ function navigateFromRoute(route) {
         openProjectView(projectId);
         return;
       }
-      restoreProjectView(projectId, partId, tab).catch(() => {});
+      restoreProjectView(projectId, partId, tab)
+        .then(() => {
+          if (route.subsectionId) {
+            const el = document.getElementById(route.subsectionId);
+            if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+          }
+        })
+        .catch(() => {});
       return;
     }
 
@@ -333,14 +352,22 @@ async function initApp() {
         if (viewState.view === 'view-project' && viewState.projectId) {
           state.currentProjectId = viewState.projectId;
           state.currentPartId = viewState.partId || null;
+          state.currentSubsectionId = viewState.subsectionId || null;
           state.activeTab = viewState.activeTab || 'explicacion';
-          await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab);
+          await restoreProjectView(viewState.projectId, viewState.partId, viewState.activeTab)
+            .then(() => {
+              if (viewState.subsectionId) {
+                const el = document.getElementById(viewState.subsectionId);
+                if (el) el.scrollIntoView({ behavior: 'auto', block: 'start' });
+              }
+            });
           if (window.replaceRoute) {
             window.replaceRoute({
               view: 'project',
               projectId: viewState.projectId,
               partId: viewState.partId,
               tab: viewState.activeTab || 'explicacion',
+              subsectionId: viewState.subsectionId,
             });
           }
           return;
