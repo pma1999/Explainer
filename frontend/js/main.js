@@ -23,6 +23,117 @@ import { initShareModal } from './share.js';
 import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes } from './projectView.js';
 import { initPWA } from './pwa.js';
 
+let _subsectionObserver = null;
+let _subsectionDebounce = null;
+let _lastSubsectionId = null;
+let _subsectionAccumulator = new Map(); // id -> accumulated ms
+let _subsectionLastActivatedAt = 0;
+
+async function saveSubsectionProgress(payload) {
+  // TODO(Task 13): fully implement saveSubsectionProgress
+  console.debug('[saveSubsectionProgress] stub called with', payload);
+}
+
+function initSubsectionObserver() {
+  disconnectSubsectionObserver();
+  if (state.activeTab !== 'explicacion') return;
+  const main = document.getElementById('project-main');
+  const panel = document.getElementById('panel-explicacion');
+  if (!main || !panel) return;
+
+  const targets = panel.querySelectorAll('h4.explainer-subsection-title');
+  if (targets.length === 0) return;
+
+  _subsectionObserver = new IntersectionObserver((entries) => {
+    const active = entries
+      .filter(e => e.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (active) setActiveSubsection(active.target.id);
+  }, {
+    root: main,
+    rootMargin: '-35% 0px -55% 0px',
+    threshold: [0, 0.25, 0.5, 0.75, 1],
+  });
+
+  targets.forEach(t => _subsectionObserver.observe(t));
+}
+
+function disconnectSubsectionObserver() {
+  if (_subsectionObserver) {
+    _subsectionObserver.disconnect();
+    _subsectionObserver = null;
+  }
+}
+
+function setActiveSubsection(id) {
+  if (id === _lastSubsectionId) {
+    // Still same subsection; update accumulator time
+    return;
+  }
+
+  // Finalize time for previous subsection
+  const now = Date.now();
+  if (_lastSubsectionId && _subsectionLastActivatedAt) {
+    const elapsed = now - _subsectionLastActivatedAt;
+    const prevTotal = (_subsectionAccumulator.get(_lastSubsectionId) || 0) + elapsed;
+    _subsectionAccumulator.set(_lastSubsectionId, prevTotal);
+    if (prevTotal >= 3000) {
+      maybeMarkSubsectionRead(_lastSubsectionId);
+    }
+  }
+
+  _lastSubsectionId = id;
+  _subsectionLastActivatedAt = now;
+  state.currentSubsectionId = id;
+
+  // Update UI
+  import('./projectView.js').then(({ updateGhostRailActive, updateSmartBarText }) => {
+    updateGhostRailActive(id);
+    updateSmartBarText(id);
+  });
+
+  // Update URL quietly
+  if (window.replaceRoute && state.currentProjectId && state.currentPartId) {
+    window.replaceRoute({
+      view: state.isSharedView ? 'shared' : 'project',
+      projectId: state.currentProjectId,
+      shareToken: state.shareToken,
+      partId: state.currentPartId,
+      tab: state.activeTab,
+      subsectionId: id,
+    });
+  }
+
+  // Debounced persistence
+  if (_subsectionDebounce) clearTimeout(_subsectionDebounce);
+  _subsectionDebounce = setTimeout(() => {
+    saveSubsectionProgress({
+      subsection_id: id,
+      part_id: state.currentPartId,
+      tab: state.activeTab,
+      is_last_read: true,
+    });
+    _subsectionDebounce = null;
+  }, 2000);
+}
+
+function maybeMarkSubsectionRead(id) {
+  if (!state.currentProject) return;
+  const progress = state.currentProject.reading_progress || {};
+  const completed = new Set(progress.completed_subsections || []);
+  if (completed.has(id)) return;
+
+  saveSubsectionProgress({
+    subsection_id: id,
+    part_id: state.currentPartId,
+    tab: state.activeTab,
+    completed: true,
+  });
+}
+
+window.initSubsectionObserver = initSubsectionObserver;
+window.disconnectSubsectionObserver = disconnectSubsectionObserver;
+
 function saveViewState() {
   if (!state.user?.id) return;
 
@@ -456,6 +567,11 @@ function bootstrap() {
         }
       } else {
         activateTab(tab);
+      }
+      if (tab === 'explicacion') {
+        setTimeout(initSubsectionObserver, 0);
+      } else {
+        disconnectSubsectionObserver();
       }
     });
   });

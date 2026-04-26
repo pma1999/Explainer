@@ -1041,6 +1041,11 @@ export function selectPart(partId) {
   updateMobileHeader();
   updateToggleCompleteButton();
 
+  // Trigger observer setup after content is rendered
+  if (typeof window.initSubsectionObserver === 'function') {
+    setTimeout(window.initSubsectionObserver, 0);
+  }
+
   saveViewState();
 }
 
