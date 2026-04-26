@@ -750,6 +750,7 @@ function renderSmartBar(partId, explainerData) {
   bar.dataset.count = String(subsections.length);
   bar.innerHTML = `
     <div class="smart-bar-progress"></div>
+    <button type="button" class="smart-bar-peek-hitarea" aria-label="Mostrar navegación de subsecciones"></button>
     <button type="button" class="smart-bar-prev" aria-label="Subsección anterior">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
     </button>
@@ -764,10 +765,15 @@ function renderSmartBar(partId, explainerData) {
   const prevBtn = bar.querySelector('.smart-bar-prev');
   const nextBtn = bar.querySelector('.smart-bar-next');
   const titleBtn = bar.querySelector('.smart-bar-title');
+  const peekBtn = bar.querySelector('.smart-bar-peek-hitarea');
 
   prevBtn.addEventListener('click', () => navigateSubsection(-1));
   nextBtn.addEventListener('click', () => navigateSubsection(1));
   titleBtn.addEventListener('click', () => openSubsectionSheet(subsections));
+  peekBtn.addEventListener('click', () => {
+    bar.classList.remove('retracted');
+    bar.dataset.manualExpandedUntil = String(Date.now() + 1200);
+  });
 
   content.appendChild(bar);
   updateSmartBarText(state.currentSubsectionId);
@@ -1321,4 +1327,3 @@ export function resetDescriptionExpand() {
     btn.setAttribute('aria-label', 'Ver más');
   }
 }
-

@@ -79,6 +79,7 @@ describe('renderSmartBar (via renderTab)', () => {
     expect(bar.getAttribute('aria-label')).toBe('Navegación de subsección');
     expect(bar.dataset.count).toBe('4'); // 2 + 1 + 1
     expect(bar.querySelector('.smart-bar-progress')).not.toBeNull();
+    expect(bar.querySelector('.smart-bar-peek-hitarea')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-prev')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-next')).not.toBeNull();
     expect(bar.querySelector('.smart-bar-title')).not.toBeNull();
@@ -267,6 +268,13 @@ describe('openSubsectionSheet (via title click)', () => {
 
     expect(spy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(document.querySelector('.subsection-sheet-overlay')).toBeNull();
+  });
+
+  it('clicking peek hitarea expands a retracted smart bar', () => {
+    const bar = document.querySelector('.smart-bar');
+    bar.classList.add('retracted');
+    document.querySelector('.smart-bar-peek-hitarea').click();
+    expect(bar.classList.contains('retracted')).toBe(false);
   });
 
   it('clicking the backdrop (overlay itself) closes the sheet', () => {
