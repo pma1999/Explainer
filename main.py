@@ -67,15 +67,19 @@ from backend.segmentation_page_coverage import (
     validate_page_coverage,
 )
 from pypdf import PdfReader
-from backend.agents.explainer import run_explainer, run_subpart_explainer
+from backend.agents.explainer import (
+    run_explainer_validated as run_explainer,
+    run_subpart_explainer_validated as run_subpart_explainer,
+)
 from backend.agents.explainer_openrouter import (
-    run_explainer_or,
-    run_subpart_explainer_or,
+    run_explainer_or_validated as run_explainer_or,
+    run_subpart_explainer_or_validated as run_subpart_explainer_or,
     OPENROUTER_MODEL_AGENTS as OPENROUTER_EXPLAINER_MODEL,
     OPENROUTER_PDF_PARSER_ENGINE,
     OPENROUTER_PDF_PRIMING_MODEL,
     OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
 )
+from backend.agents.completeness_validator import COMPLETENESS_VALIDATOR_MODEL
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
@@ -2189,6 +2193,7 @@ async def _process_project(
                                     explainer_model,
                                     "application/pdf",
                                     openrouter_api_key,
+                                    api_key,  # gemini_api_key para el validador
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
                                 )
@@ -2199,6 +2204,7 @@ async def _process_project(
                                 explainer_model,
                                 agent_mime_type,
                                 openrouter_api_key,
+                                api_key,  # gemini_api_key para el validador
                             )
                         return asyncio.to_thread(
                             explainer_fn_sp,
@@ -2230,6 +2236,7 @@ async def _process_project(
                                 explainer_model,
                                 "application/pdf",
                                 openrouter_api_key,
+                                api_key,  # gemini_api_key para el validador
                                 mistral_pdf_context.cache_entry,
                                 page_scope,
                             )
@@ -2244,6 +2251,7 @@ async def _process_project(
                                 explainer_model,
                                 agent_mime_type,
                                 openrouter_api_key,
+                                api_key,  # gemini_api_key para el validador
                             )
                             for sp_prompt in subpart_prompts
                         ]
@@ -2267,6 +2275,7 @@ async def _process_project(
                 resources_result = results[num_subparts + 1]
 
                 # Process subpart explainer results
+                # Each sp_result is (result_dict, usage, validator_usages_list) or Exception.
                 subpart_desarrollos: list[list[dict]] = []
                 for i, sp_result in enumerate(subpart_results):
                     if isinstance(sp_result, Exception):
@@ -2275,7 +2284,7 @@ async def _process_project(
                             extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
                         )
                     else:
-                        sp_data, _ = sp_result
+                        sp_data = sp_result[0]
                         subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
                 # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2296,12 +2305,19 @@ async def _process_project(
                 async with usage_lock:
                     for i, sp_result in enumerate(subpart_results):
                         if not isinstance(sp_result, Exception):
-                            _, sp_usage = sp_result
+                            # sp_result is (result_dict, explainer_usage, validator_usages_list)
+                            _, sp_usage, sp_val_usages = sp_result
                             if sp_usage:
                                 _update_usage(
                                     sp_usage,
                                     phase=f"part_{part_id}_explainer_sp{i+1}",
                                     cost_model=explainer_model,
+                                )
+                            for j, val_usage in enumerate(sp_val_usages or []):
+                                _update_usage(
+                                    val_usage,
+                                    phase=f"part_{part_id}_validator_sp{i+1}_{j+1}",
+                                    cost_model=COMPLETENESS_VALIDATOR_MODEL,
                                 )
                     if usage_rec:
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
