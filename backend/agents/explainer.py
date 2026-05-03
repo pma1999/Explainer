@@ -11,6 +11,11 @@ from backend.agents.explainer_prompts import (
     SUBPART_SYSTEM_INSTRUCTION,
     SYSTEM_INSTRUCTION,
 )
+from backend.agents.completeness_validator import (
+    INCOMPLETE_RETRY_SYSTEM_SUFFIX,
+    format_incomplete_context,
+    run_with_completeness_validation,
+)
 
 from google import genai
 from google.genai import types
@@ -309,3 +314,166 @@ def run_subpart_explainer(
             }
         )
         raise
+
+
+# ---------------------------------------------------------------------------
+# Retry helpers — misma lógica que los originales pero con contexto de
+# explicación anterior incompleta inyectado en system instruction y user message.
+# ---------------------------------------------------------------------------
+
+def _run_explainer_for_retry(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    previous_result: dict[str, Any],
+    model: str = MODEL_AGENTS,
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any]:
+    """Reintento de run_explainer con contexto de la explicación anterior incompleta."""
+    logger.info(
+        "Reintentando explainer completo por truncamiento detectado",
+        extra={"file_uri_prefix": file_uri[:60], "model": model},
+    )
+    client = genai.Client(api_key=api_key)
+
+    incomplete_ctx = format_incomplete_context(previous_result)
+    extended_system = SYSTEM_INSTRUCTION + INCOMPLETE_RETRY_SYSTEM_SUFFIX
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
+                types.Part.from_text(text=identificacion),
+                types.Part.from_text(text=incomplete_ctx),
+            ],
+        ),
+    ]
+
+    config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+        response_mime_type="application/json",
+        response_schema=RESPONSE_SCHEMA,
+        system_instruction=[types.Part.from_text(text=extended_system)],
+    )
+
+    response = generate_content_with_retry(
+        client=client,
+        model=model,
+        contents=contents,
+        config=config,
+        max_retries=5,
+        operation_context={"agent": "explainer_completeness_retry"},
+    )
+
+    result = json.loads(response.text)
+    logger.info(
+        "Reintento explainer completado: %d secciones",
+        len(result.get("desarrollo", [])),
+        extra={"num_secciones": len(result.get("desarrollo", []))},
+    )
+    return result, response.usage_metadata
+
+
+def _run_subpart_explainer_for_retry(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    previous_result: dict[str, Any],
+    model: str = MODEL_AGENTS,
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any]:
+    """Reintento de run_subpart_explainer con contexto de la subparte anterior incompleta."""
+    logger.info(
+        "Reintentando explainer de subparte por truncamiento detectado",
+        extra={"file_uri_prefix": file_uri[:60], "model": model},
+    )
+    client = genai.Client(api_key=api_key)
+
+    incomplete_ctx = format_incomplete_context(previous_result)
+    extended_system = SUBPART_SYSTEM_INSTRUCTION + INCOMPLETE_RETRY_SYSTEM_SUFFIX
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
+                types.Part.from_text(text=identificacion),
+                types.Part.from_text(text=incomplete_ctx),
+            ],
+        ),
+    ]
+
+    config = types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
+        response_mime_type="application/json",
+        response_schema=SUBPART_RESPONSE_SCHEMA,
+        system_instruction=[types.Part.from_text(text=extended_system)],
+    )
+
+    response = generate_content_with_retry(
+        client=client,
+        model=model,
+        contents=contents,
+        config=config,
+        max_retries=5,
+        operation_context={"agent": "subpart_explainer_completeness_retry"},
+    )
+
+    result = json.loads(response.text)
+    logger.info(
+        "Reintento subpart explainer completado: %d secciones",
+        len(result.get("desarrollo", [])),
+        extra={"num_secciones": len(result.get("desarrollo", []))},
+    )
+    return result, response.usage_metadata
+
+
+# ---------------------------------------------------------------------------
+# Funciones públicas con validación de completitud integrada.
+# Devuelven (result, main_usage, list[validator_usages]) en lugar del 2-tuple
+# original, para que el llamador pueda trackear el coste del validador.
+# ---------------------------------------------------------------------------
+
+def run_explainer_validated(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    model: str = MODEL_AGENTS,
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any, list[Any]]:
+    """run_explainer con validación de completitud y reintento automático.
+
+    Returns:
+        (result, usage_metadata, validator_usages_list)
+    """
+    return run_with_completeness_validation(
+        initial_call=lambda: run_explainer(api_key, file_uri, identificacion, model, mime_type),
+        retry_call=lambda prev: _run_explainer_for_retry(
+            api_key, file_uri, identificacion, prev, model, mime_type
+        ),
+        gemini_api_key=api_key,
+        label=f"Explainer Gemini [{file_uri[:40]}]",
+    )
+
+
+def run_subpart_explainer_validated(
+    api_key: str,
+    file_uri: str,
+    identificacion: str,
+    model: str = MODEL_AGENTS,
+    mime_type: str = "application/pdf",
+) -> tuple[dict[str, Any], Any, list[Any]]:
+    """run_subpart_explainer con validación de completitud y reintento automático.
+
+    Returns:
+        (result, usage_metadata, validator_usages_list)
+    """
+    return run_with_completeness_validation(
+        initial_call=lambda: run_subpart_explainer(api_key, file_uri, identificacion, model, mime_type),
+        retry_call=lambda prev: _run_subpart_explainer_for_retry(
+            api_key, file_uri, identificacion, prev, model, mime_type
+        ),
+        gemini_api_key=api_key,
+        label=f"Subpart Explainer Gemini [{file_uri[:40]}]",
+    )
