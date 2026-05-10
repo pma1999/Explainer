@@ -51,7 +51,6 @@ def _part_pdf_fields(num: int, title: str, p_start: int, p_end: int) -> dict:
         "identificacion": f"Desde página {p_start} hasta {p_end}",
         "pagina_inicio": p_start,
         "pagina_fin": p_end,
-        "temas_cubiertos": [f"tema{num}"],
         "extension_estimada": "media",
         "complejidad": "media",
         "expansion_prevista": "alta",
@@ -128,7 +127,6 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             return (
                 {
                     "analisis_texto": "Diez páginas de prueba",
-                    "temas_identificados": ["tema1", "tema2"],
                     "decision_num_partes": 2,
                     "decision_justificacion": "Dos bloques MECE",
                     "partes": [
@@ -140,9 +138,15 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
                 _usage(total=100),
             )
 
-        def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
+        def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type, validation_context=None):
             explainer_calls.append(
-                {"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt, "model": model}
+                {
+                    "file_uri": file_uri,
+                    "mime_type": mime_type,
+                    "prompt": agent_prompt,
+                    "model": model,
+                    "validation_context": validation_context,
+                }
             )
             return ({"ok": True}, _usage())
 
@@ -191,6 +195,8 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         assert "Páginas 4-10" in part2_prompt
         assert part1_marker in part1_prompt
         assert part2_marker in part2_prompt
+        assert all(c["validation_context"] is not None for c in explainer_calls)
+        assert {c["validation_context"].scope_kind for c in explainer_calls} == {"part"}
 
         # Sub-PDF page counts (buffer=1): part1 pages 1–3 → 1..4 → 4 pages; part2 4–10 → 3..10 → 8 pages
         assert sorted(segment_upload_page_counts) == [4, 8]
@@ -201,8 +207,8 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             os.unlink(pdf_path)
 
 
-def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
-    """Theme assignment is not validated in the main PDF processing path."""
+def test_process_project_pdf_does_not_require_legacy_theme_fields(monkeypatch):
+    """The main PDF processing path accepts the current segmentador contract."""
     pdf_path = _create_multi_page_pdf(5)
     try:
         project = {
@@ -215,7 +221,8 @@ def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
             "status": "pending",
         }
         updates = []
-        seg_calls = []
+        segmentador_calls = []
+        validation_contexts = []
 
         monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
         monkeypatch.setattr(
@@ -243,12 +250,11 @@ def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
         monkeypatch.setattr(main, "upload_file_with_retry", lambda *a, **k: SimpleNamespace(uri="u://x", mime_type="application/pdf"))
         monkeypatch.setattr(main, "run_page_classifier", lambda *a, **k: (frozenset({1, 2, 3, 4, 5}), _usage(), {}))
 
-        def _segmentador_with_unassigned_theme(api_key, file_uri, description, model, mime_type, source_kind):
-            seg_calls.append(description)
+        def _segmentador_without_legacy_fields(api_key, file_uri, description, model, mime_type, source_kind):
+            segmentador_calls.append(description)
             return (
                 {
                     "analisis_texto": "x",
-                    "temas_identificados": ["solo_tema"],
                     "decision_num_partes": 1,
                     "decision_justificacion": "x",
                     "partes": [
@@ -259,7 +265,6 @@ def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
                             "identificacion": "i",
                             "pagina_inicio": 1,
                             "pagina_fin": 5,
-                            "temas_cubiertos": [],
                             "extension_estimada": "m",
                             "complejidad": "m",
                             "expansion_prevista": "a",
@@ -278,8 +283,12 @@ def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
                 _usage(total=10),
             )
 
-        monkeypatch.setattr(main, "run_segmentador", _segmentador_with_unassigned_theme)
-        monkeypatch.setattr(main, "run_explainer", lambda *a, **k: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_segmentador", _segmentador_without_legacy_fields)
+        def _fake_subpart_explainer(*args, validation_context=None, **kwargs):
+            validation_contexts.append(validation_context)
+            return ({"desarrollo": []}, _usage())
+
+        monkeypatch.setattr(main, "run_subpart_explainer", _fake_subpart_explainer)
         monkeypatch.setattr(main, "run_recorrido", lambda *a, **k: ({"ok": True}, _usage()))
         monkeypatch.setattr(main, "run_resources", lambda *a, **k: ({"ok": True}, _usage()))
 
@@ -290,8 +299,9 @@ def test_process_project_pdf_does_not_validate_tema_mece(monkeypatch):
 
         asyncio.run(main._process_project("proj-no-tema-mece", "user-1"))
 
-        assert len(seg_calls) == 1
-        assert all("<correccion_asignacion_temas>" not in call for call in seg_calls)
+        assert len(segmentador_calls) == 1
+        assert validation_contexts and all(ctx is not None for ctx in validation_contexts)
+        assert {ctx.scope_kind for ctx in validation_contexts} == {"subpart"}
         assert any(payload.get("status") == "completed" for payload in updates)
     finally:
         if os.path.isfile(pdf_path):
@@ -390,7 +400,6 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
             lambda *args, **kwargs: (
                 {
                     "analisis_texto": "Cuatro páginas",
-                    "temas_identificados": ["tema1"],
                     "decision_num_partes": 1,
                     "decision_justificacion": "Una parte",
                     "partes": [_part_pdf_fields(1, "Única", 1, 4)],
@@ -437,6 +446,100 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
         usage_updates = [payload["usage"] for payload in updates if "usage" in payload]
         assert usage_updates[0]["explainer_provider"] == "gemini"
         assert usage_updates[0]["explainer_model"] == MODEL_AGENTS
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_validation_error_does_not_complete_project(monkeypatch):
+    pdf_path = _create_multi_page_pdf(3)
+    try:
+        project = {
+            "id": "proj-validation-error",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+        }
+        updates = []
+        events = []
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(deepcopy(payload)))
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+
+        async def _send_event(project_id, payload):
+            events.append(payload)
+
+        class _DummySSE:
+            async def end_stream(self, project_id):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+        from backend.agents.completeness_validator import (
+            ExplainerValidationError,
+            ExplainerValidationReport,
+        )
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset({1, 2, 3}), _usage(), {}))
+        monkeypatch.setattr(
+            main,
+            "run_segmentador",
+            lambda *args, **kwargs: (
+                {
+                    "analisis_texto": "Tres paginas",
+                    "decision_num_partes": 1,
+                    "decision_justificacion": "Una parte",
+                    "partes": [_part_pdf_fields(1, "Unica", 1, 3)],
+                    "consideraciones_estudiante": "Orden natural",
+                },
+                _usage(total=40),
+            ),
+        )
+
+        def _raise_validation_error(*args, **kwargs):
+            raise ExplainerValidationError(
+                label="Explainer Gemini",
+                report=ExplainerValidationReport(
+                    is_complete=True,
+                    scope_status="violation",
+                    reason="Invade la parte siguiente.",
+                    offending_fragments=("parte siguiente",),
+                    retry_instructions="Eliminar la parte siguiente.",
+                ),
+            )
+
+        monkeypatch.setattr(main, "run_explainer", _raise_validation_error)
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(
+            main,
+            "format_explainer_content",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("No debe formatear una explicacion invalida")),
+        )
+
+        asyncio.run(main._process_project("proj-validation-error", "user-123", explainer_provider="gemini"))
+
+        assert any(payload.get("status") == "error" for payload in updates)
+        assert not any(payload.get("status") == "completed" for payload in updates)
+        assert any(event.get("type") == "error" for event in events)
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
@@ -522,7 +625,6 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             lambda *args, **kwargs: (
                 {
                     "analisis_texto": "Cuatro páginas",
-                    "temas_identificados": ["tema1"],
                     "decision_num_partes": 1,
                     "decision_justificacion": "Una parte",
                     "partes": [_part_pdf_fields(1, "Única", 1, 4)],
@@ -537,12 +639,23 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini explainer no debería ejecutarse")),
         )
 
-        def _fake_openrouter_explainer(source_path, agent_prompt, model, mime_type, api_key, cache_entry=None, page_numbers=()):
+        def _fake_openrouter_explainer(
+            source_path,
+            agent_prompt,
+            model,
+            mime_type,
+            api_key,
+            gemini_api_key="",
+            cache_entry=None,
+            page_numbers=(),
+            validation_context=None,
+        ):
             openrouter_calls.append({
                 "source_path": source_path,
                 "model": model,
                 "mime_type": mime_type,
                 "page_numbers": tuple(page_numbers),
+                "validation_context": validation_context,
             })
             return (
                 {
@@ -568,6 +681,8 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         assert openrouter_calls
         assert all(call["model"] == main.OPENROUTER_EXPLAINER_MODEL for call in openrouter_calls)
         assert all(call["page_numbers"] == (1, 2, 3, 4) for call in openrouter_calls)
+        assert all(call["validation_context"] is not None for call in openrouter_calls)
+        assert {call["validation_context"].scope_kind for call in openrouter_calls} == {"part"}
         usage_updates = [payload["usage"] for payload in updates if "usage" in payload]
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
@@ -636,7 +751,6 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
         )
         monkeypatch.setattr(main, "run_segmentador", lambda *args, **kwargs: ({
             "analisis_texto": "Cinco páginas",
-            "temas_identificados": ["tema1"],
             "decision_num_partes": 1,
             "decision_justificacion": "Una parte",
             "partes": [{
@@ -646,7 +760,6 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
                 "identificacion": "Páginas 1-5",
                 "pagina_inicio": 1,
                 "pagina_fin": 5,
-                "temas_cubiertos": ["tema1"],
                 "extension_estimada": "media",
                 "complejidad": "media",
                 "expansion_prevista": "alta",

@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import inspect
 import json
 import math
 import os
@@ -79,7 +80,12 @@ from backend.agents.explainer_openrouter import (
     OPENROUTER_PDF_PRIMING_MODEL,
     OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
 )
-from backend.agents.completeness_validator import COMPLETENESS_VALIDATOR_MODEL
+from backend.agents.completeness_validator import (
+    COMPLETENESS_VALIDATOR_MODEL,
+    ExplainerScopeItem,
+    ExplainerValidationContext,
+    ExplainerValidationError,
+)
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
 from backend.agents.formatter import format_explainer_content
@@ -680,22 +686,9 @@ class PartHandoffContext:
 
     titulo: str
     resumen_alcance: str
-    temas_cubiertos: tuple[str, ...]
     intent_usuario: str | None
     continuidad_previa: str | None
     vision_global_division: str | None
-
-
-def _normalized_temas_cubiertos(parte: dict) -> tuple[str, ...]:
-    raw = parte.get("temas_cubiertos")
-    if not isinstance(raw, list):
-        return ()
-    out: list[str] = []
-    for item in raw:
-        s = str(item).strip()
-        if s:
-            out.append(s)
-    return tuple(out)
 
 
 def _part_handoff_base(
@@ -711,7 +704,6 @@ def _part_handoff_base(
     return PartHandoffContext(
         titulo=titulo,
         resumen_alcance=resumen,
-        temas_cubiertos=_normalized_temas_cubiertos(parte),
         intent_usuario=intent_usuario,
         continuidad_previa=continuidad_previa,
         vision_global_division=vision_global_division,
@@ -728,13 +720,6 @@ def _continuity_block_from_previous_part(prev: dict) -> str:
     if body:
         lines.append("Alcance que el segmentador asignó a ese módulo (orientación, no sustituye al texto fuente):")
         lines.append(body)
-    temas = _normalized_temas_cubiertos(prev)
-    if temas:
-        lines.append(
-            "Temas que el segmentador cerró en ese módulo (para enlazar ideas y prerequisitos; no reexpliques ese bloque aquí):"
-        )
-        for i, tema in enumerate(temas, start=1):
-            lines.append(f"  {i}. {tema}")
     return "\n".join(lines) if lines else ""
 
 
@@ -791,6 +776,149 @@ def _adjacent_subparts_for_audit(
     return previous_sp, next_sp
 
 
+def _item_number(value: object, total: int | None = None) -> str:
+    if value is None:
+        return ""
+    base = str(value).strip()
+    if not base:
+        return ""
+    return f"{base}/{total}" if total else base
+
+
+def _scope_anchors_from_subpart(subparte: dict) -> tuple[str, ...]:
+    raw = subparte.get("delimitacion_explainer") or {}
+    if not isinstance(raw, dict):
+        return ()
+    inicio = raw.get("inicio") or {}
+    fin = raw.get("fin") or {}
+    transicion = raw.get("transicion_compartida") or {}
+    anchors: list[str] = []
+    for value in (
+        inicio.get("encabezado") if isinstance(inicio, dict) else None,
+        inicio.get("ancla_texto") if isinstance(inicio, dict) else None,
+        fin.get("ancla_texto") if isinstance(fin, dict) else None,
+        fin.get("encabezado_siguiente_excluido") if isinstance(fin, dict) else None,
+        transicion.get("hasta_texto_inclusive") if isinstance(transicion, dict) else None,
+        transicion.get("desde_texto_inclusive") if isinstance(transicion, dict) else None,
+    ):
+        normalized = str(value or "").strip()
+        if normalized:
+            anchors.append(normalized)
+    return tuple(anchors)
+
+
+def _scope_item_from_part(parte: dict, *, total_parts: int | None = None) -> ExplainerScopeItem:
+    return ExplainerScopeItem(
+        kind="part",
+        number=_item_number(parte.get("numero"), total_parts),
+        title=str(parte.get("titulo") or "").strip(),
+        content=str(parte.get("contenido") or "").strip(),
+        identification=str(parte.get("identificacion") or "").strip(),
+        page_start=_optional_int(parte, "pagina_inicio"),
+        page_end=_optional_int(parte, "pagina_fin"),
+        block_start=_optional_int(parte, "bloque_inicio"),
+        block_end=_optional_int(parte, "bloque_fin"),
+    )
+
+
+def _scope_item_from_subpart(subparte: dict | None, *, total_subparts: int | None = None) -> ExplainerScopeItem | None:
+    if subparte is None:
+        return None
+    return ExplainerScopeItem(
+        kind="subpart",
+        number=_item_number(subparte.get("numero_subparte"), total_subparts),
+        title=str(subparte.get("titulo") or "").strip(),
+        content=str(subparte.get("contenido") or "").strip(),
+        identification=str(subparte.get("identificacion") or "").strip(),
+        anchors=_scope_anchors_from_subpart(subparte),
+        page_start=_optional_int(subparte, "pagina_inicio"),
+        page_end=_optional_int(subparte, "pagina_fin"),
+        block_start=_optional_int(subparte, "bloque_inicio"),
+        block_end=_optional_int(subparte, "bloque_fin"),
+    )
+
+
+def _build_subpart_validation_context(
+    *,
+    partes_segmentadas: list[dict],
+    current_parte: dict,
+    subpart_idx: int,
+) -> ExplainerValidationContext:
+    subpartes = current_parte.get("subpartes") or []
+    current_subpart = subpartes[subpart_idx]
+    previous_sp, next_sp = _adjacent_subparts_for_audit(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=current_parte,
+        subpart_idx=subpart_idx,
+    )
+    return ExplainerValidationContext(
+        scope_kind="subpart",
+        current=_scope_item_from_subpart(current_subpart, total_subparts=len(subpartes)) or ExplainerScopeItem(
+            kind="subpart",
+            title="",
+        ),
+        parent=_scope_item_from_part(current_parte, total_parts=len(partes_segmentadas)),
+        previous_neighbor=_scope_item_from_subpart(previous_sp),
+        next_neighbor=_scope_item_from_subpart(next_sp),
+    )
+
+
+def _build_part_validation_context(
+    *,
+    partes_segmentadas: list[dict],
+    current_parte: dict,
+) -> ExplainerValidationContext:
+    part_pos = next((i for i, p in enumerate(partes_segmentadas) if p is current_parte), -1)
+    if part_pos < 0:
+        current_num = current_parte.get("numero")
+        part_pos = next((i for i, p in enumerate(partes_segmentadas) if p.get("numero") == current_num), -1)
+
+    if part_pos < 0:
+        previous_part = None
+        next_part = None
+    else:
+        previous_part = partes_segmentadas[part_pos - 1] if part_pos > 0 else None
+        next_part = partes_segmentadas[part_pos + 1] if part_pos + 1 < len(partes_segmentadas) else None
+    return ExplainerValidationContext(
+        scope_kind="part",
+        current=_scope_item_from_part(current_parte, total_parts=len(partes_segmentadas)),
+        previous_neighbor=_scope_item_from_part(previous_part, total_parts=len(partes_segmentadas)) if previous_part else None,
+        next_neighbor=_scope_item_from_part(next_part, total_parts=len(partes_segmentadas)) if next_part else None,
+    )
+
+
+def _call_agent_with_optional_validation_context(
+    fn: Callable[..., Any],
+    *args: Any,
+    validation_context: ExplainerValidationContext | None,
+) -> Any:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return fn(*args, validation_context=validation_context)
+
+    accepts_context = False
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "validation_context":
+            accepts_context = True
+            break
+    if accepts_context:
+        return fn(*args, validation_context=validation_context)
+    return fn(*args)
+
+
+def _unpack_explainer_result(sp_result: Any) -> tuple[dict, Any, list[Any]]:
+    if not isinstance(sp_result, (tuple, list)):
+        raise RuntimeError("Resultado de explainer inválido: se esperaba una tupla.")
+    if len(sp_result) == 3:
+        data, usage, validator_usages = sp_result
+        return data, usage, list(validator_usages or [])
+    if len(sp_result) == 2:
+        data, usage = sp_result
+        return data, usage, []
+    raise RuntimeError(f"Resultado de explainer inválido: tupla de longitud {len(sp_result)}.")
+
+
 def _assemble_part_explainer(
     parte: dict,
     subpart_desarrollos: list[list[dict]],
@@ -817,7 +945,7 @@ def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes
     blocks.append(
         "Lo siguiente resume decisiones ya tomadas sobre este documento. "
         "La fuente de verdad sigue siendo el archivo adjunto y la identificación textual; "
-        "usa este bloque como contrato de cobertura y hilo conductor."
+        "usa este bloque como contrato de alcance y hilo conductor."
     )
 
     if ctx.intent_usuario:
@@ -842,20 +970,6 @@ def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes
         blocks.append("")
         blocks.append("Alcance declarado de esta parte (segmentador):")
         blocks.append(ctx.resumen_alcance)
-
-    blocks.append("")
-    blocks.append(
-        "CONTRATO DE COBERTURA — cada ítem debe quedar desarrollado en el cuerpo de la explicación "
-        "(no basta mencionarlo en listas ni en la introducción):"
-    )
-    if ctx.temas_cubiertos:
-        for i, tema in enumerate(ctx.temas_cubiertos, start=1):
-            blocks.append(f"  {i}. {tema}")
-    else:
-        blocks.append(
-            "  (El segmentador no devolvió lista explícita de temas_cubiertos; "
-            "deriva el inventario exhaustivo del texto adjunto y de la identificación.)"
-        )
 
     return "\n".join(blocks)
 
@@ -923,7 +1037,7 @@ def _pdf_scope_instructions(
             "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
             "El archivo es un recorte local del documento con hasta una página de contexto a cada lado del tramo "
             "principal de esta parte (buffer), para no perder párrafos cortados entre módulos.\n\n"
-            "- NÚCLEO: delimita el bloque principal usando la identificación de la parte y el contrato de cobertura; "
+            "- NÚCLEO: delimita el bloque principal usando la identificación de la parte y el contrato de alcance; "
             "ahí reside el objetivo de estudio.\n"
             "- CONTEXTO (buffer): solo continuidad en los bordes; no lo desarrolles como temario independiente "
             "ni bases de estudio aisladas.\n\n"
@@ -940,7 +1054,7 @@ def _pdf_scope_instructions(
         "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
         "El archivo contiene el documento completo."
         f"{nucleus_hint}\n\n"
-        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes} según el contrato de cobertura y la identificación. "
+        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
         "No sustituyas el material de otras partes por contenido de este módulo. "
         "Si necesitas enlaces mínimos con el resto del temario, limítalos al campo conexiones_contextuales o a menciones breves."
     )
@@ -959,7 +1073,7 @@ def _text_scope_instructions(part_id: int, num_partes: int, bloque_inicio: int, 
 def _youtube_scope_instructions(part_id: int, num_partes: int) -> str:
     return (
         "ALCANCE DE LA FUENTE ADJUNTA\n"
-        f"Procesa únicamente la Parte {part_id}/{num_partes} según el contrato de cobertura y la identificación. "
+        f"Procesa únicamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
         "La tabla de contenidos sitúa el módulo dentro del conjunto del material."
     )
 
@@ -1059,7 +1173,6 @@ def _build_subpart_context(
     total_sp = len(all_subpartes)
     sp_titulo = subparte.get("titulo", f"Subparte {sp_num}")
     sp_contenido = subparte.get("contenido", "")
-    sp_temas = subparte.get("temas_cubiertos", [])
 
     lines: list[str] = []
     lines.append("ALCANCE PEDAGÓGICO DE LA SUBPARTE")
@@ -1069,10 +1182,6 @@ def _build_subpart_context(
     lines.append(f"Título: «{sp_titulo}»")
     if sp_contenido:
         lines.append(f"Contenido propio: {sp_contenido}")
-    if sp_temas:
-        lines.append("Temas propios a desarrollar:")
-        for i, tema in enumerate(sp_temas, 1):
-            lines.append(f"  {i}. {tema}")
     lines.append(
         "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
         "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
@@ -2165,7 +2274,29 @@ async def _process_project(
                     else:
                         subpart_prompts = [agent_prompt]
 
+                subpartes_for_validation = parte.get("subpartes") or []
+                if subpartes_for_validation:
+                    subpart_validation_contexts = [
+                        _build_subpart_validation_context(
+                            partes_segmentadas=partes_segmentadas,
+                            current_parte=parte,
+                            subpart_idx=i,
+                        )
+                        for i in range(len(subpartes_for_validation))
+                    ]
+                else:
+                    subpart_validation_contexts = [
+                        _build_part_validation_context(
+                            partes_segmentadas=partes_segmentadas,
+                            current_parte=parte,
+                        )
+                    ]
+
                 num_subparts = len(subpart_prompts)
+                if len(subpart_validation_contexts) != num_subparts:
+                    raise RuntimeError(
+                        "Los contextos de validación no coinciden con el número de subprompts generados."
+                    )
                 use_subpart_explainer = bool(parte.get("subpartes"))
 
                 logger.info(
@@ -2184,9 +2315,11 @@ async def _process_project(
 
                     def _make_subpart_task(idx: int):
                         sp_prompt = subpart_prompts[idx]
+                        validation_context = subpart_validation_contexts[idx]
                         if use_or:
                             if use_or_canonical:
                                 return asyncio.to_thread(
+                                    _call_agent_with_optional_validation_context,
                                     explainer_fn_or_sp,
                                     mistral_pdf_context.source_pdf_path,
                                     sp_prompt,
@@ -2196,8 +2329,10 @@ async def _process_project(
                                     api_key,  # gemini_api_key para el validador
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
+                                    validation_context=validation_context,
                                 )
                             return asyncio.to_thread(
+                                _call_agent_with_optional_validation_context,
                                 explainer_fn_or_sp,
                                 segment_temp_path,
                                 sp_prompt,
@@ -2205,14 +2340,17 @@ async def _process_project(
                                 agent_mime_type,
                                 openrouter_api_key,
                                 api_key,  # gemini_api_key para el validador
+                                validation_context=validation_context,
                             )
                         return asyncio.to_thread(
+                            _call_agent_with_optional_validation_context,
                             explainer_fn_sp,
                             api_key,
                             agent_file_uri,
                             sp_prompt,
                             MODEL_AGENTS,
                             agent_mime_type,
+                            validation_context=validation_context,
                         )
 
                     if use_or_canonical:
@@ -2230,6 +2368,7 @@ async def _process_project(
                             )
                         parallel_explainer = [
                             asyncio.to_thread(
+                                _call_agent_with_optional_validation_context,
                                 explainer_fn_or,
                                 mistral_pdf_context.source_pdf_path,
                                 sp_prompt,
@@ -2239,12 +2378,14 @@ async def _process_project(
                                 api_key,  # gemini_api_key para el validador
                                 mistral_pdf_context.cache_entry,
                                 page_scope,
+                                validation_context=subpart_validation_contexts[idx],
                             )
-                            for sp_prompt, page_scope in zip(subpart_prompts, openrouter_page_scopes)
+                            for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
                         ]
                     else:
                         parallel_explainer = [
                             asyncio.to_thread(
+                                _call_agent_with_optional_validation_context,
                                 explainer_fn_or,
                                 segment_temp_path,
                                 sp_prompt,
@@ -2252,14 +2393,24 @@ async def _process_project(
                                 agent_mime_type,
                                 openrouter_api_key,
                                 api_key,  # gemini_api_key para el validador
+                                validation_context=subpart_validation_contexts[idx],
                             )
-                            for sp_prompt in subpart_prompts
+                            for idx, sp_prompt in enumerate(subpart_prompts)
                         ]
                 else:
                     explainer_fn = run_explainer
                     parallel_explainer = [
-                        asyncio.to_thread(explainer_fn, api_key, agent_file_uri, sp_prompt, MODEL_AGENTS, agent_mime_type)
-                        for sp_prompt in subpart_prompts
+                        asyncio.to_thread(
+                            _call_agent_with_optional_validation_context,
+                            explainer_fn,
+                            api_key,
+                            agent_file_uri,
+                            sp_prompt,
+                            MODEL_AGENTS,
+                            agent_mime_type,
+                            validation_context=subpart_validation_contexts[idx],
+                        )
+                        for idx, sp_prompt in enumerate(subpart_prompts)
                     ]
                 results = await asyncio.gather(
                     *parallel_explainer,
@@ -2279,12 +2430,14 @@ async def _process_project(
                 subpart_desarrollos: list[list[dict]] = []
                 for i, sp_result in enumerate(subpart_results):
                     if isinstance(sp_result, Exception):
+                        if isinstance(sp_result, ExplainerValidationError):
+                            raise sp_result
                         logger.error(
                             f"[Process] Error en explainer subparte {i+1}/{num_subparts} de parte {part_id}: {str(sp_result)}",
                             extra={"part_id": part_id, "subpart": i+1, "error_type": type(sp_result).__name__}
                         )
                     else:
-                        sp_data = sp_result[0]
+                        sp_data, _, _ = _unpack_explainer_result(sp_result)
                         subpart_desarrollos.append(sp_data.get("desarrollo") or [])
 
                 # Assemble: intro/conclusion/conexiones from segmentador + subpart results
@@ -2294,7 +2447,7 @@ async def _process_project(
                     # Fallback: no subparts — use the full explainer output as-is.
                     # Both Gemini and OpenRouter now return the same structured shape.
                     if subpart_results and not isinstance(subpart_results[0], Exception):
-                        assembled_explainer = subpart_results[0][0]
+                        assembled_explainer = _unpack_explainer_result(subpart_results[0])[0]
                     else:
                         assembled_explainer = {"error": "All explainer calls failed"}
 
@@ -2306,7 +2459,7 @@ async def _process_project(
                     for i, sp_result in enumerate(subpart_results):
                         if not isinstance(sp_result, Exception):
                             # sp_result is (result_dict, explainer_usage, validator_usages_list)
-                            _, sp_usage, sp_val_usages = sp_result
+                            _, sp_usage, sp_val_usages = _unpack_explainer_result(sp_result)
                             if sp_usage:
                                 _update_usage(
                                     sp_usage,
@@ -2445,6 +2598,24 @@ async def _process_project(
         update_project(project_id, user_id, {"status": "completed"})
         await send_event(project_id, {"type": "completed"})
 
+    except ExplainerValidationError as exc:
+        error_msg = (
+            "Se abortó el procesamiento porque el validador confirmó que una explicación "
+            f"seguía fuera de alcance o incompleta tras los reintentos: {exc.report.reason}"
+        )
+        logger.error(
+            "[Process] Validación de explainer fallida: %s",
+            exc.report.reason[:300],
+            extra={
+                "error_type": "ExplainerValidationError",
+                "project_id": project_id,
+                "label": exc.label,
+                "is_complete": exc.report.is_complete,
+                "scope_status": exc.report.scope_status,
+            },
+        )
+        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        await send_event(project_id, {"type": "error", "message": error_msg})
     except GeminiRateLimitError as exc:
         # Error específico de rate limit - mensaje amigable
         error_msg = (

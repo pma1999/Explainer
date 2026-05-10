@@ -24,9 +24,11 @@ from backend.agents.explainer_prompts import (
     SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
 )
 from backend.agents.completeness_validator import (
-    INCOMPLETE_RETRY_SYSTEM_SUFFIX,
-    format_incomplete_context,
-    run_with_completeness_validation,
+    ExplainerValidationContext,
+    ExplainerValidationReport,
+    build_explainer_retry_system_suffix,
+    format_explainer_retry_context,
+    run_with_explainer_validation,
 )
 
 logger = get_logger("backend.agents.explainer_openrouter")
@@ -763,20 +765,34 @@ def _run_explainer_or_for_retry(
     source_path: str,
     identificacion: str,
     previous_result: dict[str, Any],
+    validation_report: ExplainerValidationReport,
     model: str,
     mime_type: str,
     api_key: str,
     pdf_cache_entry: "PdfOcrCacheEntry | None",
     page_numbers: tuple[int, ...] | None,
+    validation_context: ExplainerValidationContext | None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Reintento de run_explainer_or con contexto de la explicación anterior incompleta."""
+    """Reintento de run_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
-        "Reintentando explainer (openrouter) por truncamiento detectado",
-        extra={"source_path": source_path, "model": model},
+        "Reintentando explainer (openrouter) por validación fallida",
+        extra={
+            "source_path": source_path,
+            "model": model,
+            "is_complete": validation_report.is_complete,
+            "scope_status": validation_report.scope_status,
+        },
     )
-    incomplete_ctx = format_incomplete_context(previous_result)
-    extended_identificacion = f"{identificacion}\n\n{incomplete_ctx}"
-    extended_system = f"{OR_EXPLAINER_SYSTEM_PROMPT}{INCOMPLETE_RETRY_SYSTEM_SUFFIX}"
+    retry_ctx = format_explainer_retry_context(
+        previous_result,
+        validation_report,
+        validation_context=validation_context,
+    )
+    extended_identificacion = f"{identificacion}\n\n{retry_ctx}"
+    extended_system = (
+        f"{OR_EXPLAINER_SYSTEM_PROMPT}"
+        f"{build_explainer_retry_system_suffix(validation_report, validation_context=validation_context)}"
+    )
 
     response_format = _resolve_openrouter_response_format(
         model=model, json_schema=OR_EXPLAINER_JSON_SCHEMA
@@ -804,20 +820,34 @@ def _run_subpart_explainer_or_for_retry(
     source_path: str,
     identificacion: str,
     previous_result: dict[str, Any],
+    validation_report: ExplainerValidationReport,
     model: str,
     mime_type: str,
     api_key: str,
     pdf_cache_entry: "PdfOcrCacheEntry | None",
     page_numbers: tuple[int, ...] | None,
+    validation_context: ExplainerValidationContext | None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    """Reintento de run_subpart_explainer_or con contexto de la subparte anterior incompleta."""
+    """Reintento de run_subpart_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
-        "Reintentando subpart explainer (openrouter) por truncamiento detectado",
-        extra={"source_path": source_path, "model": model},
+        "Reintentando subpart explainer (openrouter) por validación fallida",
+        extra={
+            "source_path": source_path,
+            "model": model,
+            "is_complete": validation_report.is_complete,
+            "scope_status": validation_report.scope_status,
+        },
     )
-    incomplete_ctx = format_incomplete_context(previous_result)
-    extended_identificacion = f"{identificacion}\n\n{incomplete_ctx}"
-    extended_system = f"{OR_SUBPART_EXPLAINER_SYSTEM_PROMPT}{INCOMPLETE_RETRY_SYSTEM_SUFFIX}"
+    retry_ctx = format_explainer_retry_context(
+        previous_result,
+        validation_report,
+        validation_context=validation_context,
+    )
+    extended_identificacion = f"{identificacion}\n\n{retry_ctx}"
+    extended_system = (
+        f"{OR_SUBPART_EXPLAINER_SYSTEM_PROMPT}"
+        f"{build_explainer_retry_system_suffix(validation_report, validation_context=validation_context)}"
+    )
 
     response_format = _resolve_openrouter_response_format(
         model=model, json_schema=OR_SUBPART_EXPLAINER_JSON_SCHEMA
@@ -856,6 +886,7 @@ def run_explainer_or_validated(
     gemini_api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_explainer_or con validación de completitud y reintento automático.
 
@@ -866,15 +897,25 @@ def run_explainer_or_validated(
     Returns:
         (result, usage, validator_usages_list)
     """
-    return run_with_completeness_validation(
+    return run_with_explainer_validation(
         initial_call=lambda: run_explainer_or(
             source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
         ),
-        retry_call=lambda prev: _run_explainer_or_for_retry(
-            source_path, identificacion, prev, model, mime_type, api_key, pdf_cache_entry, page_numbers
+        retry_call=lambda prev, report: _run_explainer_or_for_retry(
+            source_path,
+            identificacion,
+            prev,
+            report,
+            model,
+            mime_type,
+            api_key,
+            pdf_cache_entry,
+            page_numbers,
+            validation_context,
         ),
         gemini_api_key=gemini_api_key,
         label=f"Explainer OpenRouter [{model}]",
+        validation_context=validation_context,
     )
 
 
@@ -887,6 +928,7 @@ def run_subpart_explainer_or_validated(
     gemini_api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_subpart_explainer_or con validación de completitud y reintento automático.
 
@@ -897,13 +939,23 @@ def run_subpart_explainer_or_validated(
     Returns:
         (result, usage, validator_usages_list)
     """
-    return run_with_completeness_validation(
+    return run_with_explainer_validation(
         initial_call=lambda: run_subpart_explainer_or(
             source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
         ),
-        retry_call=lambda prev: _run_subpart_explainer_or_for_retry(
-            source_path, identificacion, prev, model, mime_type, api_key, pdf_cache_entry, page_numbers
+        retry_call=lambda prev, report: _run_subpart_explainer_or_for_retry(
+            source_path,
+            identificacion,
+            prev,
+            report,
+            model,
+            mime_type,
+            api_key,
+            pdf_cache_entry,
+            page_numbers,
+            validation_context,
         ),
         gemini_api_key=gemini_api_key,
         label=f"Subpart Explainer OpenRouter [{model}]",
+        validation_context=validation_context,
     )

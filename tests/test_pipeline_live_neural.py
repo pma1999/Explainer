@@ -164,18 +164,13 @@ def main():
     _save_json("01_segmentation", segmentation, output_dir)
 
     num_partes = len(segmentation.get("partes", []))
-    temas = segmentation.get("temas_identificados", [])
-    log.info("Segmentador done in %dms — %d partes, %d temas", int(seg_ms), num_partes, len(temas))
+    log.info("Segmentador done in %dms — %d partes", int(seg_ms), num_partes)
     log.info("Token usage: %s", _tokens(seg_usage))
 
     # Print segmentation summary
     log.info("-" * 60)
     log.info("SEGMENTATION SUMMARY")
     log.info("-" * 60)
-    log.info("Temas identificados (%d):", len(temas))
-    for i, t in enumerate(temas, 1):
-        log.info("  T%d: %s", i, t)
-    log.info("")
     for p in segmentation.get("partes", []):
         pg_i = p.get("pagina_inicio", "?")
         pg_f = p.get("pagina_fin", "?")
@@ -188,9 +183,8 @@ def main():
             sp_pi = sp.get("pagina_inicio", "?")
             sp_pf = sp.get("pagina_fin", "?")
             log.info(
-                "    SP %d: \"%s\" (pp.%s-%s) — temas: %s",
+                "    SP %d: \"%s\" (pp.%s-%s)",
                 sp["numero_subparte"], sp["titulo"], sp_pi, sp_pf,
-                ", ".join(sp.get("temas_cubiertos", [])),
             )
     log.info("-" * 60)
 
@@ -260,7 +254,6 @@ def main():
             "identificacion": first_parte.get("identificacion", ""),
             "pagina_inicio": pg_inicio,
             "pagina_fin": pg_fin,
-            "temas_cubiertos": first_parte.get("temas_cubiertos", []),
         }]
         log.warning("No subpartes defined — using whole part as single subparte")
 
@@ -274,7 +267,6 @@ def main():
             sp_idx + 1, len(subpartes), sp.get("titulo", "?"),
             sp.get("pagina_inicio", "?"), sp.get("pagina_fin", "?"),
         )
-        log.info("  Temas cubiertos: %s", sp.get("temas_cubiertos", []))
         log.info("-" * 60)
 
         sp_prompt = _build_subpart_pdf_prompt(

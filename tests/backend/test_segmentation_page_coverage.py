@@ -13,12 +13,10 @@ from backend.segmentation_page_coverage import (
 CONTENT = frozenset(range(3, 21))
 
 
-def _parte(num: int, pi: int, pf: int, subpartes: list[dict] | None = None, temas: list[str] | None = None) -> dict:
+def _parte(num: int, pi: int, pf: int, subpartes: list[dict] | None = None) -> dict:
     p: dict = {"numero": num, "titulo": f"Parte {num}", "pagina_inicio": pi, "pagina_fin": pf}
     if subpartes is not None:
         p["subpartes"] = subpartes
-    if temas is not None:
-        p["temas_cubiertos"] = temas
     return p
 
 
@@ -237,18 +235,18 @@ def test_retry_suffix_without_theme_context_still_has_page_instructions():
     assert "PÁGINAS DE CONTENIDO" in text
 
 
-def test_compact_segmentation_ranges_omits_theme_assignment_fields():
-    """Range retry context should not depend on theme assignment fields."""
+def test_compact_segmentation_ranges_omits_non_range_fields():
+    """Range retry context should stay focused on page boundaries."""
     from backend.segmentation_page_coverage import _compact_segmentation_ranges
     seg = {
         "partes": [
-            _parte(1, 3, 9, temas=["Tema A", "Tema B"]),
-            _parte(2, 12, 20, temas=["Tema C"]),
+            {**_parte(1, 3, 9), "contenido": "Contenido fuera del contrato de rangos"},
+            {**_parte(2, 12, 20), "identificacion": "Detalle textual fuera del contrato de rangos"},
         ]
     }
     text = _compact_segmentation_ranges(seg)
-    assert "temas_cubiertos" not in text
-    assert "Tema A" not in text
+    assert "Contenido fuera del contrato de rangos" not in text
+    assert "Detalle textual fuera del contrato de rangos" not in text
 
 
 if __name__ == "__main__":

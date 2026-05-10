@@ -374,7 +374,6 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
                     "motivo": "El texto extraído corresponde a contenido real y estudiable.",
                     "indicios": ["Desarrollo temático coherente", "Bloques con contenido sustantivo"],
                 },
-                "temas_identificados": ["tema principal"],
                 "partes": [
                     {
                         "numero": 1,
@@ -383,7 +382,6 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
                         "identificacion": "Desde el bloque 1 hasta el bloque 1",
                         "bloque_inicio": 1,
                         "bloque_fin": 1,
-                        "temas_cubiertos": ["tema principal"],
                         "extension_estimada": "media",
                         "complejidad": "media",
                         "expansion_prevista": "alta",
@@ -507,7 +505,6 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
                         "Señales de verificación humana",
                     ],
                 },
-                "temas_identificados": [],
                 "partes": [],
                 "analisis_texto": "El texto parece un scrape defectuoso sin contenido sustantivo.",
                 "decision_num_partes": 0,

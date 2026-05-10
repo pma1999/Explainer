@@ -124,7 +124,6 @@ def _scope_handoff():
     return m.PartHandoffContext(
         titulo="Parte 2",
         resumen_alcance="Instituciones del Estado Moderno",
-        temas_cubiertos=("Concepto de Estado", "Burocracia"),
         intent_usuario=None,
         continuidad_previa=None,
         vision_global_division=None,
@@ -146,7 +145,6 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
             "numero_subparte": 1,
             "titulo": "Precursores",
             "contenido": "Teorización política previa",
-            "temas_cubiertos": ["Tomás de Aquino", "Maquiavelo"],
             "pagina_inicio": 18,
             "pagina_fin": 19,
         },
@@ -154,7 +152,6 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
             "numero_subparte": 2,
             "titulo": "Cambios estructurales",
             "contenido": "Reforma administrativa y oficiales",
-            "temas_cubiertos": ["Burocracia"],
             "pagina_inicio": 19,
             "pagina_fin": 22,
             "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 19–22.",
@@ -173,7 +170,6 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
             "numero_subparte": 3,
             "titulo": "Consejos",
             "contenido": "Régimen polisinodial",
-            "temas_cubiertos": ["Consejos", "Audiencias"],
             "pagina_inicio": 23,
             "pagina_fin": 27,
         },
@@ -196,9 +192,9 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
     assert "FRONTERAS NEGATIVAS (NO DESARROLLAR)" in prompt
     assert "Subparte 1 (anterior)" in prompt
     assert "Subparte 3 (siguiente)" in prompt
-    assert "Burocracia" in prompt
-    assert "Tomás de Aquino" in prompt
-    assert "Consejos" in prompt
+    assert "Reforma administrativa y oficiales" in prompt
+    assert "Teorización política previa" in prompt
+    assert "Régimen polisinodial" in prompt
 
 
 def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch):
@@ -284,3 +280,65 @@ def test_adjacent_subparts_for_audit_uses_segmentation_order_and_skips_parts_wit
 
     assert prev_sp is None
     assert next_sp is partes_segmentadas[2]["subpartes"][0]
+
+
+def test_build_subpart_validation_context_uses_cross_part_neighbors():
+    import main as m
+
+    partes_segmentadas = [
+        {
+            "numero": 1,
+            "titulo": "Parte 1",
+            "contenido": "Contenido parte 1",
+            "subpartes": [
+                {"numero_subparte": 1, "titulo": "1.1", "contenido": "Uno uno"},
+                {"numero_subparte": 2, "titulo": "1.2", "contenido": "Uno dos"},
+            ],
+        },
+        {
+            "numero": 2,
+            "titulo": "Parte 2",
+            "contenido": "Contenido parte 2",
+            "subpartes": [
+                {"numero_subparte": 1, "titulo": "2.1", "contenido": "Dos uno"},
+                {"numero_subparte": 2, "titulo": "2.2", "contenido": "Dos dos"},
+            ],
+        },
+    ]
+
+    context = m._build_subpart_validation_context(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=partes_segmentadas[1],
+        subpart_idx=0,
+    )
+
+    assert context.scope_kind == "subpart"
+    assert context.current.title == "2.1"
+    assert context.parent is not None
+    assert context.parent.title == "Parte 2"
+    assert context.previous_neighbor is not None
+    assert context.previous_neighbor.title == "1.2"
+    assert context.next_neighbor is not None
+    assert context.next_neighbor.title == "2.2"
+
+
+def test_build_part_validation_context_for_fallback_uses_neighbor_parts():
+    import main as m
+
+    partes_segmentadas = [
+        {"numero": 1, "titulo": "Parte 1", "contenido": "A"},
+        {"numero": 2, "titulo": "Parte 2", "contenido": "B"},
+        {"numero": 3, "titulo": "Parte 3", "contenido": "C"},
+    ]
+
+    context = m._build_part_validation_context(
+        partes_segmentadas=partes_segmentadas,
+        current_parte=partes_segmentadas[1],
+    )
+
+    assert context.scope_kind == "part"
+    assert context.current.title == "Parte 2"
+    assert context.previous_neighbor is not None
+    assert context.previous_neighbor.title == "Parte 1"
+    assert context.next_neighbor is not None
+    assert context.next_neighbor.title == "Parte 3"

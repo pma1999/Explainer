@@ -344,3 +344,27 @@ def test_run_subpart_explainer_or_uses_cached_mistral_page_subset(monkeypatch):
     inline_text = captured["messages"][0]["content"][0]["text"]
     assert "Texto OCR página 2" in inline_text
     assert "Prompt de prueba" in inline_text
+
+
+def test_openrouter_validated_signature_defaults_validation_context_none(monkeypatch):
+    captured: dict = {}
+
+    def _fake_run_with(**kwargs):
+        captured.update(kwargs)
+        return {"desarrollo": []}, _usage(), []
+
+    monkeypatch.setattr(module, "run_with_explainer_validation", _fake_run_with)
+
+    result, usage, validator_usages = module.run_subpart_explainer_or_validated(
+        source_path="source.txt",
+        identificacion="Prompt de prueba",
+        model="xiaomi/mimo-v2.5-pro",
+        mime_type="text/plain",
+        api_key="sk-or-v1-test",
+        gemini_api_key="AIzaFakeKey",
+    )
+
+    assert result == {"desarrollo": []}
+    assert usage.total_token_count == 48
+    assert validator_usages == []
+    assert captured["validation_context"] is None

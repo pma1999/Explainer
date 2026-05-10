@@ -81,9 +81,4 @@ def build_subpart_negative_scope_block(subparte: dict[str, Any], all_subpartes: 
         contenido = str(sibling.get("contenido") or "").strip()
         if contenido:
             lines.append(f"  Contenido vecino fuera de alcance: {contenido}")
-        temas = sibling.get("temas_cubiertos") or []
-        if temas:
-            lines.append("  Temas prohibidos en esta ejecución:")
-            for tema in temas:
-                lines.append(f"    - {tema}")
     return "\n".join(lines)

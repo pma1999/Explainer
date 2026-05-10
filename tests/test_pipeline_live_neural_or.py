@@ -236,7 +236,6 @@ def main():
             "identificacion": first_parte.get("identificacion", ""),
             "pagina_inicio": pg_inicio,
             "pagina_fin": pg_fin,
-            "temas_cubiertos": first_parte.get("temas_cubiertos", []),
         }]
         log.warning("No subpartes defined — using whole part as single subparte")
 
@@ -250,7 +249,6 @@ def main():
             sp_idx + 1, len(subpartes), sp.get("titulo", "?"),
             sp.get("pagina_inicio", "?"), sp.get("pagina_fin", "?"),
         )
-        log.info("  Temas: %s", sp.get("temas_cubiertos", []))
         log.info("-" * 60)
 
         sp_prompt = _build_subpart_pdf_prompt(

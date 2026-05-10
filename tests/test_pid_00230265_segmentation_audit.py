@@ -1,6 +1,6 @@
 """Auditoría en vivo: clasificador de páginas + segmentador sobre PID_00230265.pdf.
 
-Replica la lógica de main.py (reintentos unificados MECE temas + cobertura de páginas),
+Replica la lógica de main.py (reintentos por cobertura de páginas),
 valida la partición del clasificador y escribe un informe JSON detallado.
 
 Uso (desde la raíz del repo):
@@ -42,19 +42,6 @@ def _tokens(usage: Any) -> dict[str, int]:
         "candidates": getattr(usage, "candidates_token_count", 0) or 0,
         "thoughts": getattr(usage, "thoughts_token_count", 0) or 0,
         "total": getattr(usage, "total_token_count", 0) or 0,
-    }
-
-
-def _tema_report_dict(r: Any) -> dict[str, Any]:
-    return {
-        "is_valid": r.is_valid,
-        "missing": list(r.missing),
-        "duplicates": [
-            {"canonical": d.canonical, "part_numbers": list(d.part_numbers)} for d in r.duplicates
-        ],
-        "orphans": [{"parte": p, "texto": t} for p, t in r.orphans],
-        "structural_errors": list(r.structural_errors),
-        "empty_temas_inventory": r.empty_temas_inventory,
     }
 
 
@@ -142,11 +129,6 @@ def main() -> None:
         build_page_coverage_retry_suffix,
         validate_page_coverage,
     )
-    from backend.segmentation_tema_coverage import (
-        MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-        build_tema_coverage_retry_suffix,
-        validate_tema_partition,
-    )
     from main import _build_content_pages_prefix
 
     output_dir = os.path.join(PROJECT_ROOT, "test_output")
@@ -221,9 +203,8 @@ def main() -> None:
 
     # --- STEP 3: segmentador con reintentos (igual que main.py) ---
     content_pages_prefix = _build_content_pages_prefix(content_page_set, total_pages)
-    max_attempts = max(MAX_SEGMENTATION_COVERAGE_ATTEMPTS, MAX_PAGE_COVERAGE_ATTEMPTS)
+    max_attempts = MAX_PAGE_COVERAGE_ATTEMPTS
     segmentation: dict[str, Any] | None = None
-    tema_report = None
     page_report = None
     attempts_log: list[dict[str, Any]] = []
 
@@ -234,14 +215,6 @@ def main() -> None:
         else:
             assert segmentation is not None
             correction_parts = []
-            if tema_report is not None and not tema_report.is_valid:
-                correction_parts.append(
-                    build_tema_coverage_retry_suffix(
-                        attempt=seg_attempt,
-                        segmentation=segmentation,
-                        report=tema_report,
-                    )
-                )
             if page_report is not None and not page_report.is_valid:
                 correction_parts.append(
                     build_page_coverage_retry_suffix(
@@ -265,37 +238,24 @@ def main() -> None:
         )
         seg_ms = int((time.time() - t_seg) * 1000)
 
-        tema_report = validate_tema_partition(segmentation)
         page_report = validate_page_coverage(segmentation, content_page_set)
 
         entry = {
             "attempt": seg_attempt,
             "duration_ms": seg_ms,
             "tokens": _tokens(seg_usage),
-            "tema": _tema_report_dict(tema_report),
             "paginas": _page_report_dict(page_report),
-            "both_valid": tema_report.is_valid and page_report.is_valid,
+            "valid": page_report.is_valid,
         }
         attempts_log.append(entry)
 
         log.info(
-            "Segmentación intento %d/%d — temas_ok=%s páginas_ok=%s (%d ms)",
+            "Segmentación intento %d/%d — páginas_ok=%s (%d ms)",
             seg_attempt + 1,
             max_attempts,
-            tema_report.is_valid,
             page_report.is_valid,
             seg_ms,
         )
-
-        if not tema_report.is_valid:
-            for e in tema_report.structural_errors:
-                log.warning("[Tema] %s", e)
-            for m in tema_report.missing:
-                log.warning("[Tema] Sin asignar: %s", m)
-            for d in tema_report.duplicates:
-                log.warning("[Tema] Duplicado: %s en partes %s", d.canonical, d.part_numbers)
-            for parte_no, raw in tema_report.orphans:
-                log.warning("[Tema] Huérfano en parte %s: %s", parte_no, raw)
 
         if not page_report.is_valid:
             for e in page_report.part_errors:
@@ -303,18 +263,16 @@ def main() -> None:
             for e in page_report.subpart_errors:
                 log.warning("[Página subparte] %s", e.detail)
 
-        if tema_report.is_valid and page_report.is_valid:
+        if page_report.is_valid:
             break
     else:
-        log.error("Se agotaron los reintentos sin validación conjunta OK")
+        log.error("Se agotaron los reintentos sin validación de páginas OK")
 
     audit["segmentation"] = {
         "max_attempts": max_attempts,
         "total_duration_ms": int((time.time() - seg_total_start) * 1000),
         "attempts": attempts_log,
-        "final_both_valid": bool(
-            tema_report and page_report and tema_report.is_valid and page_report.is_valid
-        ),
+        "final_valid": bool(page_report and page_report.is_valid),
         "result": segmentation,
     }
 
@@ -327,10 +285,6 @@ def main() -> None:
         )
 
     # Resumen de errores finales
-    if tema_report and not tema_report.is_valid:
-        audit["errors_summary"].append(
-            {"phase": "segmentation_tema", "detail": _tema_report_dict(tema_report)}
-        )
     if page_report and not page_report.is_valid:
         audit["errors_summary"].append(
             {"phase": "segmentation_pages", "detail": _page_report_dict(page_report)}
@@ -347,7 +301,6 @@ def main() -> None:
                 "titulo": p.get("titulo"),
                 "pagina_inicio": p.get("pagina_inicio"),
                 "pagina_fin": p.get("pagina_fin"),
-                "temas_cubiertos": p.get("temas_cubiertos"),
                 "identificacion": (str(p.get("identificacion") or "")[:400] + "…")
                 if p.get("identificacion") and len(str(p.get("identificacion"))) > 400
                 else p.get("identificacion"),
@@ -362,7 +315,6 @@ def main() -> None:
                         "titulo": sp.get("titulo"),
                         "pagina_inicio": sp.get("pagina_inicio"),
                         "pagina_fin": sp.get("pagina_fin"),
-                        "temas_cubiertos": sp.get("temas_cubiertos"),
                         "identificacion": (str(sp.get("identificacion") or "")[:300] + "…")
                         if sp.get("identificacion") and len(str(sp.get("identificacion"))) > 300
                         else sp.get("identificacion"),
@@ -383,8 +335,8 @@ def main() -> None:
     print(f"Páginas (pypdf): {total_pages}")
     print(f"Clasificador — partición JSON válida: {clf_partition_ok}")
     print(f"Páginas de contenido: {len(content_page_set)}")
-    if tema_report and page_report:
-        print(f"Segmentación — válida (temas + páginas): {tema_report.is_valid and page_report.is_valid}")
+    if page_report:
+        print(f"Segmentación — páginas válidas: {page_report.is_valid}")
     print(f"Informe completo: {report_path}")
     print("=" * 72)
 

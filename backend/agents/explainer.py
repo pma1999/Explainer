@@ -12,9 +12,11 @@ from backend.agents.explainer_prompts import (
     SYSTEM_INSTRUCTION,
 )
 from backend.agents.completeness_validator import (
-    INCOMPLETE_RETRY_SYSTEM_SUFFIX,
-    format_incomplete_context,
-    run_with_completeness_validation,
+    ExplainerValidationContext,
+    ExplainerValidationReport,
+    build_explainer_retry_system_suffix,
+    format_explainer_retry_context,
+    run_with_explainer_validation,
 )
 
 from google import genai
@@ -326,18 +328,32 @@ def _run_explainer_for_retry(
     file_uri: str,
     identificacion: str,
     previous_result: dict[str, Any],
+    validation_report: ExplainerValidationReport,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], Any]:
-    """Reintento de run_explainer con contexto de la explicación anterior incompleta."""
+    """Reintento de run_explainer con contexto de validación de la salida anterior."""
     logger.info(
-        "Reintentando explainer completo por truncamiento detectado",
-        extra={"file_uri_prefix": file_uri[:60], "model": model},
+        "Reintentando explainer completo por validación fallida",
+        extra={
+            "file_uri_prefix": file_uri[:60],
+            "model": model,
+            "is_complete": validation_report.is_complete,
+            "scope_status": validation_report.scope_status,
+        },
     )
     client = genai.Client(api_key=api_key)
 
-    incomplete_ctx = format_incomplete_context(previous_result)
-    extended_system = SYSTEM_INSTRUCTION + INCOMPLETE_RETRY_SYSTEM_SUFFIX
+    retry_ctx = format_explainer_retry_context(
+        previous_result,
+        validation_report,
+        validation_context=validation_context,
+    )
+    extended_system = SYSTEM_INSTRUCTION + build_explainer_retry_system_suffix(
+        validation_report,
+        validation_context=validation_context,
+    )
 
     contents = [
         types.Content(
@@ -345,7 +361,7 @@ def _run_explainer_for_retry(
             parts=[
                 types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
                 types.Part.from_text(text=identificacion),
-                types.Part.from_text(text=incomplete_ctx),
+                types.Part.from_text(text=retry_ctx),
             ],
         ),
     ]
@@ -363,7 +379,7 @@ def _run_explainer_for_retry(
         contents=contents,
         config=config,
         max_retries=5,
-        operation_context={"agent": "explainer_completeness_retry"},
+        operation_context={"agent": "explainer_validation_retry"},
     )
 
     result = json.loads(response.text)
@@ -380,18 +396,32 @@ def _run_subpart_explainer_for_retry(
     file_uri: str,
     identificacion: str,
     previous_result: dict[str, Any],
+    validation_report: ExplainerValidationReport,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], Any]:
-    """Reintento de run_subpart_explainer con contexto de la subparte anterior incompleta."""
+    """Reintento de run_subpart_explainer con contexto de validación de la salida anterior."""
     logger.info(
-        "Reintentando explainer de subparte por truncamiento detectado",
-        extra={"file_uri_prefix": file_uri[:60], "model": model},
+        "Reintentando explainer de subparte por validación fallida",
+        extra={
+            "file_uri_prefix": file_uri[:60],
+            "model": model,
+            "is_complete": validation_report.is_complete,
+            "scope_status": validation_report.scope_status,
+        },
     )
     client = genai.Client(api_key=api_key)
 
-    incomplete_ctx = format_incomplete_context(previous_result)
-    extended_system = SUBPART_SYSTEM_INSTRUCTION + INCOMPLETE_RETRY_SYSTEM_SUFFIX
+    retry_ctx = format_explainer_retry_context(
+        previous_result,
+        validation_report,
+        validation_context=validation_context,
+    )
+    extended_system = SUBPART_SYSTEM_INSTRUCTION + build_explainer_retry_system_suffix(
+        validation_report,
+        validation_context=validation_context,
+    )
 
     contents = [
         types.Content(
@@ -399,7 +429,7 @@ def _run_subpart_explainer_for_retry(
             parts=[
                 types.Part.from_uri(file_uri=file_uri, mime_type=mime_type),
                 types.Part.from_text(text=identificacion),
-                types.Part.from_text(text=incomplete_ctx),
+                types.Part.from_text(text=retry_ctx),
             ],
         ),
     ]
@@ -417,7 +447,7 @@ def _run_subpart_explainer_for_retry(
         contents=contents,
         config=config,
         max_retries=5,
-        operation_context={"agent": "subpart_explainer_completeness_retry"},
+        operation_context={"agent": "subpart_explainer_validation_retry"},
     )
 
     result = json.loads(response.text)
@@ -441,19 +471,28 @@ def run_explainer_validated(
     identificacion: str,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     """run_explainer con validación de completitud y reintento automático.
 
     Returns:
         (result, usage_metadata, validator_usages_list)
     """
-    return run_with_completeness_validation(
+    return run_with_explainer_validation(
         initial_call=lambda: run_explainer(api_key, file_uri, identificacion, model, mime_type),
-        retry_call=lambda prev: _run_explainer_for_retry(
-            api_key, file_uri, identificacion, prev, model, mime_type
+        retry_call=lambda prev, report: _run_explainer_for_retry(
+            api_key,
+            file_uri,
+            identificacion,
+            prev,
+            report,
+            model,
+            mime_type,
+            validation_context,
         ),
         gemini_api_key=api_key,
         label=f"Explainer Gemini [{file_uri[:40]}]",
+        validation_context=validation_context,
     )
 
 
@@ -463,17 +502,26 @@ def run_subpart_explainer_validated(
     identificacion: str,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     """run_subpart_explainer con validación de completitud y reintento automático.
 
     Returns:
         (result, usage_metadata, validator_usages_list)
     """
-    return run_with_completeness_validation(
+    return run_with_explainer_validation(
         initial_call=lambda: run_subpart_explainer(api_key, file_uri, identificacion, model, mime_type),
-        retry_call=lambda prev: _run_subpart_explainer_for_retry(
-            api_key, file_uri, identificacion, prev, model, mime_type
+        retry_call=lambda prev, report: _run_subpart_explainer_for_retry(
+            api_key,
+            file_uri,
+            identificacion,
+            prev,
+            report,
+            model,
+            mime_type,
+            validation_context,
         ),
         gemini_api_key=api_key,
         label=f"Subpart Explainer Gemini [{file_uri[:40]}]",
+        validation_context=validation_context,
     )

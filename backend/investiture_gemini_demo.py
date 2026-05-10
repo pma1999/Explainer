@@ -16,15 +16,8 @@ from pypdf import PdfReader
 from backend.gemini_client import upload_file_with_retry
 from backend.gemini_model_routing import MODEL_AGENTS, MODEL_SEGMENTADOR
 from backend.pdf_utils import add_page_numbers, extract_page_range
-from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
+from backend.agents.segmentador import run_segmentador
 from backend.agents.explainer import run_explainer
-from backend.segmentation_tema_coverage import (
-    MAX_SEGMENTATION_COVERAGE_ATTEMPTS,
-    SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE,
-    SegmentationTemaReport,
-    build_tema_coverage_retry_suffix,
-    validate_tema_partition,
-)
 
 
 def resolve_gemini_api_key() -> str | None:
@@ -99,80 +92,6 @@ def _ellipsis(s: str, max_len: int) -> str:
     return s[: max_len - 1] + "…"
 
 
-def _print_segmentation_tema_layout(
-    segmentation: dict[str, Any],
-    *,
-    indent: str = "    ",
-) -> None:
-    """Full temas_identificados list and per-parte temas_cubiertos (for MECE debugging)."""
-    print(f"{indent}Vista detallada — inventario y asignación devueltos por el segmentador:")
-    ti = segmentation.get("temas_identificados")
-    print(f"{indent}  Inventario completo (temas_identificados):")
-    if isinstance(ti, list) and ti:
-        n = 0
-        for i, item in enumerate(ti, start=1):
-            s = str(item).strip() if item is not None else ""
-            if not s:
-                print(f"{indent}    [{i}] (vacío)")
-                continue
-            n += 1
-            print(f"{indent}    {n:>3}. {s}")
-        print(f"{indent}    — Total entradas no vacías: {n} —")
-    else:
-        print(f"{indent}    (no hay lista o está vacía)")
-
-    partes = segmentation.get("partes")
-    print(f"{indent}  Temas por parte (temas_cubiertos):")
-    if not isinstance(partes, list) or not partes:
-        print(f"{indent}    (sin partes)")
-        return
-    for p in partes:
-        if not isinstance(p, dict):
-            print(f"{indent}    (entrada de parte inválida)")
-            continue
-        num = p.get("numero")
-        tit = str(p.get("titulo") or "").strip()
-        tit_disp = f"«{tit}»" if tit else "(sin título)"
-        print(f"{indent}    Parte {num} {tit_disp}")
-        tc = p.get("temas_cubiertos")
-        if not isinstance(tc, list) or not tc:
-            print(f"{indent}      · (sin temas_cubiertos o no es lista)")
-            continue
-        shown = 0
-        for item in tc:
-            line = str(item).strip() if item is not None else ""
-            if not line:
-                continue
-            shown += 1
-            print(f"{indent}      {shown:>2}. {line}")
-        if shown == 0:
-            print(f"{indent}      · (lista sin textos no vacíos)")
-
-
-def _print_tema_report_deltas(report: SegmentationTemaReport, *, indent: str = "    ") -> None:
-    """Print full MECE discrepancy lists (no truncation)."""
-    if report.structural_errors:
-        print(f"{indent}  Errores de forma ({len(report.structural_errors)}):")
-        for e in report.structural_errors:
-            print(f"{indent}    · {e}")
-    if report.missing:
-        print(f"{indent}  Temas del inventario sin ninguna parte ({len(report.missing)}):")
-        for m in report.missing:
-            print(f"{indent}    · {m}")
-    if report.duplicates:
-        print(f"{indent}  Temas asignados a más de una parte ({len(report.duplicates)}):")
-        for d in report.duplicates:
-            nums = ", ".join(str(n) for n in d.part_numbers)
-            print(f"{indent}    · «{d.canonical}» → partes {nums}")
-    if report.orphans:
-        print(
-            f"{indent}  Entradas en temas_cubiertos que no coinciden con el inventario "
-            f"({len(report.orphans)}):"
-        )
-        for part_no, raw in report.orphans:
-            print(f"{indent}    · Parte {part_no}: {raw}")
-
-
 def _merge_usage_dicts(usages: list[dict[str, Any]]) -> dict[str, Any]:
     keys = (
         "prompt_token_count",
@@ -203,7 +122,7 @@ class InvestitureDemoResult:
     explainer: dict[str, Any]
     usage_segmentador: dict[str, Any]
     usage_explainer: dict[str, Any]
-    mece_coverage_attempts: int = 1
+    segmentation_attempts: int = 1
 
 
 def run_investiture_pdf_gemini_demo(
@@ -267,74 +186,20 @@ def run_investiture_pdf_gemini_demo(
         if verbose:
             print("  La IA debe devolver pagina_inicio / pagina_fin por parte según las marcas visibles.")
             print(
-                "  Tras cada respuesta, el backend valida que todo tema en temas_identificados "
-                f"aparezca exactamente una vez en temas_cubiertos (hasta {MAX_SEGMENTATION_COVERAGE_ATTEMPTS} intentos)."
+                "  La validación posterior se centra en rangos, estructura e identificación de alcance."
             )
 
-        segmentation: dict[str, Any] | None = None
-        tema_report = None
-        usage_seg_per_attempt: list[dict[str, Any]] = []
-        mece_attempts = 0
-
-        for seg_attempt in range(MAX_SEGMENTATION_COVERAGE_ATTEMPTS):
-            if seg_attempt == 0:
-                seg_description = ""
-            else:
-                assert segmentation is not None and tema_report is not None
-                suffix = build_tema_coverage_retry_suffix(
-                    attempt=seg_attempt,
-                    segmentation=segmentation,
-                    report=tema_report,
-                )
-                base_eff = DEFAULT_DESCRIPTION
-                seg_description = f"{base_eff}\n\n{suffix}"
-
-            segmentation, usage_seg = run_segmentador(
-                api_key,
-                file_uri_full,
-                seg_description,
-                MODEL_SEGMENTADOR,
-                mime,
-                "pdf",
-            )
-            mece_attempts = seg_attempt + 1
-            usage_seg_per_attempt.append(_usage_summary(usage_seg))
-            if verbose:
-                label = "segmentador" if seg_attempt == 0 else f"segmentador (reintento MECE {seg_attempt})"
-                print(f"  Uso ({label}): {usage_seg_per_attempt[-1]}")
-
-            tema_report = validate_tema_partition(segmentation)
-            if tema_report.is_valid:
-                if verbose and not tema_report.empty_temas_inventory:
-                    if seg_attempt == 0:
-                        print("  Validación MECE de temas: correcta (primer intento).")
-                    else:
-                        print("  Validación MECE de temas: correcta tras reintento(s).")
-                if verbose and tema_report.empty_temas_inventory:
-                    print("  Aviso: temas_identificados vacío; validación MECE omitida.")
-                break
-
-            if verbose:
-                print(
-                    f"  Validación MECE fallida (intento {seg_attempt + 1}/{MAX_SEGMENTATION_COVERAGE_ATTEMPTS}): "
-                    f"{len(tema_report.missing)} sin asignar, "
-                    f"{len(tema_report.duplicates)} duplicados entre partes, "
-                    f"{len(tema_report.orphans)} huérfanos, "
-                    f"{len(tema_report.structural_errors)} errores de forma."
-                )
-                _print_segmentation_tema_layout(segmentation, indent="    ")
-                _print_tema_report_deltas(tema_report, indent="    ")
-        else:
-            assert segmentation is not None and tema_report is not None
-            raise RuntimeError(
-                f"{SEGMENTATION_TEMA_COVERAGE_USER_MESSAGE} "
-                f"(detalle: {len(tema_report.missing)} sin asignar, "
-                f"{len(tema_report.duplicates)} duplicados, "
-                f"{len(tema_report.orphans)} huérfanos, "
-                f"{len(tema_report.structural_errors)} estructura)."
-            )
-
-        usage_s = _merge_usage_dicts(usage_seg_per_attempt)
+        segmentation, usage_seg = run_segmentador(
+            api_key,
+            file_uri_full,
+            "",
+            MODEL_SEGMENTADOR,
+            mime,
+            "pdf",
+        )
+        usage_s = _merge_usage_dicts([_usage_summary(usage_seg)])
+        if verbose:
+            print(f"  Uso (segmentador): {usage_s}")
 
         partes = segmentation.get("partes") or []
         if not partes:
@@ -347,14 +212,12 @@ def run_investiture_pdf_gemini_demo(
                 "decision_justificacion": _truncate(
                     str(segmentation.get("decision_justificacion", "")), 500
                 ),
-                "temas_identificados": segmentation.get("temas_identificados"),
                 "partes_resumen": [
                     {
                         "numero": p.get("numero"),
                         "titulo": p.get("titulo"),
                         "pagina_inicio": p.get("pagina_inicio"),
                         "pagina_fin": p.get("pagina_fin"),
-                        "temas_cubiertos": p.get("temas_cubiertos"),
                     }
                     for p in partes
                 ],
@@ -362,26 +225,13 @@ def run_investiture_pdf_gemini_demo(
             print("\n  Resumen JSON (recortado):\n")
             print(textwrap.indent(json.dumps(preview, ensure_ascii=False, indent=2), "    "))
 
-            print("\n  Tabla de partes (páginas y temas asignados):")
+            print("\n  Tabla de partes (páginas):")
             for p in partes:
                 tit = _ellipsis(str(p.get("titulo") or ""), 72)
                 print(
                     f"    Parte {p.get('numero')}: «{tit}» "
                     f"→ págs. {p.get('pagina_inicio')}–{p.get('pagina_fin')}"
                 )
-                tc_raw = p.get("temas_cubiertos")
-                if not isinstance(tc_raw, list) or not tc_raw:
-                    print("      · (sin temas_cubiertos o lista vacía)")
-                else:
-                    shown = 0
-                    for item in tc_raw:
-                        line = str(item).strip() if item is not None else ""
-                        if not line:
-                            continue
-                        shown += 1
-                        print(f"      {shown}. {line}")
-                    if shown == 0:
-                        print("      · (sin temas_cubiertos o lista vacía)")
 
         for p in partes:
             if "pagina_inicio" not in p or "pagina_fin" not in p:
@@ -453,7 +303,7 @@ def run_investiture_pdf_gemini_demo(
             chunks = prompt.split("\n---\n")
             labels = (
                 "Tabla de contenidos",
-                "Contexto del segmentador (incl. contrato de cobertura / temas de esta parte)",
+                "Contexto del segmentador (alcance de esta parte)",
                 "Alcance del PDF adjunto (núcleo vs buffer)",
                 "Identificación precisa de la parte",
             )
@@ -506,10 +356,8 @@ def run_investiture_pdf_gemini_demo(
             print(
                 "  La IA fijó los rangos de página; el backend recortó y subió solo ese tramo; "
                 "el explainer recibió ese sub-PDF y un prompt con tabla de contenidos, "
-                "contexto del segmentador (contrato de temas, alcance, núcleo/buffer) y la identificación de la parte."
+                "contexto del segmentador, alcance núcleo/buffer y la identificación de la parte."
             )
-            if mece_attempts > 1:
-                print(f"  Llamadas al segmentador (incl. reintentos MECE): {mece_attempts}")
 
         return InvestitureDemoResult(
             pdf_path=path,
@@ -523,7 +371,7 @@ def run_investiture_pdf_gemini_demo(
             explainer=explainer_out,
             usage_segmentador=usage_s,
             usage_explainer=usage_e,
-            mece_coverage_attempts=mece_attempts,
+            segmentation_attempts=1,
         )
     finally:
         for pth in (numbered_path, segment_path):

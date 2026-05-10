@@ -317,7 +317,7 @@ def _build_markdown_report(summary: dict[str, Any]) -> str:
         lines.append(f"- Segmentation reused: `{reuse_path}` (SHA-256 `{reuse_sha}`)")
     lines.append(
         f"- Shared segmentation: {shared['num_partes']} partes, "
-        f"{len(shared['temas_identificados'])} temas, parte comparada `{shared['selected_part']['titulo']}` "
+        f"parte comparada `{shared['selected_part']['titulo']}` "
         f"(pp. {shared['selected_part']['pagina_inicio']}-{shared['selected_part']['pagina_fin']})"
     )
     lines.append(
@@ -625,19 +625,16 @@ def main() -> None:
         segmentation_path = _save_json("shared_01_segmentation", segmentation, output_dir)
 
     num_partes = len(segmentation.get("partes", []))
-    temas_identificados = segmentation.get("temas_identificados", [])
     if segmentation_reused:
         log.info(
-            "Segmentador skipped (reused artifact) -> %d partes, %d temas",
+            "Segmentador skipped (reused artifact) -> %d partes",
             num_partes,
-            len(temas_identificados),
         )
     else:
         log.info(
-            "Segmentador done in %dms -> %d partes, %d temas",
+            "Segmentador done in %dms -> %d partes",
             seg_ms,
             num_partes,
-            len(temas_identificados),
         )
 
     if num_partes == 0:
@@ -753,7 +750,6 @@ def main() -> None:
                 "identificacion": first_parte.get("identificacion", ""),
                 "pagina_inicio": pg_inicio,
                 "pagina_fin": pg_fin,
-                "temas_cubiertos": first_parte.get("temas_cubiertos", []),
             }
         ]
         log.warning("No subpartes returned by segmentador; using whole part as a single fallback subpart")
@@ -1042,7 +1038,6 @@ def main() -> None:
             "segmentation_reused": segmentation_reused,
             "segmentation_reuse": segmentation_reuse_meta,
             "num_partes": num_partes,
-            "temas_identificados": temas_identificados,
             "selected_part": {
                 "numero": first_parte.get("numero"),
                 "titulo": first_parte.get("titulo"),

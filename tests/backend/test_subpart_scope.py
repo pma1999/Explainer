@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 
-def _sp(num: int, title: str, content: str, temas: list[str], pi: int, pf: int, next_heading: str = "") -> dict:
+def _sp(num: int, title: str, content: str, pi: int, pf: int, next_heading: str = "") -> dict:
     return {
         "numero_subparte": num,
         "titulo": title,
         "contenido": content,
-        "temas_cubiertos": temas,
         "pagina_inicio": pi,
         "pagina_fin": pf,
         "delimitacion_explainer": {
@@ -31,7 +30,7 @@ def test_positive_scope_block_includes_pages_anchors_and_transition():
     from backend.subpart_scope import build_subpart_scope_contract_block
 
     text = build_subpart_scope_contract_block(
-        _sp(2, "Cambios estructurales", "Reforma administrativa", ["Burocracia"], 19, 22, "2.4 Consejos")
+        _sp(2, "Cambios estructurales", "Reforma administrativa", 19, 22, "2.4 Consejos")
     )
 
     assert "CONTRATO ESTRUCTURADO DE ALCANCE DE LA SUBPARTE" in text
@@ -46,9 +45,9 @@ def test_negative_scope_block_lists_previous_and_next_neighbors():
     from backend.subpart_scope import build_subpart_negative_scope_block
 
     subpartes = [
-        _sp(1, "Precursores", "Tomás de Aquino y Maquiavelo", ["Tomás de Aquino", "Maquiavelo"], 18, 19),
-        _sp(2, "Cambios estructurales", "Reforma administrativa", ["Burocracia"], 19, 22, "2.4 Consejos"),
-        _sp(3, "Consejos", "Régimen polisinodial", ["Consejos", "Audiencias"], 23, 27),
+        _sp(1, "Precursores", "Tomás de Aquino y Maquiavelo", 18, 19),
+        _sp(2, "Cambios estructurales", "Reforma administrativa", 19, 22, "2.4 Consejos"),
+        _sp(3, "Consejos", "Régimen polisinodial", 23, 27),
     ]
 
     text = build_subpart_negative_scope_block(subpartes[1], subpartes)
@@ -60,16 +59,14 @@ def test_negative_scope_block_lists_previous_and_next_neighbors():
     assert "Consejos" in text
 
 
-def test_negative_scope_block_uses_neighbor_content_and_topics():
+def test_negative_scope_block_uses_neighbor_content():
     from backend.subpart_scope import build_subpart_negative_scope_block
 
     subpartes = [
-        _sp(1, "Anterior", "Contenido anterior", ["Tema anterior"], 10, 12),
-        _sp(2, "Actual", "Contenido actual", ["Tema actual"], 13, 15),
+        _sp(1, "Anterior", "Contenido anterior", 10, 12),
+        _sp(2, "Actual", "Contenido actual", 13, 15),
     ]
 
     text = build_subpart_negative_scope_block(subpartes[1], subpartes)
 
     assert "Contenido anterior" in text
-    assert "Tema anterior" in text
-    assert "Tema actual" not in text
