@@ -67,6 +67,13 @@ PRICING = {
         "output_small": 0.28,
         "output_large": 0.28,
     },
+    "deepseek/deepseek-v4-pro": {
+        # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
+        "input_small": 0.50,
+        "input_large": 0.50,
+        "output_small": 1.50,
+        "output_large": 1.50,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

@@ -842,6 +842,7 @@ def call_openrouter_chat_full(
     reasoning: dict | None = None,
     max_retries: int = 5,
     temperature: float | None = None,
+    provider: dict | None = None,
 ) -> OpenRouterChatResult:
     """
     Igual que `call_openrouter_chat`, pero preserva el mensaje del asistente
@@ -887,6 +888,8 @@ def call_openrouter_chat_full(
 
     if reasoning:
         payload["reasoning"] = reasoning
+    if provider is not None:
+        payload["provider"] = provider
 
     last_exc: Exception = OpenRouterError("No se realizó ningún intento.")
     for attempt in range(1, max_retries + 1):
@@ -1488,6 +1491,7 @@ def call_openrouter_chat(
     reasoning: dict | None = None,
     max_retries: int = 5,
     temperature: float | None = None,
+    provider: dict | None = None,
 ) -> tuple[str | dict[str, Any], OpenRouterUsage]:
     """
     Llama a OpenRouter /chat/completions.
@@ -1505,5 +1509,6 @@ def call_openrouter_chat(
         reasoning=reasoning,
         max_retries=max_retries,
         temperature=temperature,
+        provider=provider,
     )
     return result.content, result.usage

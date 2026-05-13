@@ -11,6 +11,7 @@ import {
   isValidOpenRouterModel,
   OPENROUTER_MODEL_MIMO,
   OPENROUTER_MODEL_MIMO_PRO,
+  OPENROUTER_MODEL_DEEPSEEK_V4_PRO,
   validateExplainerProviderSelection,
 } from '../../frontend/js/landing.js';
 
@@ -93,9 +94,10 @@ describe('landing.js', () => {
   });
 
   describe('isValidOpenRouterModel', () => {
-    it('accepts both Xiaomi OpenRouter model choices', () => {
+    it('accepts all supported OpenRouter model choices', () => {
       expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
       expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO)).toBe(true);
     });
 
     it('rejects unsupported OpenRouter model ids', () => {

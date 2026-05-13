@@ -46,6 +46,9 @@ OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
         "qwen/qwen3.6-plus",
     }
 )
+_OPENROUTER_PROVIDER_OVERRIDES = {
+    "deepseek/deepseek-v4-pro": {"order": ["deepseek"], "allow_fallbacks": False},
+}
 
 # PDF parsing plugin (used only in the fallback path for direct file sends)
 _PDF_PLUGIN = [{"id": "file-parser", "pdf": {"engine": OPENROUTER_PDF_PARSER_ENGINE}}]
@@ -529,6 +532,7 @@ def _call_openrouter_json_with_pdf_fallback(
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
+    provider = _OPENROUTER_PROVIDER_OVERRIDES.get(model)
     try:
         if mime_type == "application/pdf" and pdf_cache_entry is not None:
             requested_pages = page_numbers or pdf_cache_entry.cached_page_numbers
@@ -547,6 +551,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 enable_response_healing=True,
                 reasoning={"effort": "xhigh", "exclude": True},
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+                provider=provider,
             )
     except PdfOcrError:
         logger.warning("La caché OCR de Mistral no pudo renderizar el subconjunto solicitado.")
@@ -569,6 +574,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 enable_response_healing=True,
                 reasoning={"effort": "xhigh", "exclude": True},
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+                provider=provider,
             )
         finally:
             try:
@@ -589,6 +595,7 @@ def _call_openrouter_json_with_pdf_fallback(
         enable_response_healing=True,
         reasoning={"effort": "xhigh", "exclude": True},
         temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+        provider=provider,
     )
 
 def _build_content(source_path: str, identificacion: str, mime_type: str) -> tuple[list[dict], list[dict] | None]:

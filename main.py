@@ -122,7 +122,7 @@ logger = get_logger("main")
 MAX_CONCURRENT_PARTS = 5
 
 ExplainerProvider = Literal["gemini", "openrouter"]
-OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5"]
+OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5", "deepseek/deepseek-v4-pro"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
 EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
@@ -130,6 +130,7 @@ OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
     {
         "xiaomi/mimo-v2.5-pro",
         "xiaomi/mimo-v2.5",
+        "deepseek/deepseek-v4-pro",
     }
 )
 

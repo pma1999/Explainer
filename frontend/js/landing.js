@@ -13,6 +13,7 @@ let currentSourceType = 'pdf';
 let currentExplainerProvider = 'gemini';
 export const OPENROUTER_MODEL_MIMO_PRO = 'xiaomi/mimo-v2.5-pro';
 export const OPENROUTER_MODEL_MIMO = 'xiaomi/mimo-v2.5';
+export const OPENROUTER_MODEL_DEEPSEEK_V4_PRO = 'deepseek/deepseek-v4-pro';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 
 export function extractYouTubeVideoId(url) {
@@ -55,11 +56,12 @@ export function isExplainerProviderSupportedForSource(sourceType, provider) {
 }
 
 export function isValidOpenRouterModel(model) {
-  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO;
+  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
 }
 
 function openRouterModelLabel(model) {
   if (model === OPENROUTER_MODEL_MIMO) return 'Xiaomi MiMo V2.5';
+  if (model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO) return 'DeepSeek V4 Pro';
   return 'Xiaomi MiMo V2.5 Pro';
 }
 
@@ -127,6 +129,7 @@ export function initLanding() {
   const providerOpenRouter = $('explainer-provider-openrouter');
   const modelPro = $('openrouter-model-pro');
   const modelStandard = $('openrouter-model-standard');
+  const modelDeepseek = $('openrouter-model-deepseek');
   const modelPanel = $('openrouter-model-panel');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
@@ -159,8 +162,10 @@ export function initLanding() {
     modelPanel.classList.toggle('hidden', currentExplainerProvider !== 'openrouter' || !openRouterSupported);
     modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO;
     modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO;
+    modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
     $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
     $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
+    $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
 
     providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
     clearProviderError();
@@ -222,6 +227,9 @@ export function initLanding() {
   });
   modelStandard.addEventListener('change', () => {
     if (modelStandard.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO);
+  });
+  modelDeepseek.addEventListener('change', () => {
+    if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
   });
 
   function checkReady() {
