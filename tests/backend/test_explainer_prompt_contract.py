@@ -15,3 +15,14 @@ def test_subpart_prompt_gives_precedence_to_current_scope():
     from backend.agents.explainer_prompts import SUBPART_SYSTEM_INSTRUCTION
 
     assert "prevalece el alcance de la subparte actual" in SUBPART_SYSTEM_INSTRUCTION
+
+
+def test_subpart_prompt_removes_global_scaffold_sections():
+    from backend.agents.explainer_prompts import SUBPART_SYSTEM_INSTRUCTION
+
+    lowered = SUBPART_SYSTEM_INSTRUCTION.lower()
+
+    assert "introducción" not in lowered
+    assert "conclusión" not in lowered
+    assert "conexiones contextuales" not in lowered
+    assert "conexiones_contextuales" not in lowered

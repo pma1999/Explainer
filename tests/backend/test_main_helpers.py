@@ -197,6 +197,116 @@ def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbo
     assert "Régimen polisinodial" in prompt
 
 
+def test_build_subpart_pdf_prompt_removes_global_scaffold_references():
+    import main as m
+
+    parte = {
+        "numero": 2,
+        "titulo": "El Estado Moderno",
+        "identificacion": "Parte 2 completa",
+        "pagina_inicio": 12,
+        "pagina_fin": 27,
+    }
+    subpartes = [
+        {
+            "numero_subparte": 1,
+            "titulo": "Precursores",
+            "contenido": "Teorización política previa",
+            "pagina_inicio": 18,
+            "pagina_fin": 19,
+        },
+        {
+            "numero_subparte": 2,
+            "titulo": "Cambios estructurales",
+            "contenido": "Reforma administrativa y oficiales",
+            "pagina_inicio": 19,
+            "pagina_fin": 22,
+            "identificacion": "NÚCLEO SEGÚN MARCAS PDF: páginas 19–22.",
+            "delimitacion_explainer": {
+                "inicio": {"encabezado": "2.3", "ancla_texto": "Las monarquías modernas reforzaron"},
+                "fin": {"ancla_texto": "oficio público cada vez más técnico", "encabezado_siguiente_excluido": "2.4 Régimen de Consejos"},
+                "transicion_compartida": {
+                    "hay_transicion": True,
+                    "pagina": 19,
+                    "hasta_texto_inclusive": "la mención a Bodin",
+                    "desde_texto_inclusive": "2.3 Cambios estructurales",
+                },
+            },
+        },
+    ]
+
+    prompt = m._build_subpart_pdf_prompt(
+        "TABLA",
+        parte,
+        subpartes[1],
+        subpartes,
+        2,
+        5,
+        _scope_handoff(),
+        pdf_scope_mode="subpdf_buffered",
+        nucleo_inicio=12,
+        nucleo_fin=27,
+    )
+
+    lowered = prompt.lower()
+    assert "introducción" not in lowered
+    assert "conclusión" not in lowered
+    assert "conexiones contextuales" not in lowered
+    assert "conexiones_contextuales" not in lowered
+
+
+def test_build_part_pdf_prompt_includes_structured_scope_and_negative_neighbors():
+    import main as m
+
+    partes = [
+        {
+            "numero": 1,
+            "titulo": "Precursores",
+            "contenido": "Teorización política previa",
+            "identificacion": "Parte 1 completa",
+            "pagina_inicio": 1,
+            "pagina_fin": 11,
+        },
+        {
+            "numero": 2,
+            "titulo": "El Estado Moderno",
+            "contenido": "Reforma administrativa y oficiales",
+            "identificacion": "Parte 2 completa",
+            "pagina_inicio": 12,
+            "pagina_fin": 27,
+        },
+        {
+            "numero": 3,
+            "titulo": "Consejos",
+            "contenido": "Régimen polisinodial",
+            "identificacion": "Parte 3 completa",
+            "pagina_inicio": 28,
+            "pagina_fin": 35,
+        },
+    ]
+
+    prompt = m._build_pdf_agent_prompt(
+        "TABLA",
+        partes[1]["identificacion"],
+        2,
+        3,
+        _scope_handoff(),
+        pdf_scope_mode="subpdf_buffered",
+        nucleo_inicio=12,
+        nucleo_fin=27,
+        current_parte=partes[1],
+        partes_segmentadas=partes,
+    )
+
+    assert "CONTRATO ESTRUCTURADO DE ALCANCE DE LA PARTE" in prompt
+    assert "FRONTERAS NEGATIVAS (NO DESARROLLAR)" in prompt
+    assert "Parte 1/3 (anterior)" in prompt
+    assert "Parte 3/3 (siguiente)" in prompt
+    assert "Reforma administrativa y oficiales" in prompt
+    assert "Teorización política previa" in prompt
+    assert "Régimen polisinodial" in prompt
+
+
 def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch):
     import main as m
 

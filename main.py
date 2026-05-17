@@ -1037,13 +1037,26 @@ def _pdf_scope_instructions(
         return (
             "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
             "El archivo es un recorte local del documento con hasta una página de contexto a cada lado del tramo "
-            "principal de esta parte (buffer), para no perder párrafos cortados entre módulos.\n\n"
-            "- NÚCLEO: delimita el bloque principal usando la identificación de la parte y el contrato de alcance; "
-            "ahí reside el objetivo de estudio.\n"
-            "- CONTEXTO (buffer): solo continuidad en los bordes; no lo desarrolles como temario independiente "
-            "ni bases de estudio aisladas.\n\n"
-            f"Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo; el resto del documento completo "
-            "no es objeto de este procesamiento."
+            + ("principal de esta subparte (buffer), para no perder párrafos cortados entre módulos.\n\n"
+               if nucleo_unit == "subparte"
+               else "principal de esta parte (buffer), para no perder párrafos cortados entre módulos.\n\n")
+            + ("- NÚCLEO: delimita el bloque principal usando la identificación de la subparte y el contrato de alcance; "
+               if nucleo_unit == "subparte"
+               else "- NÚCLEO: delimita el bloque principal usando la identificación de la parte y el contrato de alcance; ")
+            + "ahí reside el objetivo de estudio.\n"
+            + "- CONTEXTO (buffer): solo continuidad en los bordes; no lo desarrolles como temario independiente "
+            + "ni bases de estudio aisladas.\n\n"
+            + (
+                f"Subparte {subparte_num}/{subparte_total} de la Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo; "
+                "el resto del documento completo no es objeto de este procesamiento."
+                if (
+                    nucleo_unit == "subparte"
+                    and subparte_num is not None
+                    and subparte_total is not None
+                )
+                else f"Parte {part_id}/{num_partes}: desarrolla exclusivamente este módulo; el resto del documento completo "
+                "no es objeto de este procesamiento."
+            )
         )
     nucleus_hint = ""
     if nucleo_inicio is not None and nucleo_fin is not None:
@@ -1055,26 +1068,76 @@ def _pdf_scope_instructions(
         "ALCANCE DEL PDF ADJUNTO (LECTURA)\n"
         "El archivo contiene el documento completo."
         f"{nucleus_hint}\n\n"
-        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
-        "No sustituyas el material de otras partes por contenido de este módulo. "
-        "Si necesitas enlaces mínimos con el resto del temario, limítalos al campo conexiones_contextuales o a menciones breves."
+        + (
+            (
+                f"Desarrolla exclusivamente la Subparte {subparte_num}/{subparte_total} "
+                f"de la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
+                "No desarrolles bloques pertenecientes a subpartes vecinas ni conviertas el resto del documento en desarrollo sustantivo."
+            )
+            if (
+                nucleo_unit == "subparte"
+                and subparte_num is not None
+                and subparte_total is not None
+            )
+            else (
+                f"Desarrolla exclusivamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
+                "No sustituyas el material de otras partes por contenido de este módulo. "
+                "Si necesitas enlaces mínimos con el resto del temario, limítalos a menciones breves."
+            )
+        )
     )
 
 
-def _text_scope_instructions(part_id: int, num_partes: int, bloque_inicio: int, bloque_fin: int) -> str:
+def _text_scope_instructions(
+    part_id: int,
+    num_partes: int,
+    bloque_inicio: int,
+    bloque_fin: int,
+    *,
+    nucleo_unit: Literal["parte", "subparte"] = "parte",
+    subparte_num: int | None = None,
+    subparte_total: int | None = None,
+) -> str:
+    exclusivity = (
+        f"Desarrolla exclusivamente la Subparte {subparte_num}/{subparte_total} de la Parte {part_id}/{num_partes}; "
+        "el resto del texto adjunto y cualquier bloque vecino quedan fuera de alcance."
+        if (
+            nucleo_unit == "subparte"
+            and subparte_num is not None
+            and subparte_total is not None
+        )
+        else f"Desarrolla exclusivamente la Parte {part_id}/{num_partes}; "
+    )
     return (
         "ALCANCE DEL TEXTO ADJUNTO\n"
         f"El archivo incluye exactamente los bloques {bloque_inicio}–{bloque_fin} de la segmentación "
         "(sin páginas de buffer: el corte es preciso). "
-        f"Desarrolla exclusivamente la Parte {part_id}/{num_partes}; "
+        f"{exclusivity}"
         "la tabla de contenidos aporta panorama global, pero no añadas temario fuera de los bloques adjuntos."
     )
 
 
-def _youtube_scope_instructions(part_id: int, num_partes: int) -> str:
+def _youtube_scope_instructions(
+    part_id: int,
+    num_partes: int,
+    *,
+    nucleo_unit: Literal["parte", "subparte"] = "parte",
+    subparte_num: int | None = None,
+    subparte_total: int | None = None,
+) -> str:
+    exclusivity = (
+        f"Procesa únicamente la Subparte {subparte_num}/{subparte_total} de la Parte {part_id}/{num_partes} "
+        "según el contrato de alcance y la identificación. No desarrolles material de subpartes vecinas. "
+        if (
+            nucleo_unit == "subparte"
+            and subparte_num is not None
+            and subparte_total is not None
+        )
+        else f"Procesa únicamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
+    )
     return (
         "ALCANCE DE LA FUENTE ADJUNTA\n"
-        f"Procesa únicamente la Parte {part_id}/{num_partes} según el contrato de alcance y la identificación. "
+        f"{exclusivity}"
         "La tabla de contenidos sitúa el módulo dentro del conjunto del material."
     )
 
@@ -1085,6 +1148,8 @@ def _build_pdf_agent_prompt(
     part_id: int,
     num_partes: int,
     handoff: PartHandoffContext,
+    current_parte: dict,
+    partes_segmentadas: list[dict],
     *,
     pdf_scope_mode: Literal["subpdf_buffered", "full_document"],
     nucleo_inicio: int | None,
@@ -1095,6 +1160,12 @@ def _build_pdf_agent_prompt(
         f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
     )
     handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    part_scope_contract = _build_part_scope_contract_block(
+        current_parte,
+        part_id=part_id,
+        num_partes=num_partes,
+    )
+    negative_scope = _build_part_negative_scope_block(current_parte, partes_segmentadas)
     scope = _pdf_scope_instructions(
         mode=pdf_scope_mode,
         part_id=part_id,
@@ -1103,6 +1174,10 @@ def _build_pdf_agent_prompt(
         nucleo_fin=nucleo_fin,
     )
     return (
+        f"{part_scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
         f"{handoff_body}\n\n"
@@ -1119,6 +1194,8 @@ def _build_text_agent_prompt(
     part_id: int,
     num_partes: int,
     handoff: PartHandoffContext,
+    current_parte: dict,
+    partes_segmentadas: list[dict],
     *,
     bloque_inicio: int,
     bloque_fin: int,
@@ -1128,8 +1205,18 @@ def _build_text_agent_prompt(
         f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
     )
     handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    part_scope_contract = _build_part_scope_contract_block(
+        current_parte,
+        part_id=part_id,
+        num_partes=num_partes,
+    )
+    negative_scope = _build_part_negative_scope_block(current_parte, partes_segmentadas)
     scope = _text_scope_instructions(part_id, num_partes, bloque_inicio, bloque_fin)
     return (
+        f"{part_scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
         f"{handoff_body}\n\n"
@@ -1146,14 +1233,26 @@ def _build_youtube_agent_prompt(
     part_id: int,
     num_partes: int,
     handoff: PartHandoffContext,
+    current_parte: dict,
+    partes_segmentadas: list[dict],
 ) -> str:
     toc_with_marker = table_of_contents.replace(
         f"  Parte {part_id}/{num_partes}:",
         f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
     )
     handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
+    part_scope_contract = _build_part_scope_contract_block(
+        current_parte,
+        part_id=part_id,
+        num_partes=num_partes,
+    )
+    negative_scope = _build_part_negative_scope_block(current_parte, partes_segmentadas)
     scope = _youtube_scope_instructions(part_id, num_partes)
     return (
+        f"{part_scope_contract}\n\n"
+        f"---\n\n"
+        f"{negative_scope}\n\n"
+        f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
         f"{handoff_body}\n\n"
@@ -1184,10 +1283,80 @@ def _build_subpart_context(
     if sp_contenido:
         lines.append(f"Contenido propio: {sp_contenido}")
     lines.append(
-        "Genera SOLO el campo «desarrollo» (secciones y subsecciones con explicaciones exhaustivas). "
-        "NO generes introduccion, conclusion ni conexiones_contextuales — ya han sido redactados "
-        "por el segmentador con visión global del documento completo."
+        "Genera exclusivamente el desarrollo explicativo de esta subparte. "
+        "La exhaustividad se aplica solo a este fragmento objetivo y no autoriza a invadir "
+        "otros bloques de la parte ni del documento completo."
     )
+    return "\n".join(lines)
+
+
+def _build_part_scope_contract_block(parte: dict, *, part_id: int, num_partes: int) -> str:
+    title = str(parte.get("titulo") or "").strip() or f"Parte {part_id}"
+    lines = [
+        "CONTRATO ESTRUCTURADO DE ALCANCE DE LA PARTE",
+        "Este contrato manda sobre cualquier otra señal contextual: desarrolla solo la parte actual.",
+        f"Parte objetivo: {part_id}/{num_partes}",
+        f"Título permitido: «{title}»",
+    ]
+
+    pagina_inicio = _optional_int(parte, "pagina_inicio")
+    pagina_fin = _optional_int(parte, "pagina_fin")
+    if pagina_inicio is not None and pagina_fin is not None:
+        lines.append(f"Páginas núcleo: {pagina_inicio}-{pagina_fin}")
+
+    bloque_inicio = _optional_int(parte, "bloque_inicio")
+    bloque_fin = _optional_int(parte, "bloque_fin")
+    if bloque_inicio is not None and bloque_fin is not None:
+        lines.append(f"Bloques núcleo: {bloque_inicio}-{bloque_fin}")
+
+    contenido = str(parte.get("contenido") or "").strip()
+    if contenido:
+        lines.append(f"Contenido propio de la parte: {contenido}")
+
+    identificacion = str(parte.get("identificacion") or "").strip()
+    if identificacion:
+        lines.append(f"Identificación literal de apoyo: {identificacion}")
+
+    lines.extend(
+        [
+            "",
+            "Todo el resto del documento funciona únicamente como contexto aclaratorio y queda fuera del desarrollo sustantivo.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_part_negative_scope_block(current_parte: dict, partes_segmentadas: list[dict]) -> str:
+    current_num = current_parte.get("numero")
+    current_pos = next((i for i, parte in enumerate(partes_segmentadas) if parte is current_parte), -1)
+    if current_pos < 0:
+        current_pos = next(
+            (i for i, parte in enumerate(partes_segmentadas) if parte.get("numero") == current_num),
+            -1,
+        )
+
+    previous_part = partes_segmentadas[current_pos - 1] if current_pos > 0 else None
+    next_part = (
+        partes_segmentadas[current_pos + 1]
+        if current_pos >= 0 and current_pos + 1 < len(partes_segmentadas)
+        else None
+    )
+
+    lines = ["FRONTERAS NEGATIVAS (NO DESARROLLAR)"]
+    for neighbor, role in ((previous_part, "anterior"), (next_part, "siguiente")):
+        if not neighbor:
+            continue
+        neighbor_number = _item_number(neighbor.get("numero"), len(partes_segmentadas))
+        title = str(neighbor.get("titulo") or "").strip() or "?"
+        lines.append(f"- Parte {neighbor_number} ({role}): «{title}»")
+
+        contenido = str(neighbor.get("contenido") or "").strip()
+        if contenido:
+            lines.append(f"  Contenido vecino fuera de alcance: {contenido}")
+
+        identificacion = str(neighbor.get("identificacion") or "").strip()
+        if identificacion:
+            lines.append(f"  Identificación vecina fuera de alcance: {identificacion}")
     return "\n".join(lines)
 
 
@@ -1232,11 +1401,11 @@ def _build_subpart_pdf_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{subpart_ctx}\n\n"
-        f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
@@ -1269,7 +1438,15 @@ def _build_subpart_text_prompt(
 
     sp_bi = subparte.get("bloque_inicio", bloque_inicio)
     sp_bf = subparte.get("bloque_fin", bloque_fin)
-    scope = _text_scope_instructions(part_id, num_partes, int(sp_bi), int(sp_bf))
+    scope = _text_scope_instructions(
+        part_id,
+        num_partes,
+        int(sp_bi),
+        int(sp_bf),
+        nucleo_unit="subparte",
+        subparte_num=_optional_int(subparte, "numero_subparte"),
+        subparte_total=len(all_subpartes),
+    )
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
     scope_contract = build_subpart_scope_contract_block(subparte)
@@ -1277,11 +1454,11 @@ def _build_subpart_text_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{subpart_ctx}\n\n"
-        f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
@@ -1308,7 +1485,13 @@ def _build_subpart_youtube_prompt(
         f"  ▶ Parte {part_id}/{num_partes} [PARTE ACTUAL]:",
     )
     handoff_body = _format_handoff_section(handoff, part_id=part_id, num_partes=num_partes)
-    scope = _youtube_scope_instructions(part_id, num_partes)
+    scope = _youtube_scope_instructions(
+        part_id,
+        num_partes,
+        nucleo_unit="subparte",
+        subparte_num=_optional_int(subparte, "numero_subparte"),
+        subparte_total=len(all_subpartes),
+    )
 
     subpart_ctx = _build_subpart_context(subparte, all_subpartes, part_id, num_partes)
     scope_contract = build_subpart_scope_contract_block(subparte)
@@ -1316,11 +1499,11 @@ def _build_subpart_youtube_prompt(
     sp_identificacion = subparte.get("identificacion", parte.get("identificacion", ""))
 
     return (
-        f"{subpart_ctx}\n\n"
-        f"---\n\n"
         f"{scope_contract}\n\n"
         f"---\n\n"
         f"{negative_scope}\n\n"
+        f"---\n\n"
+        f"{subpart_ctx}\n\n"
         f"---\n\n"
         f"{toc_with_marker}\n\n"
         f"---\n\n"
@@ -2154,6 +2337,8 @@ async def _process_project(
                         part_id,
                         num_partes,
                         handoff,
+                        parte,
+                        partes_segmentadas,
                         pdf_scope_mode=pdf_scope_mode,
                         nucleo_inicio=nucleo_pi,
                         nucleo_fin=nucleo_pf,
@@ -2235,6 +2420,8 @@ async def _process_project(
                         part_id,
                         num_partes,
                         handoff,
+                        parte,
+                        partes_segmentadas,
                         bloque_inicio=int(bloque_inicio),
                         bloque_fin=int(bloque_fin),
                     )
@@ -2260,6 +2447,8 @@ async def _process_project(
                         part_id,
                         num_partes,
                         handoff,
+                        parte,
+                        partes_segmentadas,
                     )
 
                     # Build subpart-level prompts (for explainer)
