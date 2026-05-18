@@ -784,3 +784,152 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)
+
+
+def test_process_project_pdf_deletes_source_object_after_success(monkeypatch):
+    pdf_path = _create_multi_page_pdf(2)
+    try:
+        project = {
+            "id": "proj-cleanup-success",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+            "source_object_status": main.SOURCE_OBJECT_STATUS_STORED,
+            "source_object_path": "user-123/proj-cleanup-success/test.pdf",
+        }
+        cleanup_calls = []
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+        monkeypatch.setattr(
+            main,
+            "delete_project_source_object",
+            lambda pid, uid, project=None: cleanup_calls.append((pid, uid, deepcopy(project))) or True,
+        )
+
+        async def _send_event(*args, **kwargs):
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, *args, **kwargs):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset({1, 2}), _usage(), {}))
+        monkeypatch.setattr(
+            main,
+            "run_segmentador",
+            lambda *args, **kwargs: (
+                {
+                    "analisis_texto": "Dos páginas",
+                    "decision_num_partes": 1,
+                    "decision_justificacion": "Una parte",
+                    "partes": [_part_pdf_fields(1, "Única", 1, 2)],
+                    "consideraciones_estudiante": "Orden natural",
+                },
+                _usage(total=20),
+            ),
+        )
+        monkeypatch.setattr(main, "run_explainer", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+
+        async def _fake_format(api_key, explainer_data):
+            return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
+
+        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+
+        asyncio.run(main._process_project("proj-cleanup-success", "user-123"))
+
+        assert cleanup_calls == [("proj-cleanup-success", "user-123", project)]
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)
+
+
+def test_process_project_pdf_deletes_source_object_after_error(monkeypatch):
+    pdf_path = _create_multi_page_pdf(2)
+    try:
+        project = {
+            "id": "proj-cleanup-error",
+            "name": "Doc PDF",
+            "description": "Procesar todo",
+            "pdf_filename": "test.pdf",
+            "source_type": "pdf",
+            "source_url": None,
+            "status": "pending",
+            "source_object_status": main.SOURCE_OBJECT_STATUS_STORED,
+            "source_object_path": "user-123/proj-cleanup-error/test.pdf",
+        }
+        cleanup_calls = []
+
+        monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
+        monkeypatch.setattr(
+            main,
+            "get_user_api_key",
+            lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+        )
+        monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
+        monkeypatch.setattr(
+            main,
+            "delete_project_source_object",
+            lambda pid, uid, project=None: cleanup_calls.append((pid, uid, deepcopy(project))) or True,
+        )
+
+        async def _send_event(*args, **kwargs):
+            return None
+
+        class _DummySSE:
+            async def end_stream(self, *args, **kwargs):
+                return None
+
+        monkeypatch.setattr(main, "send_event", _send_event)
+        monkeypatch.setattr(main, "sse_manager", _DummySSE())
+
+        from google import genai
+
+        monkeypatch.setattr(genai, "Client", lambda api_key: object())
+        monkeypatch.setattr(
+            main,
+            "upload_file_with_retry",
+            lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"),
+        )
+        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset({1, 2}), _usage(), {}))
+        monkeypatch.setattr(
+            main,
+            "run_segmentador",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("segmentador falló")),
+        )
+        monkeypatch.setattr(main, "run_explainer", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "format_explainer_content", lambda *args, **kwargs: ({"ok": True}, {}))
+
+        asyncio.run(main._process_project("proj-cleanup-error", "user-123"))
+
+        assert cleanup_calls == [("proj-cleanup-error", "user-123", project)]
+    finally:
+        if os.path.isfile(pdf_path):
+            os.unlink(pdf_path)

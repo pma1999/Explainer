@@ -7,7 +7,7 @@ import os
 import secrets
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from supabase import create_client, Client
@@ -24,6 +24,9 @@ logger = logging.getLogger("backend.supabase_data")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 BUCKET_ID = "project-pdfs"
+SOURCE_OBJECT_STATUS_NONE = "none"
+SOURCE_OBJECT_STATUS_STORED = "stored"
+SOURCE_OBJECT_STATUS_DELETED = "deleted"
 
 
 def _client() -> Client:
@@ -33,7 +36,38 @@ def _client() -> Client:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _project_storage_path(user_id: str, project_id: str, pdf_filename: str) -> str:
+    return f"{user_id}/{project_id}/{pdf_filename}"
+
+
+def _looks_like_storage_not_found(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        needle in message
+        for needle in (
+            "not found",
+            "object not found",
+            "no such",
+            "404",
+            "does not exist",
+        )
+    )
+
+
+def _resolve_source_object_status(row: dict[str, Any]) -> str:
+    raw = row.get("source_object_status")
+    if raw in {
+        SOURCE_OBJECT_STATUS_NONE,
+        SOURCE_OBJECT_STATUS_STORED,
+        SOURCE_OBJECT_STATUS_DELETED,
+    }:
+        return raw
+    if row.get("source_type", "pdf") == "pdf" and row.get("source_object_path"):
+        return SOURCE_OBJECT_STATUS_STORED
+    return SOURCE_OBJECT_STATUS_NONE
 
 
 def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict[str, Any]:
@@ -59,7 +93,13 @@ def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict
     if "share_token" in row:
         result["share_token"] = row.get("share_token")
     if include_internal:
+        result["user_id"] = str(row["user_id"]) if row.get("user_id") is not None else None
         result["source_text"] = row.get("source_text")
+        result["source_object_path"] = row.get("source_object_path")
+        result["source_object_status"] = _resolve_source_object_status(row)
+        result["source_object_deleted_at"] = _format_datetime_value(
+            row.get("source_object_deleted_at")
+        )
     return result
 
 
@@ -356,15 +396,47 @@ def create_project(
         "usage": {},
         "reading_progress": {},
         "error_message": None,
+        "source_object_path": None,
+        "source_object_status": SOURCE_OBJECT_STATUS_NONE,
+        "source_object_deleted_at": None,
         "created_at": now,
         "updated_at": now,
     }
+    storage_path = None
+    if source_type == "pdf" and pdf_content:
+        storage_path = _project_storage_path(user_id, project_id, pdf_filename)
+        row["source_object_path"] = storage_path
     client.table("projects").insert(row).execute()
 
     # Only upload to storage for PDF source type
     if source_type == "pdf" and pdf_content:
-        storage_path = f"{user_id}/{project_id}/{pdf_filename}"
-        client.storage.from_(BUCKET_ID).upload(path=storage_path, file=pdf_content, file_options={"content-type": "application/pdf", "upsert": "false"})
+        try:
+            client.storage.from_(BUCKET_ID).upload(
+                path=storage_path,
+                file=pdf_content,
+                file_options={"content-type": "application/pdf", "upsert": "false"},
+            )
+            client.table("projects").update(
+                {
+                    "source_object_status": SOURCE_OBJECT_STATUS_STORED,
+                    "source_object_deleted_at": None,
+                    "updated_at": _now_iso(),
+                }
+            ).eq("id", project_id).eq("user_id", user_id).execute()
+            row["source_object_status"] = SOURCE_OBJECT_STATUS_STORED
+        except Exception:
+            if storage_path:
+                try:
+                    client.storage.from_(BUCKET_ID).remove([storage_path])
+                except Exception as cleanup_exc:
+                    if not _looks_like_storage_not_found(cleanup_exc):
+                        logger.warning(
+                            "No se pudo limpiar el PDF tras fallo de upload (project_id=%s): %s",
+                            project_id,
+                            cleanup_exc,
+                        )
+            client.table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
+            raise
 
     return _row_to_project(row)
 
@@ -413,6 +485,9 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
         "reading_progress",
         "error_message",
         "share_token",
+        "source_object_path",
+        "source_object_status",
+        "source_object_deleted_at",
     }
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
@@ -526,17 +601,12 @@ def set_section_read_status(
 
 def delete_project(project_id: str, user_id: str) -> bool:
     """Delete project row and its PDF from Storage (if PDF type). Returns True if deleted."""
-    project = get_project(project_id, user_id)
+    project = get_project(project_id, user_id, include_internal=True)
     if not project:
         return False
 
-    # Only delete from storage for PDF projects
     if project.get("source_type") == "pdf":
-        storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"
-        try:
-            _client().storage.from_(BUCKET_ID).remove([storage_path])
-        except Exception:
-            pass
+        delete_project_source_object(project_id, user_id, project=project)
 
     _client().table("projects").delete().eq("id", project_id).eq("user_id", user_id).execute()
     return True
@@ -671,6 +741,9 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
             "usage": project.get("usage") or {},
             "reading_progress": project.get("reading_progress") or {},
             "error_message": project.get("error_message"),
+            "source_object_path": None,
+            "source_object_status": SOURCE_OBJECT_STATUS_NONE,
+            "source_object_deleted_at": None,
             "created_at": project.get("created_at") or created,
             "updated_at": project.get("updated_at") or created,
         }
@@ -687,7 +760,7 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
 
     Returns None for YouTube projects (no PDF to download).
     """
-    project = get_project(project_id, user_id)
+    project = get_project(project_id, user_id, include_internal=True)
     if not project:
         return None
 
@@ -695,7 +768,20 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
     if project.get("source_type") != "pdf":
         return None
 
-    storage_path = f"{user_id}/{project_id}/{project['pdf_filename']}"
+    if project.get("source_object_status") == SOURCE_OBJECT_STATUS_DELETED:
+        logger.info(
+            "Se intentó descargar un PDF ya eliminado (project_id=%s, user_id=%s...)",
+            project_id,
+            user_id[:8],
+        )
+        return None
+
+    storage_path = project.get("source_object_path")
+    if not storage_path and project.get("source_object_status") == SOURCE_OBJECT_STATUS_STORED:
+        storage_path = _project_storage_path(user_id, project_id, project["pdf_filename"])
+    if not storage_path:
+        return None
+
     try:
         data = _client().storage.from_(BUCKET_ID).download(storage_path)
     except Exception:
@@ -706,6 +792,60 @@ def download_pdf_to_temp(project_id: str, user_id: str) -> Optional[str]:
     finally:
         os.close(fd)
     return path
+
+
+def delete_project_source_object(
+    project_id: str,
+    user_id: str,
+    *,
+    project: dict[str, Any] | None = None,
+) -> bool:
+    """Delete the stored PDF object for a project and mark it deleted.
+
+    The operation is idempotent: if the object is already gone, the DB row is still
+    marked as deleted so startup reconciliation can converge.
+    """
+    project = project or get_project(project_id, user_id, include_internal=True)
+    if not project or project.get("source_type") != "pdf":
+        return False
+
+    if project.get("source_object_status") == SOURCE_OBJECT_STATUS_DELETED:
+        return False
+
+    storage_path = project.get("source_object_path")
+    if not storage_path and project.get("source_object_status") == SOURCE_OBJECT_STATUS_STORED:
+        storage_path = _project_storage_path(user_id, project_id, project["pdf_filename"])
+
+    if storage_path:
+        try:
+            _client().storage.from_(BUCKET_ID).remove([storage_path])
+        except Exception as exc:
+            if not _looks_like_storage_not_found(exc):
+                raise
+
+    deleted_at = _now_iso()
+    _client().table("projects").update(
+        {
+            "source_object_status": SOURCE_OBJECT_STATUS_DELETED,
+            "source_object_deleted_at": deleted_at,
+            "updated_at": deleted_at,
+        }
+    ).eq("id", project_id).eq("user_id", user_id).execute()
+    return True
+
+
+def list_projects_with_stored_source_objects() -> list[dict[str, Any]]:
+    """Return PDF projects whose source object still exists in Supabase storage."""
+    client = _client()
+    result = (
+        client.table("projects")
+        .select("*")
+        .eq("source_type", "pdf")
+        .eq("source_object_status", SOURCE_OBJECT_STATUS_STORED)
+        .execute()
+    )
+    rows = (result.data or []) if result else []
+    return [_row_to_project(row, include_internal=True) for row in rows]
 
 
 # ========== User API Keys (BYOK) ==========

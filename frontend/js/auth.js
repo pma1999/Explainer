@@ -2,7 +2,12 @@
    EXPLAINER — Auth & Settings
    ============================================================ */
 
-import { state, supabaseClient } from './state.js';
+import {
+  state,
+  supabaseClient,
+  getRememberSessionPreference,
+  setRememberSessionPreference,
+} from './state.js';
 import { $, show, hide, showView, toast } from './dom.js';
 import { api } from './api.js';
 import {
@@ -290,11 +295,30 @@ export function showSettings() {
   show($('modal-settings'));
 }
 
+function syncRememberSessionInputs(remember = false) {
+  const nextValue = Boolean(remember);
+  const loginCheckbox = $('login-remember-session');
+  const registerCheckbox = $('register-remember-session');
+  if (loginCheckbox) loginCheckbox.checked = nextValue;
+  if (registerCheckbox) registerCheckbox.checked = nextValue;
+}
+
 export function initAuth(onNavigateFromRoute, onInitLanding) {
   const formLogin = $('form-login');
   const formRegister = $('form-register');
   const loginError = $('auth-login-error');
   const registerError = $('auth-register-error');
+  const loginRemember = $('login-remember-session');
+  const registerRemember = $('register-remember-session');
+
+  syncRememberSessionInputs(getRememberSessionPreference() === true);
+
+  [loginRemember, registerRemember].forEach((checkbox) => {
+    if (!checkbox) return;
+    checkbox.addEventListener('change', () => {
+      syncRememberSessionInputs(checkbox.checked);
+    });
+  });
 
   document.querySelectorAll('.auth-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
@@ -317,6 +341,7 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
     loginError.textContent = '';
     const email = $('login-email').value.trim();
     const password = $('login-password').value;
+    const rememberSession = Boolean(loginRemember?.checked);
     if (!email || !password) {
       loginError.textContent = 'Completa email y contraseña';
       return;
@@ -325,6 +350,7 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Entrando...';
     try {
+      setRememberSessionPreference(rememberSession);
       const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error) throw error;
       state.session = data.session;
@@ -352,6 +378,7 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
     const email = $('register-email').value.trim();
     const password = $('register-password').value;
     const confirm = $('register-password-confirm').value;
+    const rememberSession = Boolean(registerRemember?.checked);
     if (!email || !password) {
       registerError.textContent = 'Completa email y contraseña';
       return;
@@ -368,6 +395,7 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
     btn.disabled = true;
     btn.querySelector('.btn-text').textContent = 'Creando cuenta...';
     try {
+      setRememberSessionPreference(rememberSession);
       const { data, error } = await supabaseClient.auth.signUp({ email, password });
       if (error) throw error;
       state.session = data.session;
@@ -395,6 +423,8 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
       state.processingSSE = null;
     }
     await supabaseClient.auth.signOut();
+    setRememberSessionPreference(false);
+    syncRememberSessionInputs(false);
     state.session = null;
     state.user = null;
     hide($('modal-settings'));

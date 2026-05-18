@@ -62,6 +62,10 @@
           <input type="password" id="login-password" class="form-input" placeholder="••••••••" required
             autocomplete="current-password" />
         </div>
+        <label class="auth-checkbox-row" for="login-remember-session">
+          <input type="checkbox" id="login-remember-session" />
+          <span>Mantener sesión iniciada en este dispositivo</span>
+        </label>
         <p class="form-error" id="auth-login-error"></p>
         <button type="submit" class="btn-primary btn-block" id="btn-login">
           <span class="btn-text">Iniciar sesión</span>
@@ -84,6 +88,10 @@
           <input type="password" id="register-password-confirm" class="form-input" placeholder="••••••••" required
             minlength="6" autocomplete="new-password" />
         </div>
+        <label class="auth-checkbox-row" for="register-remember-session">
+          <input type="checkbox" id="register-remember-session" />
+          <span>Mantener sesión iniciada en este dispositivo</span>
+        </label>
         <p class="form-error" id="auth-register-error"></p>
         <button type="submit" class="btn-primary btn-block" id="btn-register">
           <span class="btn-text">Crear cuenta</span>

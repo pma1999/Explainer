@@ -43,9 +43,12 @@ from backend.supabase_data import (
     delete_user_api_key,
     has_user_api_key,
     get_user_api_key_status,
+    delete_project_source_object,
+    list_projects_with_stored_source_objects,
     PROVIDER_GEMINI,
     PROVIDER_OPENROUTER,
     PROVIDER_MISTRAL,
+    SOURCE_OBJECT_STATUS_STORED,
 )
 from backend.crypto import mask_api_key
 from backend.sse_manager import sse_manager, send_event
@@ -133,6 +136,15 @@ OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
         "deepseek/deepseek-v4-pro",
     }
 )
+INTERRUPTED_PDF_PROCESS_ERROR_MESSAGE = (
+    "El procesamiento se interrumpió por un reinicio del servidor. "
+    "Vuelve a subir el PDF para reintentarlo."
+)
+MISSING_PDF_SOURCE_ERROR_MESSAGE = (
+    "El PDF original de este proyecto ya no está disponible. "
+    "Vuelve a subirlo para reintentar el análisis."
+)
+ACTIVE_PROJECT_STATUSES = frozenset({"uploading", "segmenting", "processing"})
 
 
 class ProcessProjectRequest(BaseModel):
@@ -154,6 +166,50 @@ def _resolve_explainer_model(
     return MODEL_AGENTS
 
 
+def _reconcile_stored_pdf_sources_on_startup() -> None:
+    """Converge leftover source PDFs after deploys/restarts.
+
+    BackgroundTasks are process-local, so an app restart can leave PDF objects in
+    Supabase Storage even though the job can no longer resume. We mark interrupted
+    jobs as error and retry storage cleanup idempotently on every startup.
+    """
+    try:
+        projects = list_projects_with_stored_source_objects()
+    except Exception as exc:
+        logger.warning("[Startup] No se pudo listar PDFs pendientes de cleanup: %s", exc)
+        return
+
+    for project in projects:
+        project_id = project.get("id")
+        user_id = project.get("user_id")
+        status = project.get("status")
+        if not project_id or not user_id:
+            continue
+        if status == "pending":
+            continue
+        if status in ACTIVE_PROJECT_STATUSES:
+            update_project(
+                project_id,
+                user_id,
+                {
+                    "status": "error",
+                    "error_message": INTERRUPTED_PDF_PROCESS_ERROR_MESSAGE,
+                },
+            )
+        try:
+            delete_project_source_object(project_id, user_id, project=project)
+            logger.info(
+                "[Startup] PDF fuente reconciliado y eliminado",
+                extra={"project_id": project_id, "status": status},
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Startup] No se pudo eliminar el PDF fuente pendiente (project_id=%s): %s",
+                project_id,
+                exc,
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     executor = concurrent.futures.ThreadPoolExecutor(
@@ -166,6 +222,7 @@ async def lifespan(app: FastAPI):
         "[Startup] Explainer API iniciada - Persistencia en Supabase "
         "(ThreadPoolExecutor max_workers=64)"
     )
+    await asyncio.to_thread(_reconcile_stored_pdf_sources_on_startup)
     try:
         yield
     finally:
@@ -1619,6 +1676,8 @@ async def _process_project(
     openrouter_model: OpenRouterExplainerModel | str | None = None,
 ) -> None:
     process_start_time = time.time()
+    project: dict[str, Any] | None = None
+    source_type = "pdf"
     pdf_temp_path = None
     numbered_pdf_path = None
     segment_pdf_paths: list[str] = []
@@ -2913,6 +2972,28 @@ async def _process_project(
                     logger.debug(f"[Process] Archivo temporal eliminado: {temp_path}")
                 except OSError as e:
                     logger.warning(f"[Process] No se pudo eliminar archivo temporal {temp_path}: {e}")
+        if (
+            source_type == "pdf"
+            and project is not None
+            and project.get("source_object_status") == SOURCE_OBJECT_STATUS_STORED
+        ):
+            try:
+                await asyncio.to_thread(
+                    delete_project_source_object,
+                    project_id,
+                    user_id,
+                    project=project,
+                )
+                logger.info(
+                    "[Process] PDF fuente eliminado de Supabase tras finalizar el procesamiento",
+                    extra={"project_id": project_id},
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Process] No se pudo eliminar el PDF fuente en Supabase (project_id=%s): %s",
+                    project_id,
+                    exc,
+                )
         await sse_manager.end_stream(project_id)
         logger.debug(f"[Process] Stream SSE cerrado para proyecto: {project_id}")
 
@@ -3058,7 +3139,7 @@ async def api_process_project(
         }
     )
 
-    project = get_project(project_id, user_id)
+    project = get_project(project_id, user_id, include_internal=True)
     if not project:
         logger.warning(f"[API] Proyecto no encontrado: {project_id}")
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -3069,6 +3150,21 @@ async def api_process_project(
             extra={"project_id": project_id, "current_status": project["status"]}
         )
         raise HTTPException(status_code=400, detail=f"El proyecto ya está en estado '{project['status']}'")
+
+    source_object_status = project.get("source_object_status")
+    if (
+        project.get("source_type") == "pdf"
+        and source_object_status is not None
+        and source_object_status != SOURCE_OBJECT_STATUS_STORED
+    ):
+        logger.warning(
+            "[API] Reintento de procesamiento sin PDF fuente disponible",
+            extra={
+                "project_id": project_id,
+                "source_object_status": source_object_status,
+            },
+        )
+        raise HTTPException(status_code=400, detail=MISSING_PDF_SOURCE_ERROR_MESSAGE)
 
     if not has_user_api_key(user_id, provider=PROVIDER_GEMINI):
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")

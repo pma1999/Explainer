@@ -166,6 +166,29 @@ body {
   min-height: 20px;
 }
 
+.auth-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.auth-checkbox-row input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--amber);
+  flex: 0 0 auto;
+}
+
+.auth-checkbox-row:hover {
+  color: var(--text-primary);
+}
+
 .btn-block {
   width: 100%;
   justify-content: center;
