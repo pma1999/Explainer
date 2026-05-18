@@ -124,6 +124,60 @@ function triggerDownload(blob, filename) {
   });
 }
 
+function cleanMdText(value) {
+  return String(value ?? '').replace(/\r\n?/g, '\n').trim();
+}
+
+function quoteCalloutLines(text) {
+  return cleanMdText(text)
+    .split('\n')
+    .map(line => (line.length > 0 ? `> ${line}` : '>'));
+}
+
+function stripOuterQuoteDelimiters(text) {
+  const value = cleanMdText(text);
+  const pairs = [
+    ['«', '»'],
+    ['"', '"'],
+    ['“', '”'],
+    ['‘', '’'],
+  ];
+  for (const [open, close] of pairs) {
+    if (value.startsWith(open) && value.endsWith(close)) {
+      return value.slice(open.length, -close.length).trim();
+    }
+  }
+  return value;
+}
+
+function formatGuillemetQuote(text) {
+  const value = stripOuterQuoteDelimiters(text);
+  return value ? `«${value}»` : '';
+}
+
+function formatQuoteSource(autor, obra, ubicacion) {
+  const source = [cleanMdText(autor), cleanMdText(obra) ? `*${cleanMdText(obra)}*` : '']
+    .filter(Boolean)
+    .join(', ');
+  const location = cleanMdText(ubicacion);
+  return [source, location].filter(Boolean).join(', ') || 'Cita';
+}
+
+function appendCallout(md, calloutHeader, body) {
+  const content = cleanMdText(body);
+  if (!content) return md;
+  md += `> ${calloutHeader}\n`;
+  md += `${quoteCalloutLines(content).join('\n')}\n\n`;
+  return md;
+}
+
+function formatLabelledQuoteLine(label, text) {
+  const lines = quoteCalloutLines(text);
+  if (lines.length === 0) return [];
+  const firstLine = lines[0].replace(/^> ?/, '');
+  return [`> **${label}:** ${firstLine}`, ...lines.slice(1)];
+}
+
 function formatExplicacionMd(data, autor, obra, partName) {
   if (data && data._format === 'markdown') {
     const content = typeof data.content === 'string' ? data.content.trim() : '';
@@ -162,27 +216,30 @@ function formatExplicacionMd(data, autor, obra, partName) {
   return md.trim() + '\n';
 }
 
-function formatRecorridoMd(data, autor, obra, partName) {
+export function formatRecorridoMd(data, autor, obra, partName) {
   let md = `# ${autor} — Recorrido Anotado (${partName})\n\n`;
   md += `> [!summary] Introducción orientadora\n> Recorrido analítico correspondiente a la sección **${partName}** de la obra **${obra}** por **${autor}**.\n\n---\n\n`;
   md += `## Recorrido Anotado\n\n`;
 
   if (data.recorrido_anotado && data.recorrido_anotado.length > 0) {
     data.recorrido_anotado.forEach(entry => {
-      if (entry.cita_textual && entry.cita_textual.trim().length > 0) {
-        md += `> [!quote] ${autor}, *${obra}*, ${entry.ubicacion}\n> «${entry.cita_textual.replace(/\n/g, '\n> ')}»\n\n`;
-      } else {
-        md += `> [!quote] ${autor}, *${obra}*, ${entry.ubicacion}\n> *(Contenido no citado textualmente)*\n\n`;
+      const quote = formatGuillemetQuote(entry.cita_textual);
+      const quoteBody = quote || '*(Contenido no citado textualmente)*';
+      md += `> [!quote] ${formatQuoteSource(autor, obra, entry.ubicacion)}\n`;
+      md += `${quoteCalloutLines(quoteBody).join('\n')}`;
+
+      const translation = formatGuillemetQuote(entry.traduccion);
+      if (translation) {
+        md += `\n>\n${formatLabelledQuoteLine('Traducción', translation).join('\n')}`;
       }
-      if (entry.traduccion) {
-        md += `> [!cite]- **Traducción**\n> «${entry.traduccion.replace(/\n/g, '\n> ')}»\n\n`;
+
+      md += `\n\n`;
+
+      if (cleanMdText(entry.apuntes_traductologicos)) {
+        md = appendCallout(md, '[!note]- Apunte traductológico', entry.apuntes_traductologicos);
       }
-      if (entry.apuntes_traductologicos) {
-        md += `> *Apunte traductológico:* ${entry.apuntes_traductologicos}\n\n`;
-      }
-      if (entry.anotacion) {
-        md += `> [!info]+ **Anotación**\n> ${entry.anotacion.replace(/\n/g, '\n> ')}\n\n`;
-      }
+
+      md = appendCallout(md, '[!annotation]+ Anotación', entry.anotacion);
       md += `---\n\n`;
     });
   }

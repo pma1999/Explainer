@@ -6,6 +6,7 @@ import {
   sanitizeFolderName,
   buildSectionFolderName,
   prefillFromProjectName,
+  formatRecorridoMd,
 } from '../../frontend/js/export.js';
 
 describe('export.js', () => {
@@ -72,6 +73,43 @@ describe('export.js', () => {
 
     it('returns single part as obra when no separator', () => {
       expect(prefillFromProjectName('Solo Obra')).toEqual({ autor: '', obra: 'Solo Obra' });
+    });
+  });
+
+  describe('formatRecorridoMd', () => {
+    it('exports annotated quotes with the Obsidian annotation callout', () => {
+      const md = formatRecorridoMd({
+        recorrido_anotado: [{
+          ubicacion: 'p. 44',
+          cita_textual: 'Original quote',
+          traduccion: 'Traducción al castellano',
+          apuntes_traductologicos: 'Matiz de traducción.',
+          anotacion: 'Primera línea.\nSegunda línea.',
+        }],
+      }, 'Autor', 'Obra', 'Parte I');
+
+      expect(md).toContain('> [!quote] Autor, *Obra*, p. 44\n> «Original quote»');
+      expect(md).toContain('>\n> **Traducción:** «Traducción al castellano»');
+      expect(md).toContain('> [!note]- Apunte traductológico\n> Matiz de traducción.');
+      expect(md).toContain('> [!annotation]+ Anotación\n> Primera línea.\n> Segunda línea.');
+      expect(md).not.toContain('[!info]');
+      expect(md).not.toContain('**Anotación**');
+    });
+
+    it('omits the location comma when the quote has no page or location', () => {
+      const md = formatRecorridoMd({
+        recorrido_anotado: [{
+          ubicacion: '',
+          cita_textual: '"Cita ya entrecomillada"',
+          traduccion: '',
+          apuntes_traductologicos: '',
+          anotacion: 'Anotación breve.',
+        }],
+      }, 'Autor', 'Obra', 'Parte I');
+
+      expect(md).toContain('> [!quote] Autor, *Obra*\n> «Cita ya entrecomillada»');
+      expect(md).not.toContain('Autor, *Obra*, \n');
+      expect(md).not.toContain('undefined');
     });
   });
 });
