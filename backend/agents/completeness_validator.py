@@ -33,6 +33,7 @@ MAX_COMPLETENESS_RETRIES = 2
 MAX_EXPLAINER_VALIDATION_RETRIES = MAX_COMPLETENESS_RETRIES
 
 ScopeStatus = Literal["ok", "minor_context_only", "violation", "unknown"]
+SourceEvidenceKind = Literal["ocr_text", "gemini_file"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,19 @@ class ExplainerScopeItem:
 
 
 @dataclass(frozen=True, slots=True)
+class ExplainerSourceEvidence:
+    """Source material already available to the explainer, reused by the reviewer."""
+
+    kind: SourceEvidenceKind
+    label: str = ""
+    text: str = ""
+    file_uri: str = ""
+    mime_type: str = ""
+    pages: tuple[int, ...] = ()
+    note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ExplainerValidationContext:
     """Scope contract for validating one explainer generation."""
 
@@ -60,6 +74,7 @@ class ExplainerValidationContext:
     parent: ExplainerScopeItem | None = None
     previous_neighbor: ExplainerScopeItem | None = None
     next_neighbor: ExplainerScopeItem | None = None
+    source_evidence: ExplainerSourceEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,10 +125,13 @@ Tu unica tarea es validar dos cosas y solo dos:
 2. Alcance: si la explicacion desarrolla contenido sustantivo fuera de la parte o subparte asignada por el segmentador.
 
 Politica de alcance:
-- El contrato del segmentador es la fuente de verdad: titulo, contenido, identificacion, anclas, limites y vecinos.
-- Marca scope_status="violation" solo si hay desarrollo sustantivo y claro de anclas, encabezados o contenido de vecinos prohibidos.
+- El contrato del segmentador y la fuente real permitida son la fuente de verdad: titulo, contenido, identificacion, anclas, limites, vecinos y PDF/OCR adjunto cuando exista.
+- La fuente real permitida manda sobre los resumenes tematicos del segmentador. Los titulos/contenidos de vecinos son ayudas para detectar invasiones, no una lista exhaustiva para excluir contenido que aparece dentro del nucleo permitido.
+- Si un tema, nombre, fecha, ejemplo o bloque aparece en el OCR/PDF permitido o dentro de las paginas/anclas actuales, NO marques violation aunque se parezca al titulo o resumen de un vecino.
+- Marca scope_status="violation" solo si hay desarrollo sustantivo y claro de anclas, encabezados o contenido de vecinos prohibidos Y no esta respaldado por la fuente real permitida.
 - Acepta menciones puente breves, recordatorios contextuales o conexiones necesarias si no se convierten en desarrollo didactico del vecino.
-- Si hay duda razonable, usa scope_status="minor_context_only" u "unknown", no "violation".
+- Si la fuente real no esta disponible, no puedes localizar el fragmento, o hay duda razonable, usa scope_status="minor_context_only" u "unknown", no "violation".
+- Los offending_fragments deben ser fragmentos concretos de la explicacion generada y la reason debe explicar por que estan fuera de la fuente/alcance permitido.
 - No evalues estilo, profundidad didactica, elegancia, formato ni cobertura fina de conceptos.
 
 Politica de completitud:
@@ -232,7 +250,59 @@ def _format_scope_item(item: ExplainerScopeItem | None, *, label: str) -> str:
     return "\n".join(lines)
 
 
-def format_validation_context(validation_context: ExplainerValidationContext | None) -> str:
+def _format_source_evidence(
+    source_evidence: ExplainerSourceEvidence | None,
+    *,
+    include_text: bool,
+) -> str:
+    if source_evidence is None:
+        return (
+            "FUENTE REAL PERMITIDA PARA VALIDAR ALCANCE:\n"
+            "(No disponible. Se debe validar de forma conservadora y no marcar violation si hay duda.)"
+        )
+
+    lines = ["FUENTE REAL PERMITIDA PARA VALIDAR ALCANCE:"]
+    if source_evidence.label:
+        lines.append(f"- Origen: {source_evidence.label}")
+    lines.append(f"- Modo: {source_evidence.kind}")
+    if source_evidence.pages:
+        pages = ", ".join(str(page) for page in source_evidence.pages)
+        lines.append(f"- Paginas fuente: {pages}")
+    if source_evidence.mime_type:
+        lines.append(f"- MIME: {source_evidence.mime_type}")
+    if source_evidence.file_uri:
+        lines.append("- Archivo adjunto: disponible por Files API de Gemini en esta misma llamada.")
+    if source_evidence.note:
+        lines.append(f"- Nota: {source_evidence.note}")
+
+    if include_text and source_evidence.kind == "ocr_text":
+        text = source_evidence.text.strip()
+        if text:
+            lines.extend(
+                [
+                    "",
+                    "TEXTO OCR PERMITIDO:",
+                    text,
+                    "FIN DEL TEXTO OCR PERMITIDO.",
+                ]
+            )
+        else:
+            lines.append("- Texto OCR: vacio; valida de forma conservadora.")
+
+    if include_text and source_evidence.kind == "gemini_file":
+        lines.append(
+            "- El PDF permitido esta adjunto como primer part de esta llamada. "
+            "Inspeccionalo usando las paginas/anclas del contrato actual."
+        )
+
+    return "\n".join(lines)
+
+
+def format_validation_context(
+    validation_context: ExplainerValidationContext | None,
+    *,
+    include_source_text: bool = False,
+) -> str:
     """Render the segmentador scope contract for the reviewer and retries."""
     if validation_context is None:
         return (
@@ -258,7 +328,39 @@ def format_validation_context(validation_context: ExplainerValidationContext | N
             _format_scope_item(validation_context.next_neighbor, label="Vecino siguiente"),
         ]
     )
+    if validation_context.source_evidence is not None:
+        lines.extend(
+            [
+                "",
+                _format_source_evidence(
+                    validation_context.source_evidence,
+                    include_text=include_source_text,
+                ),
+            ]
+        )
     return "\n".join(lines)
+
+
+def _build_validator_contents(
+    *,
+    user_message: str,
+    validation_context: ExplainerValidationContext | None,
+) -> list[types.Content]:
+    parts: list[types.Part] = []
+    source_evidence = validation_context.source_evidence if validation_context else None
+    if (
+        source_evidence is not None
+        and source_evidence.kind == "gemini_file"
+        and source_evidence.file_uri
+    ):
+        parts.append(
+            types.Part.from_uri(
+                file_uri=source_evidence.file_uri,
+                mime_type=source_evidence.mime_type or "application/pdf",
+            )
+        )
+    parts.append(types.Part.from_text(text=user_message))
+    return [types.Content(role="user", parts=parts)]
 
 
 def _normalize_scope_status(raw: Any) -> ScopeStatus:
@@ -305,9 +407,10 @@ def check_explainer_validation(
         if not text.strip():
             return _accepted_report("Explicacion vacia; se acepta por defecto."), None
 
-        scope_contract = format_validation_context(validation_context)
+        scope_contract = format_validation_context(validation_context, include_source_text=True)
         user_message = (
-            "Evalua la siguiente explicacion academica usando exclusivamente el contrato de alcance.\n\n"
+            "Evalua la siguiente explicacion academica usando el contrato de alcance y la fuente real permitida.\n"
+            "Recuerda: si un contenido aparece en la fuente permitida o dentro de las paginas/anclas actuales, no es invasion de alcance.\n\n"
             f"{scope_contract}\n\n"
             "---\n\n"
             "EXPLICACION GENERADA A VALIDAR:\n"
@@ -315,12 +418,10 @@ def check_explainer_validation(
         )
 
         client = genai.Client(api_key=gemini_api_key)
-        contents = [
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=user_message)],
-            )
-        ]
+        contents = _build_validator_contents(
+            user_message=user_message,
+            validation_context=validation_context,
+        )
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=_VALIDATOR_SCHEMA,

@@ -63,6 +63,18 @@ def _scope_context():
     )
 
 
+def _with_source_evidence(source_evidence: module.ExplainerSourceEvidence):
+    base = _scope_context()
+    return module.ExplainerValidationContext(
+        scope_kind=base.scope_kind,
+        current=base.current,
+        parent=base.parent,
+        previous_neighbor=base.previous_neighbor,
+        next_neighbor=base.next_neighbor,
+        source_evidence=source_evidence,
+    )
+
+
 def _fake_response(report: dict) -> SimpleNamespace:
     return SimpleNamespace(text=json.dumps(report), usage_metadata=_usage())
 
@@ -104,6 +116,94 @@ def test_check_explainer_validation_accepts_complete_in_scope(monkeypatch):
     user_text = captured["contents"][0].parts[0].text
     assert "Cambios estructurales" in user_text
     assert "Consejos" in user_text
+
+
+def test_check_explainer_validation_includes_reused_ocr_source_evidence(monkeypatch):
+    captured: dict = {}
+
+    def _fake_generate(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(
+            {
+                "is_complete": True,
+                "scope_status": "ok",
+                "reason": "El contenido aparece en la fuente permitida.",
+                "offending_fragments": [],
+                "retry_instructions": "",
+            }
+        )
+
+    monkeypatch.setattr(module.genai, "Client", lambda api_key: object())
+    monkeypatch.setattr(module, "generate_content_with_retry", _fake_generate)
+
+    context = _with_source_evidence(
+        module.ExplainerSourceEvidence(
+            kind="ocr_text",
+            label="OCR Mistral reutilizado",
+            text=(
+                "--- PAGINA 16 ---\n"
+                "El Edicto de Caracalla aparece dentro del nucleo permitido.\n\n"
+                "--- PAGINA 17 ---\n"
+                "Rutilio Claudio Namaciano aparece dentro del nucleo permitido."
+            ),
+            pages=(16, 17),
+        )
+    )
+
+    report, _ = module.check_explainer_validation(
+        _explanation("Desarrolla el Edicto de Caracalla y a Rutilio Claudio Namaciano."),
+        gemini_api_key="AIzaFakeKey",
+        validation_context=context,
+    )
+
+    assert report.is_valid is True
+    user_text = captured["contents"][0].parts[0].text
+    assert "TEXTO OCR PERMITIDO" in user_text
+    assert "El Edicto de Caracalla aparece dentro del nucleo permitido" in user_text
+    system_text = captured["config"].system_instruction[0].text
+    assert "La fuente real permitida manda" in system_text
+
+
+def test_check_explainer_validation_attaches_gemini_file_source_evidence(monkeypatch):
+    captured: dict = {}
+
+    def _fake_generate(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(
+            {
+                "is_complete": True,
+                "scope_status": "ok",
+                "reason": "Validado con PDF adjunto.",
+                "offending_fragments": [],
+                "retry_instructions": "",
+            }
+        )
+
+    monkeypatch.setattr(module.genai, "Client", lambda api_key: object())
+    monkeypatch.setattr(module, "generate_content_with_retry", _fake_generate)
+
+    context = _with_source_evidence(
+        module.ExplainerSourceEvidence(
+            kind="gemini_file",
+            label="PDF ya subido",
+            file_uri="uploaded://scope-pdf",
+            mime_type="application/pdf",
+            pages=(14, 15, 16, 17),
+        )
+    )
+
+    report, _ = module.check_explainer_validation(
+        _explanation("Explicacion dentro del PDF adjunto."),
+        gemini_api_key="AIzaFakeKey",
+        validation_context=context,
+    )
+
+    assert report.is_valid is True
+    parts = captured["contents"][0].parts
+    assert len(parts) == 2
+    assert parts[0].file_data.file_uri == "uploaded://scope-pdf"
+    assert parts[0].file_data.mime_type == "application/pdf"
+    assert "Archivo adjunto: disponible por Files API de Gemini" in parts[1].text
 
 
 def test_check_explainer_validation_accepts_minor_bridge_context(monkeypatch):

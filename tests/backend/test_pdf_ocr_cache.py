@@ -13,6 +13,7 @@ from backend.pdf_ocr_cache import (
     merge_page_indexes,
     normalize_expected_page_numbers,
     page_index_from_serialized,
+    render_pdf_page_subset_to_validation_text,
     render_pdf_page_subset_to_text,
     serialize_page_index,
     write_pdf_ocr_cache,
@@ -243,6 +244,28 @@ def test_render_pdf_page_subset_to_text_requires_complete_page_coverage():
 
     with pytest.raises(PdfOcrError, match="páginas ausentes"):
         render_pdf_page_subset_to_text(cache_entry=entry, page_numbers=(1, 3))
+
+
+def test_render_pdf_page_subset_to_validation_text_preserves_page_labels():
+    entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(16, 17),
+        cached_page_numbers=(16, 17),
+        page_index=(
+            _page(16, "El Edicto de Caracalla aparece aqui."),
+            _page(17, "Rutilio Claudio Namaciano aparece aqui."),
+        ),
+    )
+
+    rendered = render_pdf_page_subset_to_validation_text(cache_entry=entry, page_numbers=(16, 17))
+
+    assert "--- PAGINA 16 ---" in rendered
+    assert "El Edicto de Caracalla" in rendered
+    assert "--- PAGINA 17 ---" in rendered
+    assert "Rutilio Claudio Namaciano" in rendered
 
 
 def test_write_unresolved_pdf_ocr_artifact_records_missing_pages(tmp_path):

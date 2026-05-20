@@ -151,6 +151,37 @@ def render_pdf_page_subset_to_text(
     return rendered
 
 
+def render_pdf_page_subset_to_validation_text(
+    *,
+    cache_entry: PdfOcrCacheEntry,
+    page_numbers: tuple[int, ...] | list[int],
+) -> str:
+    """Render OCR pages for scope validation, preserving explicit page labels."""
+    requested_pages = normalize_expected_page_numbers(page_numbers)
+    page_lookup = {page.page_number: page for page in cache_entry.page_index}
+    missing_pages = [page for page in requested_pages if page not in page_lookup]
+    if missing_pages:
+        raise PdfOcrError(
+            "El subconjunto OCR solicitado para validacion contiene páginas ausentes en el cache: "
+            f"{missing_pages}"
+        )
+
+    rendered_chunks: list[str] = []
+    for page_number in requested_pages:
+        page = page_lookup[page_number]
+        page_text = _strip_watermark_lines(page.markdown)
+        page_text = _replace_table_placeholders(page_text, page.tables)
+        page_text = _replace_image_placeholders(page_text, page.images)
+        page_chunks = [chunk for chunk in (page_text.strip(), (page.footer or "").strip()) if chunk]
+        if page_chunks:
+            rendered_chunks.append(f"--- PAGINA {page_number} ---\n" + "\n\n".join(page_chunks))
+
+    rendered = "\n\n".join(chunk for chunk in rendered_chunks if chunk.strip()).strip()
+    if not rendered:
+        raise PdfOcrError("El subconjunto OCR solicitado para validacion no produjo texto reutilizable.")
+    return rendered
+
+
 def serialize_page_index(page_index: tuple[PdfOcrParsedPage, ...]) -> list[dict[str, Any]]:
     return [
         {

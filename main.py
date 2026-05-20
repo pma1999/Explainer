@@ -86,6 +86,7 @@ from backend.agents.explainer_openrouter import (
 from backend.agents.completeness_validator import (
     COMPLETENESS_VALIDATOR_MODEL,
     ExplainerScopeItem,
+    ExplainerSourceEvidence,
     ExplainerValidationContext,
     ExplainerValidationError,
 )
@@ -99,7 +100,7 @@ from backend.mistral_ocr_client import (
     MISTRAL_OCR_MODEL,
     get_or_prime_mistral_pdf_ocr_cache,
 )
-from backend.pdf_ocr_cache import PdfOcrCacheEntry
+from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_validation_text
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -942,6 +943,94 @@ def _build_part_validation_context(
         current=_scope_item_from_part(current_parte, total_parts=len(partes_segmentadas)),
         previous_neighbor=_scope_item_from_part(previous_part, total_parts=len(partes_segmentadas)) if previous_part else None,
         next_neighbor=_scope_item_from_part(next_part, total_parts=len(partes_segmentadas)) if next_part else None,
+    )
+
+
+def _with_validation_source_evidence(
+    context: ExplainerValidationContext,
+    source_evidence: ExplainerSourceEvidence | None,
+) -> ExplainerValidationContext:
+    if source_evidence is None:
+        return context
+    return ExplainerValidationContext(
+        scope_kind=context.scope_kind,
+        current=context.current,
+        parent=context.parent,
+        previous_neighbor=context.previous_neighbor,
+        next_neighbor=context.next_neighbor,
+        source_evidence=source_evidence,
+    )
+
+
+def _scope_pages_from_item(item: ExplainerScopeItem) -> tuple[int, ...]:
+    if item.page_start is None or item.page_end is None or item.page_start > item.page_end:
+        return ()
+    return tuple(range(item.page_start, item.page_end + 1))
+
+
+def _select_validation_ocr_pages(
+    content_page_set: frozenset[int],
+    item: ExplainerScopeItem,
+) -> tuple[int, ...]:
+    if item.page_start is None or item.page_end is None or item.page_start > item.page_end:
+        return ()
+    if not content_page_set:
+        return ()
+    return tuple(
+        page
+        for page in sorted(content_page_set)
+        if item.page_start <= page <= item.page_end
+    )
+
+
+def _build_mistral_ocr_validation_evidence(
+    *,
+    cache_entry: PdfOcrCacheEntry,
+    content_page_set: frozenset[int],
+    context: ExplainerValidationContext,
+) -> ExplainerSourceEvidence | None:
+    pages = _select_validation_ocr_pages(content_page_set, context.current)
+    if not pages:
+        return None
+    try:
+        source_text = render_pdf_page_subset_to_validation_text(
+            cache_entry=cache_entry,
+            page_numbers=pages,
+        )
+    except PdfOcrError as exc:
+        logger.warning(
+            "[Process] No se pudo reutilizar OCR Mistral para validar alcance: %s",
+            exc,
+            extra={"error_type": type(exc).__name__, "pages": pages},
+        )
+        return None
+    return ExplainerSourceEvidence(
+        kind="ocr_text",
+        label="OCR Mistral reutilizado del explainer OpenRouter",
+        text=source_text,
+        pages=pages,
+        note="Paginas nucleo exactas de la unidad validada; no se relanza OCR.",
+    )
+
+
+def _build_gemini_file_validation_evidence(
+    *,
+    file_uri: str,
+    mime_type: str,
+    context: ExplainerValidationContext,
+) -> ExplainerSourceEvidence | None:
+    if not file_uri or not mime_type:
+        return None
+    return ExplainerSourceEvidence(
+        kind="gemini_file",
+        label="Archivo PDF reutilizado por Files API de Gemini",
+        file_uri=file_uri,
+        mime_type=mime_type,
+        pages=_scope_pages_from_item(context.current),
+        note=(
+            "Es el mismo archivo enviado a los agentes; puede incluir buffer o la parte completa, "
+            "por lo que el validador debe aplicar las paginas/anclas del contrato actual."
+        ),
     )
 
 
@@ -2558,6 +2647,27 @@ async def _process_project(
                 use_or_canonical = use_openrouter_explainer and is_pdf_source and mistral_pdf_context is not None
                 use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
                 use_or = use_or_canonical or use_or_direct
+                if is_pdf_source:
+                    enriched_validation_contexts: list[ExplainerValidationContext] = []
+                    for validation_context in subpart_validation_contexts:
+                        source_evidence: ExplainerSourceEvidence | None = None
+                        if use_or_canonical and mistral_pdf_context is not None:
+                            source_evidence = _build_mistral_ocr_validation_evidence(
+                                cache_entry=mistral_pdf_context.cache_entry,
+                                content_page_set=content_page_set,
+                                context=validation_context,
+                            )
+                        if source_evidence is None:
+                            source_evidence = _build_gemini_file_validation_evidence(
+                                file_uri=agent_file_uri,
+                                mime_type=agent_mime_type,
+                                context=validation_context,
+                            )
+                        enriched_validation_contexts.append(
+                            _with_validation_source_evidence(validation_context, source_evidence)
+                        )
+                    subpart_validation_contexts = enriched_validation_contexts
+
                 if use_subpart_explainer:
                     explainer_fn_or_sp = run_subpart_explainer_or
                     explainer_fn_sp = run_subpart_explainer

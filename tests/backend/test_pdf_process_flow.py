@@ -197,6 +197,8 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         assert part2_marker in part2_prompt
         assert all(c["validation_context"] is not None for c in explainer_calls)
         assert {c["validation_context"].scope_kind for c in explainer_calls} == {"part"}
+        assert {c["validation_context"].source_evidence.kind for c in explainer_calls} == {"gemini_file"}
+        assert all(c["validation_context"].source_evidence.file_uri == c["file_uri"] for c in explainer_calls)
 
         # Sub-PDF page counts (buffer=1): part1 pages 1–3 → 1..4 → 4 pages; part2 4–10 → 3..10 → 8 pages
         assert sorted(segment_upload_page_counts) == [4, 8]
@@ -302,6 +304,7 @@ def test_process_project_pdf_does_not_require_legacy_theme_fields(monkeypatch):
         assert len(segmentador_calls) == 1
         assert validation_contexts and all(ctx is not None for ctx in validation_contexts)
         assert {ctx.scope_kind for ctx in validation_contexts} == {"subpart"}
+        assert {ctx.source_evidence.kind for ctx in validation_contexts} == {"gemini_file"}
         assert any(payload.get("status") == "completed" for payload in updates)
     finally:
         if os.path.isfile(pdf_path):
@@ -683,6 +686,9 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         assert all(call["page_numbers"] == (1, 2, 3, 4) for call in openrouter_calls)
         assert all(call["validation_context"] is not None for call in openrouter_calls)
         assert {call["validation_context"].scope_kind for call in openrouter_calls} == {"part"}
+        assert {call["validation_context"].source_evidence.kind for call in openrouter_calls} == {"ocr_text"}
+        assert all("Page 1" in call["validation_context"].source_evidence.text for call in openrouter_calls)
+        assert all(call["validation_context"].source_evidence.pages == (1, 2, 3, 4) for call in openrouter_calls)
         usage_updates = [payload["usage"] for payload in updates if "usage" in payload]
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
