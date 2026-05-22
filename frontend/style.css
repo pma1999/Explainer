@@ -4937,3 +4937,225 @@ body.is-offline .project-card[data-pinned="true"] {
   white-space: nowrap;
   border: 0;
 }
+
+/* ============================================================
+   ESQUEMA VISUAL (MERMAID)
+   ============================================================ */
+
+.esquema-container {
+  padding: 1.75rem 1.5rem 2.5rem;
+  max-width: 100%;
+}
+
+/* Metadata blocks (analysis, reading guide, synthesis) */
+.esquema-meta {
+  margin-bottom: 1.25rem;
+}
+
+.esquema-meta-label {
+  font-size: 0.7rem;
+  font-family: var(--font-sans, 'DM Sans', system-ui, sans-serif);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3, #888);
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.esquema-meta-text {
+  font-size: 0.88rem;
+  color: var(--text-2, #b0a898);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+/* Diagram wrapper */
+.esquema-diagram-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 10px;
+  background: var(--bg-2, #141414);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+  padding: 1.75rem 1.5rem;
+  margin: 1.25rem 0 1rem;
+  position: relative;
+}
+
+.esquema-diagram-wrap svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+/* Loading placeholder inside diagram wrap */
+.mermaid-loading {
+  text-align: center;
+  color: var(--text-3, #888);
+  font-size: 0.85rem;
+  padding: 2rem 0;
+  font-family: var(--font-sans, 'DM Sans', system-ui, sans-serif);
+}
+
+/* Action buttons row */
+.esquema-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+
+.btn-download-svg {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--gold, #c9a84c);
+  color: var(--gold, #c9a84c);
+  background: transparent;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-family: var(--font-sans, 'DM Sans', system-ui, sans-serif);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+.btn-download-svg:hover {
+  background: var(--gold, #c9a84c);
+  color: #000;
+}
+
+.btn-download-svg svg {
+  flex-shrink: 0;
+}
+
+/* Generate / empty state */
+.esquema-generate-section {
+  text-align: center;
+  padding: 4rem 1.5rem 5rem;
+}
+
+.esquema-generate-section p {
+  color: var(--text-2, #b0a898);
+  margin: 0 auto 1.75rem;
+  font-size: 0.92rem;
+  max-width: 440px;
+  line-height: 1.7;
+}
+
+.esquema-gen-error {
+  display: inline-block;
+  max-width: 480px;
+  margin: 0 auto 1.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(200, 60, 60, 0.1);
+  border: 1px solid rgba(200, 60, 60, 0.3);
+  border-radius: 8px;
+  color: #e07070;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.btn-generate-esquema {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.75rem;
+  background: var(--gold, #c9a84c);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-family: var(--font-sans, 'DM Sans', system-ui, sans-serif);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.btn-generate-esquema:hover:not(:disabled) {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.btn-generate-esquema:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-generate-esquema:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Error state (render failure) */
+.esquema-error {
+  padding: 1.25rem 1.5rem;
+  border: 1px solid rgba(200, 60, 60, 0.35);
+  border-radius: 8px;
+  margin: 1.25rem 0;
+  background: rgba(200, 60, 60, 0.05);
+}
+
+.esquema-error-title {
+  color: #e07070;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.esquema-error p {
+  color: var(--text-2, #b0a898);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.esquema-error pre {
+  background: var(--bg-2, #141414);
+  padding: 0.875rem 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  color: var(--text-2, #b0a898);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+}
+
+/* Shared view empty state */
+.esquema-empty-shared {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--text-3, #888);
+  font-size: 0.9rem;
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .esquema-container {
+    padding: 1.25rem 1rem 2rem;
+  }
+
+  .esquema-diagram-wrap {
+    padding: 1rem 0.75rem;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    margin-left: -1rem;
+    margin-right: -1rem;
+  }
+
+  .esquema-generate-section {
+    padding: 3rem 1rem 4rem;
+  }
+
+  .btn-generate-esquema {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .esquema-actions {
+    justify-content: center;
+  }
+}

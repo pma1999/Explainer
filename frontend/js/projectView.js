@@ -985,8 +985,25 @@ export function renderTab(tabName, contenido) {
     return;
   }
 
-  const agentKey = tabName === 'explicacion' ? 'explainer' : tabName === 'recorrido' ? 'recorrido' : 'resources';
+  const agentKey = tabName === 'explicacion' ? 'explainer'
+    : tabName === 'recorrido' ? 'recorrido'
+    : tabName === 'recursos' ? 'resources'
+    : 'mermaid';
   const data = contenido[agentKey];
+
+  // Esquema Visual is generated on-demand — independent of the main pipeline status
+  if (tabName === 'esquema') {
+    hide(loading);
+    if (!data || data.error) {
+      contentEl.innerHTML = state.isSharedView
+        ? '<div class="esquema-empty-shared">El esquema visual no ha sido generado para esta sección.</div>'
+        : _renderEsquemaGenerate(state.currentPartId, data?.error);
+    } else {
+      contentEl.innerHTML = _renderEsquemaShell(data);
+      _renderMermaidDiagram(data.mermaid_code, state.currentPartId, contentEl);
+    }
+    return;
+  }
 
   if (contenido.status === 'processing') {
     show(loading);
@@ -1110,6 +1127,7 @@ export function selectPart(partId) {
   renderTab('explicacion', contenido);
   renderTab('recorrido', contenido);
   renderTab('recursos', contenido);
+  renderTab('esquema', contenido);
 
   activateTab(state.activeTab);
 
@@ -1216,6 +1234,7 @@ export async function handleReformat() {
         renderTab('explicacion', contenido);
         renderTab('recorrido', contenido);
         renderTab('recursos', contenido);
+        renderTab('esquema', contenido);
       }
     }
 
@@ -1353,5 +1372,191 @@ export function resetDescriptionExpand() {
   if (btn) {
     btn.textContent = 'Ver más';
     btn.setAttribute('aria-label', 'Ver más');
+  }
+}
+
+// ─── Esquema Visual (Mermaid) ─────────────────────────────────────────────────
+
+let _mermaidInitDone = false;
+let _mermaidRenderSeq = 0;
+
+function _ensureMermaidInit() {
+  if (_mermaidInitDone || !window.mermaid) return;
+  window.mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#252525',
+      primaryBorderColor: '#c9a84c',
+      primaryTextColor: '#ddd8cc',
+      lineColor: '#7a7060',
+      secondaryColor: '#1e1e1e',
+      tertiaryColor: '#2a2418',
+      edgeLabelBackground: '#1a1a14',
+      titleColor: '#c9a84c',
+      clusterBkg: '#1c1c1c',
+      clusterBorder: '#555',
+      nodeBorder: '#555',
+      mainBkg: '#252525',
+    },
+    securityLevel: 'loose',
+    fontFamily: 'DM Sans, system-ui, sans-serif',
+  });
+  _mermaidInitDone = true;
+}
+
+function _renderEsquemaGenerate(partId, errorMsg) {
+  const isRetry = !!errorMsg;
+  const errorHtml = errorMsg
+    ? `<div class="esquema-gen-error">${escHtml(errorMsg)}</div>`
+    : '';
+  return `
+    <div class="esquema-generate-section">
+      ${errorHtml}
+      <p>${isRetry
+        ? 'Hubo un error al generar el esquema. Puedes intentarlo de nuevo.'
+        : 'Genera un esquema visual Mermaid de esta sección, optimizado para memorización activa con código cromático y jerarquía clara.'
+      }</p>
+      <button class="btn-generate-esquema" data-part-id="${partId}">
+        ${isRetry ? 'Reintentar' : 'Generar Esquema Visual'}
+      </button>
+    </div>`;
+}
+
+function _renderEsquemaShell(data) {
+  const analysisHtml = data.analysis
+    ? `<div class="esquema-meta">
+        <div class="esquema-meta-label">Análisis</div>
+        <div class="esquema-meta-text">${escHtml(data.analysis)}</div>
+       </div>`
+    : '';
+  const guideHtml = data.reading_guide
+    ? `<div class="esquema-meta">
+        <div class="esquema-meta-label">Guía de lectura</div>
+        <div class="esquema-meta-text">${escHtml(data.reading_guide)}</div>
+       </div>`
+    : '';
+  const synthesisHtml = data.synthesis_decisions
+    ? `<div class="esquema-meta">
+        <div class="esquema-meta-label">Decisiones de síntesis</div>
+        <div class="esquema-meta-text">${escHtml(data.synthesis_decisions)}</div>
+       </div>`
+    : '';
+  return `
+    <div class="esquema-container">
+      ${analysisHtml}
+      <div class="esquema-diagram-wrap">
+        <div class="mermaid-render-target"><div class="mermaid-loading">Renderizando diagrama…</div></div>
+      </div>
+      <div class="esquema-actions">
+        <button class="btn-download-svg" title="Descargar como SVG">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+            <path d="M10 3v10M6 9l4 4 4-4M4 15h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Descargar SVG
+        </button>
+      </div>
+      ${guideHtml}
+      ${synthesisHtml}
+    </div>`;
+}
+
+function _renderMermaidErrorHtml(errMsg, code) {
+  return `
+    <div class="esquema-error">
+      <div class="esquema-error-title">Error al renderizar el diagrama</div>
+      <p>El esquema se generó pero contiene un error de sintaxis. Código generado:</p>
+      <pre>${escHtml(code)}</pre>
+    </div>`;
+}
+
+async function _renderMermaidDiagram(code, partId, containerEl) {
+  // Wait for mermaid.js CDN to finish loading (max 3 s)
+  let waited = 0;
+  while (!window.mermaid && waited < 30) {
+    await new Promise(r => setTimeout(r, 100));
+    waited++;
+  }
+
+  const target = containerEl.querySelector('.mermaid-render-target');
+  if (!target) return;
+
+  if (!window.mermaid) {
+    target.innerHTML = _renderMermaidErrorHtml('No se pudo cargar Mermaid.js (CDN).', code);
+    return;
+  }
+
+  _ensureMermaidInit();
+
+  const uid = `mermaid-${Date.now()}-${++_mermaidRenderSeq}`;
+  try {
+    const { svg } = await window.mermaid.render(uid, code);
+    target.innerHTML = svg;
+    const svgEl = target.querySelector('svg');
+    if (svgEl) {
+      svgEl.removeAttribute('height');
+      svgEl.setAttribute('width', '100%');
+      svgEl.style.maxWidth = '100%';
+      svgEl.style.display = 'block';
+    }
+    // Wire download button (now that SVG is in the DOM)
+    const dlBtn = containerEl.querySelector('.btn-download-svg');
+    if (dlBtn && svgEl) {
+      dlBtn.addEventListener('click', () => _downloadSvg(svgEl, partId));
+    }
+  } catch (err) {
+    target.innerHTML = _renderMermaidErrorHtml(err.message || String(err), code);
+  }
+}
+
+function _downloadSvg(svgEl, partId) {
+  const serializer = new XMLSerializer();
+  let svgStr = serializer.serializeToString(svgEl);
+  // Ensure proper XML namespace
+  if (!svgStr.includes('xmlns=')) {
+    svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `esquema-parte-${partId}.svg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function generateEsquema(partId) {
+  const contentEl = document.getElementById('content-esquema');
+  if (!contentEl) return;
+
+  const btn = contentEl.querySelector('.btn-generate-esquema');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Generando…';
+  }
+
+  const projectId = state.currentProjectId;
+  try {
+    const result = await api(`/api/projects/${projectId}/parts/${partId}/mermaid`, {
+      method: 'POST',
+    });
+
+    // Update local state cache
+    if (state.currentProject?.partes_contenido?.[String(partId)]) {
+      state.currentProject.partes_contenido[String(partId)].mermaid = result.mermaid;
+    }
+
+    const contenido = state.currentProject?.partes_contenido?.[String(partId)];
+    renderTab('esquema', contenido);
+  } catch (err) {
+    // Show error with retry option
+    if (state.currentProject?.partes_contenido?.[String(partId)]) {
+      state.currentProject.partes_contenido[String(partId)].mermaid = { error: err.message };
+    }
+    const contenido = state.currentProject?.partes_contenido?.[String(partId)];
+    renderTab('esquema', contenido);
+    toast('Error al generar el esquema: ' + err.message, 'error');
   }
 }

@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText, refreshGhostRailReadState } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText, refreshGhostRailReadState, generateEsquema } from './projectView.js';
 import { initPWA } from './pwa.js';
 import { initProgressSyncLifecycle, recordSubsectionProgress, flushSubsectionProgress } from './progressSync.js';
 
@@ -691,6 +691,15 @@ function bootstrap() {
   if (reformatBtn) {
     reformatBtn.addEventListener('click', () => handleReformat());
   }
+
+  // Delegated handler for dynamically-rendered Esquema Visual buttons
+  document.addEventListener('click', (e) => {
+    const genBtn = e.target.closest('.btn-generate-esquema');
+    if (genBtn && !genBtn.disabled) {
+      const partId = parseInt(genBtn.dataset.partId, 10);
+      if (!isNaN(partId)) generateEsquema(partId);
+    }
+  });
 
   // When network is restored, re-evaluate the reformat banner (it's hidden while offline).
   window.addEventListener('explainer:online', () => {

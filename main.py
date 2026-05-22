@@ -58,6 +58,7 @@ from backend.gemini_model_routing import (
     MODEL_AGENTS,
     MODEL_CLASSIFIER,
     MODEL_EXPLAINER,
+    MODEL_MERMAID,
     MODEL_SEGMENTADOR,
 )
 
@@ -92,6 +93,7 @@ from backend.agents.completeness_validator import (
 )
 from backend.agents.recorrido import run_recorrido
 from backend.agents.resources import run_resources
+from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
@@ -3318,6 +3320,83 @@ async def api_process_project(
         "explainer_provider": explainer_provider,
         "explainer_model": explainer_model,
     }
+
+
+@app.post("/api/projects/{project_id}/parts/{part_id}/mermaid")
+async def api_generate_mermaid(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    part_id: str,
+) -> dict:
+    """Generate (or return cached) Mermaid diagram for a completed part."""
+    project = get_project(project_id, user_id, include_internal=True)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    if project["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail="El proyecto debe estar completado para generar el esquema.",
+        )
+
+    partes_contenido: dict = dict(project.get("partes_contenido") or {})
+    part_data = partes_contenido.get(part_id)
+    if not part_data:
+        raise HTTPException(status_code=404, detail=f"Parte {part_id} no encontrada")
+
+    explainer = part_data.get("explainer")
+    if not explainer or isinstance(explainer, dict) and explainer.get("error"):
+        raise HTTPException(
+            status_code=400,
+            detail="La explicación de esta parte no está disponible o tiene errores.",
+        )
+
+    # Cache hit — return immediately without calling the API
+    cached = part_data.get("mermaid")
+    if cached and isinstance(cached, dict) and not cached.get("error"):
+        return {"ok": True, "mermaid": cached, "cached": True}
+
+    api_key = get_user_api_key(user_id)
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay API key de Gemini configurada. Configúrala en Ajustes.",
+        )
+
+    explanation_text = assemble_explanation_text(explainer)
+
+    try:
+        result_dict, usage_meta = await asyncio.to_thread(
+            generate_mermaid, api_key, explanation_text, MODEL_MERMAID
+        )
+    except Exception as exc:
+        err_str = str(exc)
+        logger.error(
+            f"[Mermaid] Error generando diagrama para parte {part_id}: {err_str[:300]}",
+            extra={"project_id": project_id, "part_id": part_id},
+        )
+        partes_contenido[part_id] = {**part_data, "mermaid": {"error": err_str}}
+        update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+        raise HTTPException(status_code=500, detail=f"Error generando el esquema: {err_str[:200]}")
+
+    partes_contenido[part_id] = {**part_data, "mermaid": result_dict}
+    update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+
+    if usage_meta:
+        project_usage: dict = dict(project.get("usage") or {})
+        mermaid_tokens = (
+            getattr(usage_meta, "prompt_token_count", 0)
+            + getattr(usage_meta, "candidates_token_count", 0)
+            + getattr(usage_meta, "thoughts_token_count", 0)
+        )
+        project_usage["mermaid_tokens"] = project_usage.get("mermaid_tokens", 0) + mermaid_tokens
+        update_project(project_id, user_id, {"usage": project_usage})
+
+    logger.info(
+        f"[Mermaid] Diagrama generado para proyecto {project_id} parte {part_id}",
+        extra={"project_id": project_id, "part_id": part_id},
+    )
+    return {"ok": True, "mermaid": result_dict, "cached": False}
 
 
 @app.get("/api/projects/{project_id}/events")
