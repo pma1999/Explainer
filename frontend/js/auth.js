@@ -303,7 +303,12 @@ function syncRememberSessionInputs(remember = false) {
   if (registerCheckbox) registerCheckbox.checked = nextValue;
 }
 
+let _authInitialized = false;
+
 export function initAuth(onNavigateFromRoute, onInitLanding) {
+  if (_authInitialized) return;
+  _authInitialized = true;
+
   const formLogin = $('form-login');
   const formRegister = $('form-register');
   const loginError = $('auth-login-error');

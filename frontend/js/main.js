@@ -272,7 +272,15 @@ async function initApp() {
     return;
   }
 
-  const { data: { session } } = await supabaseClient.auth.getSession();
+  const { data: { session: rawSession } } = await supabaseClient.auth.getSession();
+  let session = rawSession;
+  if (rawSession?.expires_at) {
+    const nowSecs = Math.floor(Date.now() / 1000);
+    if (rawSession.expires_at < nowSecs + 60) {
+      const { data: refreshData } = await supabaseClient.auth.refreshSession();
+      session = refreshData?.session ?? null;
+    }
+  }
   state.session = session;
   state.user = session?.user ?? null;
 
@@ -324,9 +332,10 @@ async function initApp() {
     }
   });
 
+  initAuth(navigateFromRoute, initLanding);
+
   if (!state.session) {
     showView('view-auth');
-    initAuth(navigateFromRoute, initLanding);
     return;
   }
 
