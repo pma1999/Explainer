@@ -1654,33 +1654,16 @@ async function _downloadPng(svgEl, partId, btn) {
       img.src = dataUrl;
     });
 
-    // 10. Save: prefer Web Share API on mobile (matches the pattern in export.js); fall back to anchor download.
-    const filename = `esquema-parte-${partId}.png`;
-    const file = new File([pngBlob], filename, { type: 'image/png' });
-    let saved = false;
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: 'Esquema visual' });
-        saved = true;
-      } catch (shareErr) {
-        if (shareErr?.name === 'AbortError') {
-          saved = true; // user cancelled — don't fall back
-        } else {
-          console.warn('Web Share falló, usando descarga directa.', shareErr);
-        }
-      }
-    }
-    if (!saved) {
-      const pngUrl = URL.createObjectURL(pngBlob);
-      const a = document.createElement('a');
-      a.href = pngUrl;
-      a.download = filename;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(pngUrl), 4000); // delay revoke so the download has time to flush
-    }
+    // 10. Direct download via anchor — same path as _downloadSvg, which the user confirmed works on mobile.
+    const pngUrl = URL.createObjectURL(pngBlob);
+    const a = document.createElement('a');
+    a.href = pngUrl;
+    a.download = `esquema-parte-${partId}.png`;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(pngUrl), 4000); // delay revoke so the download has time to flush on mobile
   } catch (err) {
     console.error('Descarga PNG falló:', err);
     toast('No se pudo descargar el PNG: ' + (err?.message || err), 'error');
