@@ -5005,7 +5005,8 @@ body.is-offline .project-card[data-pinned="true"] {
   margin-bottom: 1.75rem;
 }
 
-.btn-download-svg {
+.btn-download-svg,
+.btn-download-png {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -5021,12 +5022,14 @@ body.is-offline .project-card[data-pinned="true"] {
   line-height: 1;
 }
 
-.btn-download-svg:hover {
+.btn-download-svg:hover,
+.btn-download-png:hover {
   background: var(--gold, #c9a84c);
   color: #000;
 }
 
-.btn-download-svg svg {
+.btn-download-svg svg,
+.btn-download-png svg {
   flex-shrink: 0;
 }
 

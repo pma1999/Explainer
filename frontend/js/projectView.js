@@ -1455,6 +1455,12 @@ function _renderEsquemaShell(data) {
           </svg>
           Descargar SVG
         </button>
+        <button class="btn-download-png" title="Descargar como PNG">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+            <path d="M10 3v10M6 9l4 4 4-4M4 15h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Descargar PNG
+        </button>
       </div>
       ${guideHtml}
       ${synthesisHtml}
@@ -1499,10 +1505,14 @@ async function _renderMermaidDiagram(code, partId, containerEl) {
       svgEl.style.maxWidth = '100%';
       svgEl.style.display = 'block';
     }
-    // Wire download button (now that SVG is in the DOM)
+    // Wire download buttons (now that SVG is in the DOM)
     const dlBtn = containerEl.querySelector('.btn-download-svg');
     if (dlBtn && svgEl) {
       dlBtn.addEventListener('click', () => _downloadSvg(svgEl, partId));
+    }
+    const pngBtn = containerEl.querySelector('.btn-download-png');
+    if (pngBtn && svgEl) {
+      pngBtn.addEventListener('click', () => _downloadPng(svgEl, partId, pngBtn));
     }
   } catch (err) {
     target.innerHTML = _renderMermaidErrorHtml(err.message || String(err), code);
@@ -1525,6 +1535,71 @@ function _downloadSvg(svgEl, partId) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+async function _downloadPng(svgEl, partId, btn) {
+  const originalHtml = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+  try {
+    // Use viewBox for natural dimensions (Mermaid always sets this; DOM width is "100%")
+    const vb = svgEl.viewBox?.baseVal;
+    const rect = svgEl.getBoundingClientRect();
+    const naturalW = (vb && vb.width > 0) ? vb.width : rect.width;
+    const naturalH = (vb && vb.height > 0) ? vb.height : rect.height;
+    if (!naturalW || !naturalH) return;
+
+    const serializer = new XMLSerializer();
+    let svgStr = serializer.serializeToString(svgEl);
+    if (!svgStr.includes('xmlns=')) {
+      svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    // Restore explicit pixel dimensions so the canvas renders at the right size
+    svgStr = svgStr.replace(/(<svg[^>]*)\swidth="[^"]*"/, `$1 width="${naturalW}"`);
+    if (/\sheight="/.test(svgStr)) {
+      svgStr = svgStr.replace(/(<svg[^>]*)\sheight="[^"]*"/, `$1 height="${naturalH}"`);
+    } else {
+      svgStr = svgStr.replace('<svg', `<svg height="${naturalH}"`);
+    }
+
+    // 3× scale: ~2400px wide for a typical diagram — excellent quality on all screens
+    const SCALE = 3;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(naturalW * SCALE);
+    canvas.height = Math.round(naturalH * SCALE);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#141414'; // matches .esquema-diagram-wrap background
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(SCALE, SCALE);
+
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const svgUrl = URL.createObjectURL(svgBlob);
+
+    await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, naturalW, naturalH);
+        URL.revokeObjectURL(svgUrl);
+        canvas.toBlob((pngBlob) => {
+          const pngUrl = URL.createObjectURL(pngBlob);
+          const a = document.createElement('a');
+          a.href = pngUrl;
+          a.download = `esquema-parte-${partId}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(pngUrl);
+          resolve();
+        }, 'image/png');
+      };
+      img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
+      img.src = svgUrl;
+    });
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
 }
 
 export async function generateEsquema(partId) {
