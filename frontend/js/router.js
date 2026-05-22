@@ -4,7 +4,7 @@
    Shared: #/s/{token} | #/s/{token}/s/{partId}/t/{tab}[/u/{subsectionId}]
    ============================================================ */
 
-export const VALID_TABS = ['explicacion', 'recorrido', 'recursos'];
+export const VALID_TABS = ['explicacion', 'recorrido', 'recursos', 'esquema'];
 
 /**
  * Parse the current location hash into a route object.
