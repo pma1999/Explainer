@@ -1540,64 +1540,154 @@ function _downloadSvg(svgEl, partId) {
 async function _downloadPng(svgEl, partId, btn) {
   const originalHtml = btn ? btn.innerHTML : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+
   try {
-    // Use viewBox for natural dimensions (Mermaid always sets this; DOM width is "100%")
-    const vb = svgEl.viewBox?.baseVal;
-    const rect = svgEl.getBoundingClientRect();
-    const naturalW = (vb && vb.width > 0) ? vb.width : rect.width;
-    const naturalH = (vb && vb.height > 0) ? vb.height : rect.height;
-    if (!naturalW || !naturalH) return;
-
-    const serializer = new XMLSerializer();
-    let svgStr = serializer.serializeToString(svgEl);
-    if (!svgStr.includes('xmlns=')) {
-      svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    // 1. Re-render Mermaid with htmlLabels:false so the SVG has no <foreignObject>.
+    //    foreignObject is the main reason canvas rasterization fails or taints on mobile
+    //    (Chrome Android: canvas.toBlob returns null; iOS Safari: blank labels).
+    let svgString = null;
+    const mermaidData = state.currentProject?.partes_contenido?.[String(partId)]?.mermaid;
+    const sourceCode = mermaidData?.mermaid_code;
+    if (sourceCode && window.mermaid) {
+      try {
+        const directive = '%%{init: {"flowchart":{"htmlLabels":false,"useMaxWidth":false}} }%%\n';
+        const codeWithCfg = sourceCode.trimStart().startsWith('%%{')
+          ? sourceCode
+          : directive + sourceCode;
+        const tmpId = `mermaid-png-${Date.now()}-${++_mermaidRenderSeq}`;
+        const result = await window.mermaid.render(tmpId, codeWithCfg);
+        svgString = result.svg;
+      } catch (rerenderErr) {
+        console.warn('Re-render para PNG falló; usando SVG en pantalla.', rerenderErr);
+      }
     }
-    // Restore explicit pixel dimensions so the canvas renders at the right size
-    svgStr = svgStr.replace(/(<svg[^>]*)\swidth="[^"]*"/, `$1 width="${naturalW}"`);
-    if (/\sheight="/.test(svgStr)) {
-      svgStr = svgStr.replace(/(<svg[^>]*)\sheight="[^"]*"/, `$1 height="${naturalH}"`);
-    } else {
-      svgStr = svgStr.replace('<svg', `<svg height="${naturalH}"`);
+
+    // 2. Fallback: serialize the live DOM SVG.
+    if (!svgString) {
+      const serializer = new XMLSerializer();
+      svgString = serializer.serializeToString(svgEl);
     }
 
-    // 3× scale: ~2400px wide for a typical diagram — excellent quality on all screens
-    const SCALE = 3;
+    // 3. Ensure xmlns (required to load as a standalone <img> source).
+    if (!/<svg[^>]+xmlns=/.test(svgString)) {
+      svgString = svgString.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+
+    // 4. Determine natural pixel dimensions from viewBox (Mermaid always sets this).
+    let naturalW = 0, naturalH = 0;
+    const vbMatch = svgString.match(/viewBox=["']([^"']+)["']/);
+    if (vbMatch) {
+      const parts = vbMatch[1].split(/[\s,]+/).map(parseFloat);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        naturalW = parts[2];
+        naturalH = parts[3];
+      }
+    }
+    if (!naturalW || !naturalH) {
+      const rect = svgEl.getBoundingClientRect();
+      naturalW = rect.width || 1200;
+      naturalH = rect.height || 800;
+    }
+
+    // 5. Force explicit pixel width/height on the SVG root — otherwise <img> renders it at 100×100.
+    svgString = svgString.replace(/(<svg[^>]*?)\swidth=["'][^"']*["']/, '$1');
+    svgString = svgString.replace(/(<svg[^>]*?)\sheight=["'][^"']*["']/, '$1');
+    svgString = svgString.replace('<svg', `<svg width="${naturalW}" height="${naturalH}"`);
+
+    // 6. Base64 data URL — universally compatible across mobile browsers,
+    //    UTF-8 safe (Spanish accents in labels), chunked to avoid call-stack overflow on big SVGs.
+    const utf8 = new TextEncoder().encode(svgString);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < utf8.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, utf8.subarray(i, i + chunkSize));
+    }
+    const dataUrl = `data:image/svg+xml;base64,${btoa(binary)}`;
+
+    // 7. Compute scale, clamped to a safe canvas size for mobile memory.
+    const MAX_CANVAS_PIXELS = 16777216; // 4096×4096 ≈ 64 MB canvas
+    let scale = 3;
+    if (naturalW * naturalH * scale * scale > MAX_CANVAS_PIXELS) {
+      scale = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / (naturalW * naturalH)));
+    }
+
+    // 8. Canvas with background matching .esquema-diagram-wrap (#141414).
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(naturalW * SCALE);
-    canvas.height = Math.round(naturalH * SCALE);
+    canvas.width = Math.round(naturalW * scale);
+    canvas.height = Math.round(naturalH * scale);
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#141414'; // matches .esquema-diagram-wrap background
+    ctx.fillStyle = '#141414';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(SCALE, SCALE);
 
-    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-    const svgUrl = URL.createObjectURL(svgBlob);
+    // 9. Render image → canvas → PNG blob, with a hard timeout and explicit null-blob handling
+    //    (the previous version hung forever when toBlob returned null on tainted canvases).
+    const TIMEOUT_MS = 25000;
+    const pngBlob = await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (fn) => { if (settled) return; settled = true; clearTimeout(toId); fn(); };
+      const toId = setTimeout(
+        () => finish(() => reject(new Error('Tiempo de espera agotado al renderizar el diagrama.'))),
+        TIMEOUT_MS
+      );
 
-    await new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
-        ctx.drawImage(img, 0, 0, naturalW, naturalH);
-        URL.revokeObjectURL(svgUrl);
-        canvas.toBlob((pngBlob) => {
-          const pngUrl = URL.createObjectURL(pngBlob);
-          const a = document.createElement('a');
-          a.href = pngUrl;
-          a.download = `esquema-parte-${partId}.png`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(pngUrl);
-          resolve();
-        }, 'image/png');
+        try {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        } catch (drawErr) {
+          finish(() => reject(drawErr));
+          return;
+        }
+        try {
+          canvas.toBlob((b) => {
+            if (!b) {
+              finish(() => reject(new Error('No se pudo serializar el lienzo (toBlob devolvió null).')));
+              return;
+            }
+            finish(() => resolve(b));
+          }, 'image/png');
+        } catch (blobErr) {
+          finish(() => reject(blobErr));
+        }
       };
-      img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(); };
-      img.src = svgUrl;
+      img.onerror = () => finish(() => reject(new Error('No se pudo cargar el SVG como imagen.')));
+      img.src = dataUrl;
     });
+
+    // 10. Save: prefer Web Share API on mobile (matches the pattern in export.js); fall back to anchor download.
+    const filename = `esquema-parte-${partId}.png`;
+    const file = new File([pngBlob], filename, { type: 'image/png' });
+    let saved = false;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Esquema visual' });
+        saved = true;
+      } catch (shareErr) {
+        if (shareErr?.name === 'AbortError') {
+          saved = true; // user cancelled — don't fall back
+        } else {
+          console.warn('Web Share falló, usando descarga directa.', shareErr);
+        }
+      }
+    }
+    if (!saved) {
+      const pngUrl = URL.createObjectURL(pngBlob);
+      const a = document.createElement('a');
+      a.href = pngUrl;
+      a.download = filename;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(pngUrl), 4000); // delay revoke so the download has time to flush
+    }
+  } catch (err) {
+    console.error('Descarga PNG falló:', err);
+    toast('No se pudo descargar el PNG: ' + (err?.message || err), 'error');
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = originalHtml;
+      if (originalHtml !== null) btn.innerHTML = originalHtml;
     }
   }
 }
