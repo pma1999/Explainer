@@ -269,7 +269,7 @@ OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
 
 <openrouter_source_contract>
 La fuente se entrega como texto inline completo ya delimitado para esta parte.
-Si procede de PDF, conserva separadores `--- PAGINA X ---`; usa esas marcas para ubicar citas.
+Si procede de PDF, conserva etiquetas XML `<pagina_N>...</pagina_N>`; usa esas marcas para ubicar citas.
 No recortes el contenido por longitud de contexto.
 </openrouter_source_contract>
 

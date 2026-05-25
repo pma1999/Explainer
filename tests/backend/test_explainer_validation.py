@@ -141,10 +141,12 @@ def test_check_explainer_validation_includes_reused_ocr_source_evidence(monkeypa
             kind="ocr_text",
             label="OCR Mistral reutilizado",
             text=(
-                "--- PAGINA 16 ---\n"
+                "<pagina_16>\n"
                 "El Edicto de Caracalla aparece dentro del nucleo permitido.\n\n"
-                "--- PAGINA 17 ---\n"
-                "Rutilio Claudio Namaciano aparece dentro del nucleo permitido."
+                "</pagina_16>\n\n"
+                "<pagina_17>\n"
+                "Rutilio Claudio Namaciano aparece dentro del nucleo permitido.\n"
+                "</pagina_17>"
             ),
             pages=(16, 17),
         )
@@ -162,6 +164,57 @@ def test_check_explainer_validation_includes_reused_ocr_source_evidence(monkeypa
     assert "El Edicto de Caracalla aparece dentro del nucleo permitido" in user_text
     system_text = captured["config"].system_instruction[0].text
     assert "La fuente real permitida manda" in system_text
+
+
+def test_check_explainer_validation_or_uses_openrouter_json_contract(monkeypatch):
+    captured: dict = {}
+
+    def _fake_call_openrouter_chat(**kwargs):
+        captured.update(kwargs)
+        return (
+            {
+                "is_complete": True,
+                "scope_status": "ok",
+                "reason": "Completa y dentro del alcance.",
+                "offending_fragments": [],
+                "retry_instructions": "",
+            },
+            _usage(),
+        )
+
+    monkeypatch.setattr(module, "call_openrouter_chat", _fake_call_openrouter_chat)
+
+    context = _with_source_evidence(
+        module.ExplainerSourceEvidence(
+            kind="ocr_text",
+            label="OCR Mistral reutilizado",
+            text=(
+                "<pagina_16>\n"
+                "El Edicto de Caracalla aparece dentro del nucleo permitido.\n"
+                "</pagina_16>"
+            ),
+            pages=(16,),
+        )
+    )
+
+    report, usage = module.check_explainer_validation_or(
+        _explanation("Desarrolla el Edicto de Caracalla dentro del alcance."),
+        openrouter_api_key="sk-or-v1-test",
+        validation_context=context,
+    )
+
+    assert report.is_valid is True
+    assert usage.total_token_count == 18
+    assert captured["model"] == module.OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
+    assert captured["model"] == "deepseek/deepseek-v4-flash"
+    assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["response_format"] == "json_object"
+    assert captured["enable_response_healing"] is True
+    assert "is_complete" in captured["json_retry_instruction"]
+    assert "scope_status" in captured["json_retry_instruction"]
+    assert "offending_fragments" in captured["json_retry_instruction"]
+    assert "<pagina_16>" in captured["messages"][0]["content"]
+    assert "EXPLICACION GENERADA A VALIDAR" in captured["messages"][0]["content"]
 
 
 def test_check_explainer_validation_attaches_gemini_file_source_evidence(monkeypatch):
@@ -295,6 +348,50 @@ def test_run_with_explainer_validation_retries_violation_then_accepts(monkeypatc
     assert usage.total_token_count == 18
     assert len(validator_usages) == 2
     assert retry_reports[0].reason == "Invade Consejos."
+
+
+def test_run_with_openrouter_explainer_validation_uses_openrouter_checker(monkeypatch):
+    reports = [
+        module.ExplainerValidationReport(
+            is_complete=False,
+            scope_status="ok",
+            reason="Termina abruptamente.",
+            offending_fragments=("La burocracia y",),
+            retry_instructions="Cerrar la frase final.",
+        ),
+        module.ExplainerValidationReport(
+            is_complete=True,
+            scope_status="ok",
+            reason="Corregida.",
+            offending_fragments=(),
+            retry_instructions="",
+        ),
+    ]
+    seen: list[tuple[str, module.ExplainerValidationContext | None]] = []
+
+    def _fake_check(explanation, openrouter_api_key, validation_context=None):
+        seen.append((openrouter_api_key, validation_context))
+        return reports.pop(0), _usage()
+
+    def _retry(previous_result, report):
+        assert report.reason == "Termina abruptamente."
+        return _explanation("Ahora cierra correctamente."), _usage()
+
+    monkeypatch.setattr(module, "check_explainer_validation_or", _fake_check)
+
+    result, usage, validator_usages = module.run_with_openrouter_explainer_validation(
+        initial_call=lambda: (_explanation("La burocracia y"), _usage()),
+        retry_call=_retry,
+        openrouter_api_key="sk-or-v1-test",
+        label="test-openrouter",
+        validation_context=_scope_context(),
+    )
+
+    assert result["desarrollo"][0]["subsecciones"][0]["explicacion_detallada"] == "Ahora cierra correctamente."
+    assert usage.total_token_count == 18
+    assert len(validator_usages) == 2
+    assert [api_key for api_key, _ in seen] == ["sk-or-v1-test", "sk-or-v1-test"]
+    assert all(ctx is not None for _, ctx in seen)
 
 
 def test_run_with_explainer_validation_raises_after_persistent_confirmed_failure(monkeypatch):

@@ -34,7 +34,7 @@ def test_run_resources_or_uses_deepseek_provider_and_web_search_auto(monkeypatch
 
     result, usage = resources.run_resources_or(
         api_key="sk-or-v1-test",
-        source_text="--- PAGINA 1 ---\nContenido base",
+        source_text="<pagina_1>\nContenido base\n</pagina_1>",
         identificacion="Parte 1",
     )
 
@@ -92,7 +92,7 @@ def test_run_recorrido_or_uses_deepseek_provider(monkeypatch):
 
     result, usage = recorrido.run_recorrido_or(
         api_key="sk-or-v1-test",
-        source_text="--- PAGINA 1 ---\nContenido base",
+        source_text="<pagina_1>\nContenido base\n</pagina_1>",
         identificacion="Parte 1",
     )
 
@@ -103,6 +103,8 @@ def test_run_recorrido_or_uses_deepseek_provider(monkeypatch):
     assert "recorrido_anotado" in captured["json_retry_instruction"]
     assert "sintesis_de_cobertura" in captured["json_retry_instruction"]
     assert "openrouter:web_search" not in str(captured.get("tools"))
+    assert "<pagina_1>" in captured["messages"][0]["content"]
+    assert "<pagina_N>" in captured["system_prompt"]
 
 
 def test_run_segmentador_or_uses_deepseek_provider(monkeypatch):
@@ -140,7 +142,7 @@ def test_run_segmentador_or_uses_deepseek_provider(monkeypatch):
 
     result, usage = segmentador.run_segmentador_or(
         api_key="sk-or-v1-test",
-        source_text="--- PAGINA 1 ---\nContenido base",
+        source_text="<pagina_1>\nContenido base\n</pagina_1>",
         description="Procesar todo",
         source_kind="pdf",
     )
@@ -153,6 +155,8 @@ def test_run_segmentador_or_uses_deepseek_provider(monkeypatch):
     assert '"partes"' in captured["json_retry_instruction"]
     assert '"pagina_inicio"' in captured["json_retry_instruction"]
     assert "Devuelve exactamente el objeto JSON" in captured["messages"][0]["content"]
+    assert "<pagina_1>" in captured["messages"][0]["content"]
+    assert "<pagina_N>" in captured["system_prompt"]
 
 
 def test_run_page_classifier_or_returns_content_pages(monkeypatch):
@@ -175,7 +179,7 @@ def test_run_page_classifier_or_returns_content_pages(monkeypatch):
 
     pages, usage, raw = page_classifier.run_page_classifier_or(
         api_key="sk-or-v1-test",
-        source_text="--- PAGINA 1 ---\nPortada\n--- PAGINA 2 ---\nContenido",
+        source_text="<pagina_1>\nPortada\n</pagina_1>\n<pagina_2>\nContenido\n</pagina_2>",
         total_pages=4,
     )
 
@@ -186,3 +190,5 @@ def test_run_page_classifier_or_returns_content_pages(monkeypatch):
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
     assert "total_paginas" in captured["json_retry_instruction"]
     assert "rangos_contenido" in captured["json_retry_instruction"]
+    assert "<pagina_1>" in captured["messages"][0]["content"]
+    assert "<pagina_N>" in captured["system_prompt"]

@@ -683,7 +683,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             model,
             mime_type,
             api_key,
-            gemini_api_key="",
+            validator_api_key="",
             cache_entry=None,
             page_numbers=(),
             validation_context=None,
@@ -692,6 +692,8 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
                 "source_path": source_path,
                 "model": model,
                 "mime_type": mime_type,
+                "api_key": api_key,
+                "validator_api_key": validator_api_key,
                 "page_numbers": tuple(page_numbers),
                 "validation_context": validation_context,
             })
@@ -750,12 +752,14 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         assert resources_or_calls
         assert classifier_or_calls[0]["api_key"] == "sk-or-v1-test"
         assert segmentador_or_calls[0]["source_kind"] == "pdf"
-        assert "--- PAGINA 1 ---" in classifier_or_calls[0]["source_text"]
-        assert "--- PAGINA 4 ---" in segmentador_or_calls[0]["source_text"]
+        assert "<pagina_1>" in classifier_or_calls[0]["source_text"]
+        assert "<pagina_4>" in segmentador_or_calls[0]["source_text"]
         assert "Page 1" in recorrido_or_calls[0]["source_text"]
         assert "Page 1" in resources_or_calls[0]["source_text"]
         assert openrouter_calls
         assert all(call["model"] == main.OPENROUTER_EXPLAINER_MODEL for call in openrouter_calls)
+        assert all(call["api_key"] == "sk-or-v1-test" for call in openrouter_calls)
+        assert all(call["validator_api_key"] == "sk-or-v1-test" for call in openrouter_calls)
         assert all(call["page_numbers"] == (1, 2, 3, 4) for call in openrouter_calls)
         assert all(call["validation_context"] is not None for call in openrouter_calls)
         assert {call["validation_context"].scope_kind for call in openrouter_calls} == {"part"}
@@ -765,6 +769,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         usage_updates = [payload["usage"] for payload in updates if "usage" in payload]
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
+        assert usage_updates[0]["validator_model"] == main.OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
         assert usage_updates[0]["openrouter_pdf_priming_model"] == main.OPENROUTER_PDF_PRIMING_MODEL
     finally:
         if os.path.isfile(pdf_path):

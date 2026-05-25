@@ -15,6 +15,7 @@ from backend.pdf_ocr_cache import (
     page_index_from_serialized,
     render_pdf_page_subset_to_validation_text,
     render_pdf_page_subset_to_text,
+    render_pdf_pages_with_xml_tags,
     serialize_page_index,
     write_pdf_ocr_cache,
     write_unresolved_pdf_ocr_artifact,
@@ -246,7 +247,7 @@ def test_render_pdf_page_subset_to_text_requires_complete_page_coverage():
         render_pdf_page_subset_to_text(cache_entry=entry, page_numbers=(1, 3))
 
 
-def test_render_pdf_page_subset_to_validation_text_preserves_page_labels():
+def test_render_pdf_page_subset_to_validation_text_uses_xml_page_tags():
     entry = PdfOcrCacheEntry(
         source_sha256="sha",
         engine="mistral-native",
@@ -262,10 +263,85 @@ def test_render_pdf_page_subset_to_validation_text_preserves_page_labels():
 
     rendered = render_pdf_page_subset_to_validation_text(cache_entry=entry, page_numbers=(16, 17))
 
-    assert "--- PAGINA 16 ---" in rendered
+    assert "<pagina_16>" in rendered
+    assert "</pagina_16>" in rendered
     assert "El Edicto de Caracalla" in rendered
-    assert "--- PAGINA 17 ---" in rendered
+    assert "<pagina_17>" in rendered
+    assert "</pagina_17>" in rendered
     assert "Rutilio Claudio Namaciano" in rendered
+    assert "--- PAGINA" not in rendered
+
+
+def test_render_pdf_pages_with_xml_tags_wraps_each_page():
+    entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(3, 4),
+        cached_page_numbers=(3, 4),
+        page_index=(
+            _page(3, "Contenido de la pagina tres."),
+            _page(4, "Contenido de la pagina cuatro."),
+        ),
+    )
+
+    rendered = render_pdf_pages_with_xml_tags(cache_entry=entry, page_numbers=(3, 4))
+
+    assert rendered.startswith("<pagina_3>")
+    assert "</pagina_3>" in rendered
+    assert "<pagina_4>" in rendered
+    assert rendered.rstrip().endswith("</pagina_4>")
+    assert "Contenido de la pagina tres." in rendered
+    assert "Contenido de la pagina cuatro." in rendered
+
+
+def test_render_pdf_pages_with_xml_tags_strips_watermarks():
+    entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(5,),
+        cached_page_numbers=(5,),
+        page_index=(_page(5, "— Página 5 / 20 —\nTexto real.", footer="— Página 5 / 20 —"),),
+    )
+
+    rendered = render_pdf_pages_with_xml_tags(cache_entry=entry, page_numbers=(5,))
+
+    assert "<pagina_5>" in rendered
+    assert "Texto real." in rendered
+    assert "— Página 5 / 20 —" not in rendered
+
+
+def test_render_pdf_pages_with_xml_tags_raises_when_no_text():
+    entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(1,),
+        cached_page_numbers=(1,),
+        page_index=(_page(1, "— Página 1 / 5 —", footer="— Página 1 / 5 —"),),
+    )
+
+    with pytest.raises(PdfOcrError, match="no produjo texto reutilizable"):
+        render_pdf_pages_with_xml_tags(cache_entry=entry, page_numbers=(1,))
+
+
+def test_render_pdf_pages_with_xml_tags_raises_on_missing_page():
+    entry = PdfOcrCacheEntry(
+        source_sha256="sha",
+        engine="mistral-native",
+        cache_path="cache.json",
+        cache_hit=True,
+        expected_page_numbers=(2,),
+        cached_page_numbers=(2,),
+        page_index=(_page(2, "Texto dos."),),
+    )
+
+    with pytest.raises(PdfOcrError, match="páginas ausentes"):
+        render_pdf_pages_with_xml_tags(cache_entry=entry, page_numbers=(2, 9))
 
 
 def test_write_unresolved_pdf_ocr_artifact_records_missing_pages(tmp_path):

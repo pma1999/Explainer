@@ -86,6 +86,7 @@ from backend.agents.explainer_openrouter import (
 )
 from backend.agents.completeness_validator import (
     COMPLETENESS_VALIDATOR_MODEL,
+    OPENROUTER_COMPLETENESS_VALIDATOR_MODEL,
     ExplainerScopeItem,
     ExplainerSourceEvidence,
     ExplainerValidationContext,
@@ -106,7 +107,7 @@ from backend.mistral_ocr_client import (
 from backend.pdf_ocr_cache import (
     PdfOcrCacheEntry,
     PdfOcrError,
-    render_pdf_page_subset_to_text,
+    render_pdf_pages_with_xml_tags,
     render_pdf_page_subset_to_validation_text,
 )
 from backend.pdf_utils import add_page_numbers, extract_page_range
@@ -717,19 +718,11 @@ def _render_mistral_ocr_pages_for_agents(
     cache_entry: PdfOcrCacheEntry,
     page_numbers: tuple[int, ...] | list[int],
 ) -> str:
-    """Render cached OCR pages with explicit page boundaries for OpenRouter agents."""
+    """Render cached OCR pages with XML page boundary tags for OpenRouter agents."""
     pages = tuple(int(page) for page in page_numbers)
     if not pages:
         raise PdfOcrError("No se proporcionaron páginas OCR para el agente OpenRouter.")
-
-    chunks: list[str] = []
-    for page_number in pages:
-        page_text = render_pdf_page_subset_to_text(
-            cache_entry=cache_entry,
-            page_numbers=(page_number,),
-        )
-        chunks.append(f"--- PAGINA {page_number} ---\n{page_text}")
-    return "\n\n".join(chunks).strip()
+    return render_pdf_pages_with_xml_tags(cache_entry=cache_entry, page_numbers=pages)
 
 
 def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
@@ -1820,6 +1813,11 @@ async def _process_project(
     classifier_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_CLASSIFIER
     segmentation_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_SEGMENTADOR
     auxiliary_agents_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_AGENTS
+    validator_model = (
+        OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
+        if use_openrouter_explainer
+        else COMPLETENESS_VALIDATOR_MODEL
+    )
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -1855,6 +1853,7 @@ async def _process_project(
             classifier_model = MODEL_CLASSIFIER
             segmentation_model = MODEL_SEGMENTADOR
             auxiliary_agents_model = MODEL_AGENTS
+            validator_model = COMPLETENESS_VALIDATOR_MODEL
 
         # Get user's API keys (BYOK) from Supabase
         api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
@@ -1903,10 +1902,11 @@ async def _process_project(
         from google import genai
         client = genai.Client(api_key=api_key)
         logger.info(
-            "[Process] Enrutamiento de modelos: classifier=%s, segmentador=%s, agents=%s, explainer_provider=%s, explainer_model=%s",
+            "[Process] Enrutamiento de modelos: classifier=%s, segmentador=%s, agents=%s, validator=%s, explainer_provider=%s, explainer_model=%s",
             classifier_model,
             segmentation_model,
             auxiliary_agents_model,
+            validator_model,
             explainer_provider,
             explainer_model,
         )
@@ -1915,6 +1915,7 @@ async def _process_project(
             "classifier_model": classifier_model,
             "segmentation_model": segmentation_model,
             "agents_model": auxiliary_agents_model,
+            "validator_model": validator_model,
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
             "prompt_tokens": 0,
@@ -2830,7 +2831,7 @@ async def _process_project(
                                     explainer_model,
                                     "application/pdf",
                                     openrouter_api_key,
-                                    api_key,  # gemini_api_key para el validador
+                                    openrouter_api_key,
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
                                     validation_context=validation_context,
@@ -2843,7 +2844,7 @@ async def _process_project(
                                 explainer_model,
                                 agent_mime_type,
                                 openrouter_api_key,
-                                api_key,  # gemini_api_key para el validador
+                                openrouter_api_key,
                                 validation_context=validation_context,
                             )
                         return asyncio.to_thread(
@@ -2879,7 +2880,7 @@ async def _process_project(
                                 explainer_model,
                                 "application/pdf",
                                 openrouter_api_key,
-                                api_key,  # gemini_api_key para el validador
+                                openrouter_api_key,
                                 mistral_pdf_context.cache_entry,
                                 page_scope,
                                 validation_context=subpart_validation_contexts[idx],
@@ -2896,7 +2897,7 @@ async def _process_project(
                                 explainer_model,
                                 agent_mime_type,
                                 openrouter_api_key,
-                                api_key,  # gemini_api_key para el validador
+                                openrouter_api_key,
                                 validation_context=subpart_validation_contexts[idx],
                             )
                             for idx, sp_prompt in enumerate(subpart_prompts)
@@ -3005,7 +3006,7 @@ async def _process_project(
                                 _update_usage(
                                     val_usage,
                                     phase=f"part_{part_id}_validator_sp{i+1}_{j+1}",
-                                    cost_model=COMPLETENESS_VALIDATOR_MODEL,
+                                    cost_model=validator_model,
                                 )
                     if usage_rec:
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=auxiliary_agents_model)

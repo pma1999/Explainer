@@ -1,7 +1,7 @@
 """Validador de explicaciones: truncamiento y alcance del explainer.
 
-El revisor llama siempre a Gemini Flash Lite, independientemente del proveedor
-que genero la explicacion. Evalua solo dos cosas:
+El revisor usa el mismo proveedor que el flujo explainer activo: Gemini para el
+flujo Gemini y OpenRouter para el flujo OpenRouter. Evalua solo dos cosas:
 
 - Si la explicacion quedo truncada.
 - Si desarrolla contenido sustantivo fuera de la parte/subparte asignada.
@@ -22,11 +22,18 @@ from google.genai import types
 
 from backend.gemini_client import generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.openrouter_client import call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+)
 
 logger = get_logger("backend.agents.completeness_validator")
 
-# Siempre Gemini Flash Lite para el validador, al margen del proveedor del explainer.
+# Modelo Gemini usado por el validador cuando el flujo explainer es Gemini.
 COMPLETENESS_VALIDATOR_MODEL = "gemini-3.1-flash-lite-preview"
+# Modelo OpenRouter usado por el validador cuando el flujo explainer es OpenRouter.
+OPENROUTER_COMPLETENESS_VALIDATOR_MODEL = OPENROUTER_MODEL_AUXILIARY
 
 # Numero maximo de reintentos de validacion (sin contar el intento inicial).
 MAX_COMPLETENESS_RETRIES = 2
@@ -146,6 +153,23 @@ Devuelve un unico objeto JSON con:
   "offending_fragments": ["fragmentos concretos si hay violacion o truncamiento"],
   "retry_instructions": "instrucciones concretas para regenerar, vacio si no hace falta"
 }"""
+
+_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION = """Devuelve exclusivamente un único objeto JSON raíz válido, sin Markdown ni texto externo, con exactamente esta forma:
+{
+  "is_complete": boolean,
+  "scope_status": "ok" | "minor_context_only" | "violation" | "unknown",
+  "reason": string,
+  "offending_fragments": string[],
+  "retry_instructions": string
+}
+Todas las claves son obligatorias. `offending_fragments` debe ser [] si no hay fragmentos problemáticos. `retry_instructions` debe ser "" si la explicación es aceptable."""
+
+_OPENROUTER_VALIDATOR_SYSTEM_PROMPT = f"""{_VALIDATOR_SYSTEM_PROMPT}
+
+<openrouter_json_mode_contract>
+Para OpenRouter JSON mode, cumple explícitamente este contrato adicional:
+{_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION}
+</openrouter_json_mode_contract>"""
 
 _VALIDATOR_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
@@ -390,6 +414,25 @@ def _accepted_report(reason: str) -> ExplainerValidationReport:
     )
 
 
+def _build_validator_user_message(
+    explanation: dict,
+    validation_context: ExplainerValidationContext | None,
+) -> str | None:
+    text = _serialize_for_validation(explanation)
+    if not text.strip():
+        return None
+
+    scope_contract = format_validation_context(validation_context, include_source_text=True)
+    return (
+        "Evalua la siguiente explicacion academica usando el contrato de alcance y la fuente real permitida.\n"
+        "Recuerda: si un contenido aparece en la fuente permitida o dentro de las paginas/anclas actuales, no es invasion de alcance.\n\n"
+        f"{scope_contract}\n\n"
+        "---\n\n"
+        "EXPLICACION GENERADA A VALIDAR:\n"
+        f"{text}"
+    )
+
+
 def check_explainer_validation(
     explanation: dict,
     gemini_api_key: str,
@@ -403,19 +446,9 @@ def check_explainer_validation(
     """
     start = time.time()
     try:
-        text = _serialize_for_validation(explanation)
-        if not text.strip():
+        user_message = _build_validator_user_message(explanation, validation_context)
+        if user_message is None:
             return _accepted_report("Explicacion vacia; se acepta por defecto."), None
-
-        scope_contract = format_validation_context(validation_context, include_source_text=True)
-        user_message = (
-            "Evalua la siguiente explicacion academica usando el contrato de alcance y la fuente real permitida.\n"
-            "Recuerda: si un contenido aparece en la fuente permitida o dentro de las paginas/anclas actuales, no es invasion de alcance.\n\n"
-            f"{scope_contract}\n\n"
-            "---\n\n"
-            "EXPLICACION GENERADA A VALIDAR:\n"
-            f"{text}"
-        )
 
         client = genai.Client(api_key=gemini_api_key)
         contents = _build_validator_contents(
@@ -465,6 +498,68 @@ def check_explainer_validation(
             extra={"error_type": type(exc).__name__, "elapsed_ms": elapsed_ms},
         )
         return _accepted_report(f"Error en validador ({type(exc).__name__}); resultado aceptado."), None
+
+
+def check_explainer_validation_or(
+    explanation: dict,
+    openrouter_api_key: str,
+    validation_context: ExplainerValidationContext | None = None,
+    model: str = OPENROUTER_COMPLETENESS_VALIDATOR_MODEL,
+) -> tuple[ExplainerValidationReport, Any]:
+    """Validate an explainer output with OpenRouter.
+
+    Returns:
+        (report, usage). If the reviewer fails, returns an accepted fail-open
+        report with usage None, matching the Gemini validator policy.
+    """
+    start = time.time()
+    try:
+        user_message = _build_validator_user_message(explanation, validation_context)
+        if user_message is None:
+            return _accepted_report("Explicacion vacia; se acepta por defecto."), None
+
+        content, usage = call_openrouter_chat(
+            messages=[{"role": "user", "content": user_message}],
+            model=model,
+            system_prompt=_OPENROUTER_VALIDATOR_SYSTEM_PROMPT,
+            api_key=openrouter_api_key,
+            response_format="json_object",
+            enable_response_healing=True,
+            provider=deepseek_provider_preferences(),
+            json_retry_instruction=_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION,
+        )
+        if not isinstance(content, dict):
+            raise TypeError("El validador OpenRouter no devolvio un objeto JSON.")
+
+        report = _parse_validation_report(content)
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.info(
+            "Explainer validado con OpenRouter: complete=%s scope=%s — %s (%dms)",
+            report.is_complete,
+            report.scope_status,
+            report.reason[:150],
+            elapsed_ms,
+            extra={
+                "is_complete": report.is_complete,
+                "scope_status": report.scope_status,
+                "reason": report.reason[:200],
+                "elapsed_ms": elapsed_ms,
+                "prompt_tokens": getattr(usage, "prompt_token_count", 0) if usage else 0,
+                "candidates_tokens": getattr(usage, "candidates_token_count", 0) if usage else 0,
+                "model": model,
+            },
+        )
+        return report, usage
+
+    except Exception as exc:
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.warning(
+            "Error en validador OpenRouter de explainer (%dms) — se acepta fail-open. Error: %s",
+            elapsed_ms,
+            str(exc)[:200],
+            extra={"error_type": type(exc).__name__, "elapsed_ms": elapsed_ms},
+        )
+        return _accepted_report(f"Error en validador OpenRouter ({type(exc).__name__}); resultado aceptado."), None
 
 
 def check_explanation_completeness(
@@ -605,25 +700,20 @@ def _call_retry(
     return retry_call(previous_result)
 
 
-def run_with_explainer_validation(
+def _run_with_explainer_validation_core(
     *,
     initial_call: Callable[[], tuple[dict, Any]],
     retry_call: Callable[..., tuple[dict, Any]],
-    gemini_api_key: str,
+    check_validation: Callable[[dict], tuple[ExplainerValidationReport, Any]],
     label: str,
-    validation_context: ExplainerValidationContext | None = None,
 ) -> tuple[dict, Any, list[Any]]:
-    """Run an explainer call, validate it, and regenerate on confirmed failures."""
+    """Run an explainer call with provider-specific validation and regeneration."""
     result, usage = initial_call()
     validator_usages: list[Any] = []
     last_report: ExplainerValidationReport | None = None
 
     for attempt in range(MAX_EXPLAINER_VALIDATION_RETRIES + 1):
-        report, val_usage = check_explainer_validation(
-            result,
-            gemini_api_key=gemini_api_key,
-            validation_context=validation_context,
-        )
+        report, val_usage = check_validation(result)
         last_report = report
         if val_usage is not None:
             validator_usages.append(val_usage)
@@ -673,6 +763,48 @@ def run_with_explainer_validation(
         },
     )
     raise ExplainerValidationError(label=label, report=last_report)
+
+
+def run_with_explainer_validation(
+    *,
+    initial_call: Callable[[], tuple[dict, Any]],
+    retry_call: Callable[..., tuple[dict, Any]],
+    gemini_api_key: str,
+    label: str,
+    validation_context: ExplainerValidationContext | None = None,
+) -> tuple[dict, Any, list[Any]]:
+    """Run an explainer call, validate it with Gemini, and regenerate on confirmed failures."""
+    return _run_with_explainer_validation_core(
+        initial_call=initial_call,
+        retry_call=retry_call,
+        check_validation=lambda result: check_explainer_validation(
+            result,
+            gemini_api_key=gemini_api_key,
+            validation_context=validation_context,
+        ),
+        label=label,
+    )
+
+
+def run_with_openrouter_explainer_validation(
+    *,
+    initial_call: Callable[[], tuple[dict, Any]],
+    retry_call: Callable[..., tuple[dict, Any]],
+    openrouter_api_key: str,
+    label: str,
+    validation_context: ExplainerValidationContext | None = None,
+) -> tuple[dict, Any, list[Any]]:
+    """Run an explainer call, validate it with OpenRouter, and regenerate on confirmed failures."""
+    return _run_with_explainer_validation_core(
+        initial_call=initial_call,
+        retry_call=retry_call,
+        check_validation=lambda result: check_explainer_validation_or(
+            result,
+            openrouter_api_key=openrouter_api_key,
+            validation_context=validation_context,
+        ),
+        label=label,
+    )
 
 
 def run_with_completeness_validation(

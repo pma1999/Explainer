@@ -18,7 +18,7 @@ from backend.openrouter_client import (
     call_openrouter_chat,
     get_or_prime_pdf_parse_cache,
 )
-from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_text
+from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_pages_with_xml_tags
 from backend.agents.explainer_prompts import (
     SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
     SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
@@ -28,7 +28,7 @@ from backend.agents.completeness_validator import (
     ExplainerValidationReport,
     build_explainer_retry_system_suffix,
     format_explainer_retry_context,
-    run_with_explainer_validation,
+    run_with_openrouter_explainer_validation,
 )
 
 logger = get_logger("backend.agents.explainer_openrouter")
@@ -536,7 +536,7 @@ def _call_openrouter_json_with_pdf_fallback(
     try:
         if mime_type == "application/pdf" and pdf_cache_entry is not None:
             requested_pages = page_numbers or pdf_cache_entry.cached_page_numbers
-            ocr_text = render_pdf_page_subset_to_text(
+            ocr_text = render_pdf_pages_with_xml_tags(
                 cache_entry=pdf_cache_entry,
                 page_numbers=requested_pages,
             )
@@ -880,8 +880,8 @@ def _run_subpart_explainer_or_for_retry(
 
 # ---------------------------------------------------------------------------
 # Funciones públicas con validación de completitud integrada.
-# Añaden un parámetro gemini_api_key (clave Gemini para el validador Flash Lite)
-# y devuelven (result, usage, list[validator_usages]) en lugar del 2-tuple original.
+# El validador usa OpenRouter con la misma clave salvo que se indique otra.
+# Devuelven (result, usage, list[validator_usages]) en lugar del 2-tuple original.
 # ---------------------------------------------------------------------------
 
 def run_explainer_or_validated(
@@ -890,7 +890,7 @@ def run_explainer_or_validated(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
-    gemini_api_key: str = "",
+    validator_api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
@@ -898,13 +898,14 @@ def run_explainer_or_validated(
     """run_explainer_or con validación de completitud y reintento automático.
 
     Args:
-        api_key:        Clave de OpenRouter.
-        gemini_api_key: Clave de Gemini para el validador (siempre Flash Lite).
+        api_key:            Clave de OpenRouter para el explainer.
+        validator_api_key:  Clave de OpenRouter para el validador. Si está vacía,
+                            se reutiliza api_key.
 
     Returns:
         (result, usage, validator_usages_list)
     """
-    return run_with_explainer_validation(
+    return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_explainer_or(
             source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
         ),
@@ -920,7 +921,7 @@ def run_explainer_or_validated(
             page_numbers,
             validation_context,
         ),
-        gemini_api_key=gemini_api_key,
+        openrouter_api_key=validator_api_key or api_key,
         label=f"Explainer OpenRouter [{model}]",
         validation_context=validation_context,
     )
@@ -932,7 +933,7 @@ def run_subpart_explainer_or_validated(
     model: str = OPENROUTER_MODEL_AGENTS,
     mime_type: str = "application/pdf",
     api_key: str = "",
-    gemini_api_key: str = "",
+    validator_api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
@@ -940,13 +941,14 @@ def run_subpart_explainer_or_validated(
     """run_subpart_explainer_or con validación de completitud y reintento automático.
 
     Args:
-        api_key:        Clave de OpenRouter.
-        gemini_api_key: Clave de Gemini para el validador (siempre Flash Lite).
+        api_key:            Clave de OpenRouter para el explainer.
+        validator_api_key:  Clave de OpenRouter para el validador. Si está vacía,
+                            se reutiliza api_key.
 
     Returns:
         (result, usage, validator_usages_list)
     """
-    return run_with_explainer_validation(
+    return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_subpart_explainer_or(
             source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
         ),
@@ -962,7 +964,7 @@ def run_subpart_explainer_or_validated(
             page_numbers,
             validation_context,
         ),
-        gemini_api_key=gemini_api_key,
+        openrouter_api_key=validator_api_key or api_key,
         label=f"Subpart Explainer OpenRouter [{model}]",
         validation_context=validation_context,
     )

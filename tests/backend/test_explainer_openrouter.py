@@ -353,7 +353,7 @@ def test_openrouter_validated_signature_defaults_validation_context_none(monkeyp
         captured.update(kwargs)
         return {"desarrollo": []}, _usage(), []
 
-    monkeypatch.setattr(module, "run_with_explainer_validation", _fake_run_with)
+    monkeypatch.setattr(module, "run_with_openrouter_explainer_validation", _fake_run_with)
 
     result, usage, validator_usages = module.run_subpart_explainer_or_validated(
         source_path="source.txt",
@@ -361,10 +361,31 @@ def test_openrouter_validated_signature_defaults_validation_context_none(monkeyp
         model="xiaomi/mimo-v2.5-pro",
         mime_type="text/plain",
         api_key="sk-or-v1-test",
-        gemini_api_key="AIzaFakeKey",
+        validator_api_key="sk-or-v1-validator",
     )
 
     assert result == {"desarrollo": []}
     assert usage.total_token_count == 48
     assert validator_usages == []
     assert captured["validation_context"] is None
+    assert captured["openrouter_api_key"] == "sk-or-v1-validator"
+
+
+def test_openrouter_validated_defaults_validator_key_to_openrouter_api_key(monkeypatch):
+    captured: dict = {}
+
+    def _fake_run_with(**kwargs):
+        captured.update(kwargs)
+        return {"desarrollo": []}, _usage(), []
+
+    monkeypatch.setattr(module, "run_with_openrouter_explainer_validation", _fake_run_with)
+
+    module.run_subpart_explainer_or_validated(
+        source_path="source.txt",
+        identificacion="Prompt de prueba",
+        model="xiaomi/mimo-v2.5-pro",
+        mime_type="text/plain",
+        api_key="sk-or-v1-test",
+    )
+
+    assert captured["openrouter_api_key"] == "sk-or-v1-test"

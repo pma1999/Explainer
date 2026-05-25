@@ -98,8 +98,9 @@ SYSTEM_INSTRUCTION = """<system_instruction>
 OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
 
 <openrouter_source_contract>
-La fuente se entrega como texto OCR completo, con separadores explícitos `--- PAGINA X ---`.
-Usa esos separadores como fuente de verdad para los números de página. No resumas ni ignores
+La fuente se entrega como texto OCR completo, con cada página envuelta en etiquetas XML
+`<pagina_N>...</pagina_N>`, donde N es el número absoluto de página 1-indexed.
+Usa esas etiquetas como fuente de verdad para los números de página. No resumas ni ignores
 páginas por longitud de contexto.
 </openrouter_source_contract>
 

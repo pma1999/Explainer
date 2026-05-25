@@ -151,12 +151,60 @@ def render_pdf_page_subset_to_text(
     return rendered
 
 
+def render_pdf_pages_with_xml_tags(
+    *,
+    cache_entry: PdfOcrCacheEntry,
+    page_numbers: tuple[int, ...] | list[int],
+) -> str:
+    """Render OCR pages wrapped in XML tags for LLM consumption.
+
+    Each page is enclosed in <pagina_N>...</pagina_N> so models always
+    know the absolute page number regardless of where in the document
+    the excerpt sits.
+    """
+    requested_pages = normalize_expected_page_numbers(page_numbers)
+    if not requested_pages:
+        raise PdfOcrError("No se proporcionaron páginas OCR.")
+    page_lookup = {page.page_number: page for page in cache_entry.page_index}
+    missing_pages = [page for page in requested_pages if page not in page_lookup]
+    if missing_pages:
+        raise PdfOcrError(
+            "El subconjunto OCR solicitado contiene páginas ausentes en el cache: "
+            f"{missing_pages}"
+        )
+
+    page_chunks: list[str] = []
+    for page_number in requested_pages:
+        page = page_lookup[page_number]
+        page_text = _strip_watermark_lines(page.markdown)
+        page_text = _replace_table_placeholders(page_text, page.tables)
+        page_text = _replace_image_placeholders(page_text, page.images)
+        page_text = page_text.strip()
+
+        parts: list[str] = []
+        if page_text:
+            parts.append(page_text)
+        if page.footer:
+            footer = page.footer.strip()
+            if footer and not _PAGE_MARKER_ONLY_RE.fullmatch(footer):
+                parts.append(f"[Footer página {page_number}]\n{footer}")
+
+        if parts:
+            inner = "\n\n".join(parts)
+            page_chunks.append(f"<pagina_{page_number}>\n{inner}\n</pagina_{page_number}>")
+
+    if not page_chunks:
+        raise PdfOcrError("El subconjunto OCR solicitado no produjo texto reutilizable.")
+
+    return "\n\n".join(page_chunks)
+
+
 def render_pdf_page_subset_to_validation_text(
     *,
     cache_entry: PdfOcrCacheEntry,
     page_numbers: tuple[int, ...] | list[int],
 ) -> str:
-    """Render OCR pages for scope validation, preserving explicit page labels."""
+    """Render OCR pages for scope validation with XML page boundary tags."""
     requested_pages = normalize_expected_page_numbers(page_numbers)
     page_lookup = {page.page_number: page for page in cache_entry.page_index}
     missing_pages = [page for page in requested_pages if page not in page_lookup]
@@ -172,9 +220,10 @@ def render_pdf_page_subset_to_validation_text(
         page_text = _strip_watermark_lines(page.markdown)
         page_text = _replace_table_placeholders(page_text, page.tables)
         page_text = _replace_image_placeholders(page_text, page.images)
-        page_chunks = [chunk for chunk in (page_text.strip(), (page.footer or "").strip()) if chunk]
-        if page_chunks:
-            rendered_chunks.append(f"--- PAGINA {page_number} ---\n" + "\n\n".join(page_chunks))
+        page_parts = [chunk for chunk in (page_text.strip(), (page.footer or "").strip()) if chunk]
+        if page_parts:
+            inner = "\n\n".join(page_parts)
+            rendered_chunks.append(f"<pagina_{page_number}>\n{inner}\n</pagina_{page_number}>")
 
     rendered = "\n\n".join(chunk for chunk in rendered_chunks if chunk.strip()).strip()
     if not rendered:

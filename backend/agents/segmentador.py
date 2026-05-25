@@ -1041,8 +1041,9 @@ def _openrouter_segmentador_system_instruction(source_kind: str) -> str:
     if source_kind == "pdf":
         source_note = (
             "\n\n<openrouter_source_contract>\n"
-            "La fuente se entrega como texto OCR completo, con separadores explícitos `--- PAGINA X ---`. "
-            "Usa esos separadores como fuente de verdad para `pagina_inicio` y `pagina_fin`. "
+            "La fuente se entrega como texto OCR completo, con cada página envuelta en etiquetas XML "
+            "`<pagina_N>...</pagina_N>`, donde N es el número absoluto de página 1-indexed. "
+            "Usa esas etiquetas como fuente de verdad para `pagina_inicio` y `pagina_fin`. "
             "No recortes el documento: debes razonar con todo el texto recibido.\n"
             "</openrouter_source_contract>"
         )
