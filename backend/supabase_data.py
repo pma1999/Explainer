@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import tempfile
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -39,8 +41,17 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sanitize_storage_filename(filename: str) -> str:
+    """Convert filename to a Supabase-safe storage key (ASCII, no spaces/special chars)."""
+    normalized = unicodedata.normalize("NFKD", filename)
+    ascii_str = normalized.encode("ascii", "ignore").decode("ascii")
+    safe = re.sub(r"[^a-zA-Z0-9._\-]", "_", ascii_str)
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    return safe or "document.pdf"
+
+
 def _project_storage_path(user_id: str, project_id: str, pdf_filename: str) -> str:
-    return f"{user_id}/{project_id}/{pdf_filename}"
+    return f"{user_id}/{project_id}/{_sanitize_storage_filename(pdf_filename)}"
 
 
 def _looks_like_storage_not_found(exc: Exception) -> bool:
