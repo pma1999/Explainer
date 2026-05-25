@@ -8,6 +8,12 @@ from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML
+from backend.openrouter_client import OpenRouterError, call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+    openrouter_web_search_tool_auto,
+)
 
 from google import genai
 from google.genai import types
@@ -161,6 +167,51 @@ SYSTEM_INSTRUCTION = """<system_instruction>
 Solo tras este proceso, genera el output estructurado.
 </thinking_protocol>
 </system_instruction>"""
+
+OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
+
+<openrouter_tool_contract>
+Cuando estas instrucciones mencionen Google Search, usa la herramienta de servidor
+`openrouter:web_search` disponible en esta llamada. La búsqueda está configurada con
+motor `auto`; utilízala para verificar recursos, títulos, autoría, vigencia y enlaces.
+</openrouter_tool_contract>
+
+<openrouter_source_contract>
+La fuente se entrega como texto inline completo ya delimitado para esta parte.
+No recortes el contenido por longitud de contexto.
+</openrouter_source_contract>
+
+<openrouter_json_contract>
+Devuelve exclusivamente un objeto JSON raíz con esta estructura:
+{
+  "titulo_mapa": "string",
+  "vision_general": "string",
+  "ejes_tematicos": [
+    {
+      "nombre_eje": "string",
+      "recursos": [
+        {
+          "formato": "libro_texto_articulo | documental_pelicula_serie | sitio_web_recurso_digital | podcast_audio | curso_conferencia_material_educativo",
+          "titulo": "string",
+          "autor_creador": "string",
+          "tipo_y_datos": "string",
+          "idioma": "string",
+          "conexion_con_texto": "string",
+          "nivel_y_accesibilidad": "string",
+          "nota": "string"
+        }
+      ]
+    }
+  ],
+  "nota_de_integridad": "string"
+}
+No devuelvas un array raíz ni texto fuera del JSON.
+</openrouter_json_contract>"""
+
+OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene las claves raíz `titulo_mapa`, `vision_general`, `ejes_tematicos` y `nota_de_integridad`.
+`ejes_tematicos` es un array de objetos con `nombre_eje` y `recursos`.
+Cada recurso tiene `formato`, `titulo`, `autor_creador`, `tipo_y_datos`, `idioma`, `conexion_con_texto`, `nivel_y_accesibilidad` y `nota`.
+La raíz debe ser un objeto JSON, nunca un array."""
 
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
@@ -371,3 +422,77 @@ def run_resources(
             }
         )
         raise
+
+
+def run_resources_or(
+    api_key: str,
+    source_text: str,
+    identificacion: str,
+    model: str = OPENROUTER_MODEL_AUXILIARY,
+) -> tuple[dict[str, Any], Any]:
+    """Run the Resources agent via OpenRouter with server-side web search."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente resources OpenRouter (web_search auto)",
+        extra={
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "uses_openrouter_web_search": True,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = call_openrouter_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>\n\n"
+                    "Busca y recomienda los mejores recursos disponibles (libros, artículos, "
+                    "documentales, podcasts, sitios web, cursos) para profundizar en los temas "
+                    "de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
+                    "verificables con alta confianza."
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        api_key=api_key,
+        response_format="json_object",
+        enable_response_healing=True,
+        provider=deepseek_provider_preferences(),
+        tools=[openrouter_web_search_tool_auto()],
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise OpenRouterError("Resources OpenRouter no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    total_recursos = sum(
+        len(eje.get("recursos", []))
+        for eje in content.get("ejes_tematicos", [])
+        if isinstance(eje, dict)
+    )
+    logger.info(
+        "Resources OpenRouter completado: %d ejes, %d recursos en %dms",
+        len(content.get("ejes_tematicos", [])),
+        total_recursos,
+        total_duration,
+        extra={
+            "num_ejes": len(content.get("ejes_tematicos", [])),
+            "total_recursos": total_recursos,
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "server_tool_use": getattr(usage, "server_tool_use", {}),
+            "model": model,
+        },
+    )
+    return content, usage

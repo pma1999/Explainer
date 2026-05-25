@@ -892,9 +892,9 @@
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de OpenRouter <span class="settings-badge-optional">Opcional</span></h4>
           <p class="settings-description">
-            Si la configuras, podrás elegir <strong>Xiaomi MiMo V2.5 Pro</strong> o <strong>Xiaomi MiMo V2.5</strong> para el explainer en cada ejecución.
-            El OCR de PDFs usará <strong>Mistral nativo</strong> y el resto de agentes (segmentación, recorrido, recursos y formateo)
-            siguen usando Gemini.
+            Si la configuras, podrás elegir modelos OpenRouter para el explainer en cada ejecución.
+            En modo OpenRouter, segmentación, recorrido y recursos usarán <strong>DeepSeek V4 Flash</strong> vía OpenRouter,
+            recursos usará búsqueda web, el OCR de PDFs usará <strong>Mistral nativo</strong> y el formateo seguirá usando Gemini.
             Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
           </p>
 
@@ -905,7 +905,7 @@
 
           <div id="openrouter-key-set" class="api-key-status hidden">
             <div class="status-badge status-success">✓ Configurada</div>
-            <p class="status-text">Xiaomi vía OpenRouter queda disponible para seleccionarlo al crear el proyecto.</p>
+            <p class="status-text">OpenRouter queda disponible para seleccionarlo al crear el proyecto.</p>
           </div>
 
           <form id="form-openrouter-key" class="settings-form">
@@ -928,7 +928,7 @@
         <div class="settings-section">
           <h4 class="settings-section-title">API Key de Mistral <span class="settings-badge-optional">Necesaria para PDF + OpenRouter</span></h4>
           <p class="settings-description">
-            Si quieres usar <strong>Xiaomi vía OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
+            Si quieres usar <strong>OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
             Obtén tu API key en <a href="https://console.mistral.ai/" target="_blank" rel="noopener">console.mistral.ai</a>.
           </p>
 

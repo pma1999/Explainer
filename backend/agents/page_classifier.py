@@ -8,6 +8,11 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_CLASSIFIER, TEMPERATURE_PAGE_CLASSIFIER
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.openrouter_client import OpenRouterError, call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+)
 
 from google import genai
 from google.genai import types
@@ -90,6 +95,32 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   </instructions>
 </system_instruction>"""
 
+OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
+
+<openrouter_source_contract>
+La fuente se entrega como texto OCR completo, con separadores explícitos `--- PAGINA X ---`.
+Usa esos separadores como fuente de verdad para los números de página. No resumas ni ignores
+páginas por longitud de contexto.
+</openrouter_source_contract>
+
+<openrouter_json_contract>
+Devuelve exclusivamente un objeto JSON raíz con esta estructura exacta:
+{
+  "total_paginas": 21,
+  "rangos_contenido": [{"inicio": 1, "fin": 15}],
+  "rangos_no_contenido": [{"inicio": 16, "fin": 21, "razon": "bibliografía"}]
+}
+No devuelvas un array raíz. `inicio` y `fin` son enteros 1-indexed.
+</openrouter_json_contract>"""
+
+OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene exactamente estas claves:
+{
+  "total_paginas": integer,
+  "rangos_contenido": [{"inicio": integer, "fin": integer}],
+  "rangos_no_contenido": [{"inicio": integer, "fin": integer, "razon": string}]
+}
+La raíz debe ser un objeto JSON, nunca un array."""
+
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
     required=["total_paginas", "rangos_contenido", "rangos_no_contenido"],
@@ -144,19 +175,39 @@ def _parse_classifier_result(result: dict[str, Any], total_pages: int) -> frozen
     reported_total = result.get("total_paginas")
     if reported_total != total_pages:
         logger.warning(
-            "Clasificador reportó %d páginas pero pypdf encontró %d; se usa la clasificación del modelo",
+            "Clasificador reportó %s páginas pero pypdf encontró %d; se usa la clasificación del modelo",
             reported_total,
             total_pages,
         )
 
     content_pages: set[int] = set()
     for r in result.get("rangos_contenido", []):
-        inicio = int(r["inicio"])
-        fin = int(r["fin"])
+        page_range = _coerce_classifier_range(r, label="contenido")
+        if page_range is None:
+            continue
+        inicio, fin = page_range
         if inicio <= fin:
             content_pages.update(range(inicio, fin + 1))
 
     return frozenset(content_pages)
+
+
+def _coerce_classifier_range(raw_range: Any, *, label: str) -> tuple[int, int] | None:
+    """Normalize a classifier range from canonical dict or compact two-item list."""
+    try:
+        if isinstance(raw_range, dict):
+            inicio_raw = raw_range["inicio"]
+            fin_raw = raw_range["fin"]
+        elif isinstance(raw_range, (list, tuple)) and len(raw_range) >= 2:
+            inicio_raw = raw_range[0]
+            fin_raw = raw_range[1]
+        else:
+            logger.warning("Clasificador devolvió rango %s inválido: %r", label, raw_range)
+            return None
+        return int(inicio_raw), int(fin_raw)
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Clasificador devolvió rango %s inválido: %r (%s)", label, raw_range, exc)
+        return None
 
 
 def validate_classifier_partition(
@@ -175,15 +226,11 @@ def validate_classifier_partition(
 
     for label, key in (("contenido", "rangos_contenido"), ("no_contenido", "rangos_no_contenido")):
         for r in result.get(key, []) or []:
-            if not isinstance(r, dict):
-                errors.append(f"{label}: entrada no es un objeto: {r!r}")
+            page_range = _coerce_classifier_range(r, label=label)
+            if page_range is None:
+                errors.append(f"{label}: rango inválido {r!r}")
                 continue
-            try:
-                inicio = int(r["inicio"])
-                fin = int(r["fin"])
-            except (KeyError, TypeError, ValueError) as exc:
-                errors.append(f"{label}: rango inválido {r!r}: {exc}")
-                continue
+            inicio, fin = page_range
             if inicio > fin:
                 errors.append(f"{label}: inicio>fin ({inicio}-{fin})")
                 continue
@@ -309,3 +356,59 @@ def run_page_classifier(
     )
 
     return content_pages, response.usage_metadata, result
+
+
+def run_page_classifier_or(
+    api_key: str,
+    source_text: str,
+    total_pages: int,
+    model: str = OPENROUTER_MODEL_AUXILIARY,
+) -> tuple[frozenset[int], Any, dict[str, Any]]:
+    """Classify PDF pages via OpenRouter using precomputed OCR text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando clasificador de páginas OpenRouter",
+        extra={"total_pages": total_pages, "model": model, "source_chars": len(source_text)},
+    )
+
+    content, usage = call_openrouter_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Clasifica las páginas de este documento en contenido sustantivo "
+                    "y páginas accesorias, siguiendo las instrucciones del sistema.\n\n"
+                    "<documento_ocr>\n"
+                    f"{source_text}\n"
+                    "</documento_ocr>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        api_key=api_key,
+        response_format="json_object",
+        enable_response_healing=True,
+        temperature=TEMPERATURE_PAGE_CLASSIFIER,
+        provider=deepseek_provider_preferences(),
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise OpenRouterError("El clasificador OpenRouter no devolvió un objeto JSON.")
+
+    content_pages = _parse_classifier_result(content, total_pages)
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Clasificador OpenRouter completado: %d/%d páginas de contenido en %dms",
+        len(content_pages),
+        total_pages,
+        duration_ms,
+        extra={
+            "content_pages_count": len(content_pages),
+            "total_pages": total_pages,
+            "duration_ms": duration_ms,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "model": model,
+        },
+    )
+    return content_pages, usage, content

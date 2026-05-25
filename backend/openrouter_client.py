@@ -26,6 +26,12 @@ logger = get_logger("backend.openrouter_client")
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_RESPONSE_HEALING_PLUGIN = {"id": "response-healing"}
+_JSON_RESPONSE_SYSTEM_SUFFIX = """
+
+<json_response_contract>
+Responde exclusivamente con un objeto JSON válido que cumpla el response_format solicitado.
+No incluyas Markdown, comentarios ni texto fuera del JSON.
+</json_response_contract>"""
 _OPENROUTER_COST_NUMBER_RE = re.compile(
     r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 )
@@ -44,6 +50,7 @@ class OpenRouterUsage:
         completion_tokens: int,
         *,
         cost_usd: float | None = None,
+        server_tool_use: dict[str, Any] | None = None,
     ):
         self.prompt_token_count = prompt_tokens
         self.candidates_token_count = completion_tokens
@@ -51,6 +58,7 @@ class OpenRouterUsage:
         self.tool_use_prompt_token_count = 0
         self.total_token_count = prompt_tokens + completion_tokens
         self.cost_usd = cost_usd
+        self.server_tool_use = dict(server_tool_use or {})
 
 
 class OpenRouterError(Exception):
@@ -63,6 +71,32 @@ class OpenRouterRateLimitError(OpenRouterError):
 
 class OpenRouterServiceError(OpenRouterError):
     pass
+
+
+def _with_json_response_instruction(system_prompt: str) -> str:
+    """Ensure JSON mode requests explicitly mention JSON for strict providers."""
+    if re.search(r"\bjson\b(?!-)", system_prompt, flags=re.IGNORECASE):
+        return system_prompt
+    return f"{system_prompt.rstrip()}{_JSON_RESPONSE_SYSTEM_SUFFIX}"
+
+
+def _json_retry_user_message(exc: OpenRouterError, json_retry_instruction: str | None) -> str:
+    details = [
+        "Tu respuesta anterior no ha pasado la validación local.",
+        f"Error detectado: {exc}",
+        "",
+        "Tienes que responder otra vez usando el mismo contexto anterior, pero corrigiendo SOLO el formato.",
+        "Devuelve exclusivamente un objeto JSON raíz válido. No devuelvas arrays como raíz, Markdown, comentarios ni texto fuera del JSON.",
+    ]
+    if json_retry_instruction and json_retry_instruction.strip():
+        details.extend(
+            [
+                "",
+                "Contrato del objeto JSON esperado:",
+                json_retry_instruction.strip(),
+            ]
+        )
+    return "\n".join(details)
 
 
 @dataclass(frozen=True, slots=True)
@@ -843,6 +877,8 @@ def call_openrouter_chat_full(
     max_retries: int = 5,
     temperature: float | None = None,
     provider: dict | None = None,
+    tools: list[dict] | None = None,
+    json_retry_instruction: str | None = None,
 ) -> OpenRouterChatResult:
     """
     Igual que `call_openrouter_chat`, pero preserva el mensaje del asistente
@@ -856,17 +892,23 @@ def call_openrouter_chat_full(
         "Content-Type": "application/json",
     }
 
+    uses_json_mode = response_format != "text"
+    system_content = (
+        _with_json_response_instruction(system_prompt)
+        if uses_json_mode
+        else system_prompt
+    )
+    conversation_messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_content},
+        *messages,
+    ]
     payload: dict[str, Any] = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            *messages,
-        ],
+        "messages": conversation_messages,
     }
     if temperature is not None:
         payload["temperature"] = temperature
 
-    uses_json_mode = response_format != "text"
     if response_format == "json_object":
         payload["response_format"] = {"type": "json_object"}
     elif isinstance(response_format, OpenRouterJsonSchemaResponseFormat):
@@ -890,10 +932,13 @@ def call_openrouter_chat_full(
         payload["reasoning"] = reasoning
     if provider is not None:
         payload["provider"] = provider
+    if tools is not None:
+        payload["tools"] = [dict(tool) for tool in tools]
 
     last_exc: Exception = OpenRouterError("No se realizó ningún intento.")
     for attempt in range(1, max_retries + 1):
         try:
+            payload["messages"] = conversation_messages
             resp = requests.post(
                 OPENROUTER_BASE_URL,
                 headers=headers,
@@ -1109,6 +1154,11 @@ def call_openrouter_chat_full(
                     usage_raw.get("completion_tokens", 0)
                 ),
                 cost_usd=cost_usd,
+                server_tool_use=(
+                    usage_raw.get("server_tool_use")
+                    if isinstance(usage_raw.get("server_tool_use"), dict)
+                    else None
+                ),
             )
 
             if not content_text:
@@ -1139,12 +1189,10 @@ def call_openrouter_chat_full(
                 try:
                     parsed_or_text = _parse_json_object_content(content_text)
                 except OpenRouterError as exc:
-                    wait = min(2 ** attempt, 60)
                     logger.warning(
-                        "[OpenRouter] JSON estructurado inválido, reintento %s/%s en %ss",
+                        "[OpenRouter] JSON estructurado inválido, reintento conversacional %s/%s",
                         attempt,
                         max_retries,
-                        wait,
                         extra={
                             "model": model,
                             "finish_reason": finish_reason,
@@ -1153,7 +1201,18 @@ def call_openrouter_chat_full(
                     )
                     last_exc = exc
                     if attempt < max_retries:
-                        time.sleep(wait)
+                        conversation_messages = [
+                            *conversation_messages,
+                            {"role": "assistant", "content": content_text},
+                            {
+                                "role": "user",
+                                "content": _json_retry_user_message(
+                                    exc,
+                                    json_retry_instruction,
+                                ),
+                            },
+                        ]
+                        time.sleep(2)
                         continue
                     raise
 
@@ -1492,6 +1551,8 @@ def call_openrouter_chat(
     max_retries: int = 5,
     temperature: float | None = None,
     provider: dict | None = None,
+    tools: list[dict] | None = None,
+    json_retry_instruction: str | None = None,
 ) -> tuple[str | dict[str, Any], OpenRouterUsage]:
     """
     Llama a OpenRouter /chat/completions.
@@ -1510,5 +1571,7 @@ def call_openrouter_chat(
         max_retries=max_retries,
         temperature=temperature,
         provider=provider,
+        tools=tools,
+        json_retry_instruction=json_retry_instruction,
     )
     return result.content, result.usage

@@ -77,15 +77,15 @@ export function validateExplainerProviderSelection({
   }
 
   if (!isExplainerProviderSupportedForSource(sourceType, provider)) {
-    return 'OpenRouter todavía no está disponible para vídeos de YouTube. Usa Gemini para esta fuente.';
+    return 'Los vídeos de YouTube solo son compatibles con Gemini.';
   }
 
   if (provider === 'openrouter' && !hasOpenRouterKey) {
-    return 'Necesitas configurar tu API key de OpenRouter para usar Xiaomi en el explainer.';
+    return 'Necesitas configurar tu API key de OpenRouter para usar modelos OpenRouter en el explainer y los agentes auxiliares.';
   }
 
   if (provider === 'openrouter' && sourceType === 'pdf' && !hasMistralKey) {
-    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con Xiaomi/OpenRouter.';
+    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con OpenRouter.';
   }
 
   return null;
@@ -93,23 +93,23 @@ export function validateExplainerProviderSelection({
 
 function buildExplainerProviderHint(sourceType, provider) {
   if (!isExplainerProviderSupportedForSource(sourceType, 'openrouter')) {
-    return 'YouTube se procesa con Gemini. OpenRouter todavía no está disponible para esta fuente.';
+    return 'Los vídeos de YouTube usan siempre Gemini.';
   }
 
   if (provider === 'openrouter') {
     const modelLabel = openRouterModelLabel(currentOpenRouterModel);
     if (sourceType === 'pdf') {
       if (state.hasOpenRouterKey && state.hasMistralKey) {
-        return `La explicación usará ${modelLabel} vía OpenRouter y el OCR de PDFs usará Mistral nativo. Segmentación, recorrido, recursos y formateo siguen usando Gemini.`;
+        return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido y recursos usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web. El OCR de PDFs usará Mistral nativo y el formateo seguirá usando Gemini.`;
       }
       if (!state.hasMistralKey) {
         return `Para PDFs con ${modelLabel} necesitas guardar también tu API key de Mistral para el OCR nativo.`;
       }
     }
     if (state.hasOpenRouterKey) {
-      return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.`;
+      return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido y recursos usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web. El formateo seguirá usando Gemini.`;
     }
-    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el resto del pipeline.`;
+    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el formateo y la validación.`;
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';

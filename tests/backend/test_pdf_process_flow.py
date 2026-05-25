@@ -563,12 +563,22 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
 
         updates = []
         openrouter_calls = []
+        classifier_or_calls = []
+        segmentador_or_calls = []
+        recorrido_or_calls = []
+        resources_or_calls = []
 
         monkeypatch.setattr(main, "get_project", lambda pid, uid, include_internal=False: project)
         monkeypatch.setattr(
             main,
             "get_user_api_key",
-            lambda uid, provider=None: "sk-or-v1-test" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
+            lambda uid, provider=None: (
+                "sk-or-v1-test"
+                if provider == main.PROVIDER_OPENROUTER
+                else "mistral-test-key"
+                if provider == main.PROVIDER_MISTRAL
+                else "AIzaFakeKey"
+            ),
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
         monkeypatch.setattr(
@@ -599,7 +609,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "run_page_classifier",
-            lambda *args, **kwargs: (frozenset([1, 2, 3, 4]), _usage(), {}),
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini classifier no debería ejecutarse")),
         )
         monkeypatch.setattr(
             main,
@@ -625,7 +635,31 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "run_segmentador",
-            lambda *args, **kwargs: (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini segmentador no debería ejecutarse")),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier_or",
+            lambda api_key, source_text, total_pages: (
+                classifier_or_calls.append(
+                    {"api_key": api_key, "source_text": source_text, "total_pages": total_pages}
+                )
+                or (frozenset([1, 2, 3, 4]), _usage(), {})
+            ),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_segmentador_or",
+            lambda api_key, source_text, description, source_kind: (
+                segmentador_or_calls.append(
+                    {
+                        "api_key": api_key,
+                        "source_text": source_text,
+                        "description": description,
+                        "source_kind": source_kind,
+                    }
+                )
+                or (
                 {
                     "analisis_texto": "Cuatro páginas",
                     "decision_num_partes": 1,
@@ -634,6 +668,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
                     "consideraciones_estudiante": "Seguir el orden natural",
                 },
                 _usage(total=40),
+                )
             ),
         )
         monkeypatch.setattr(
@@ -671,8 +706,36 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             )
 
         monkeypatch.setattr(main, "run_explainer_or", _fake_openrouter_explainer)
-        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
-        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(
+            main,
+            "run_recorrido",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini recorrido no debería ejecutarse")),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_resources",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini resources no debería ejecutarse")),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_recorrido_or",
+            lambda api_key, source_text, agent_prompt: (
+                recorrido_or_calls.append(
+                    {"api_key": api_key, "source_text": source_text, "agent_prompt": agent_prompt}
+                )
+                or ({"ok": True}, _usage())
+            ),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_resources_or",
+            lambda api_key, source_text, agent_prompt: (
+                resources_or_calls.append(
+                    {"api_key": api_key, "source_text": source_text, "agent_prompt": agent_prompt}
+                )
+                or ({"ok": True}, _usage())
+            ),
+        )
 
         async def _fake_format(api_key, explainer_data):
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
@@ -681,6 +744,16 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
 
         asyncio.run(main._process_project("proj-openrouter-explicit", "user-123", explainer_provider="openrouter"))
 
+        assert classifier_or_calls
+        assert segmentador_or_calls
+        assert recorrido_or_calls
+        assert resources_or_calls
+        assert classifier_or_calls[0]["api_key"] == "sk-or-v1-test"
+        assert segmentador_or_calls[0]["source_kind"] == "pdf"
+        assert "--- PAGINA 1 ---" in classifier_or_calls[0]["source_text"]
+        assert "--- PAGINA 4 ---" in segmentador_or_calls[0]["source_text"]
+        assert "Page 1" in recorrido_or_calls[0]["source_text"]
+        assert "Page 1" in resources_or_calls[0]["source_text"]
         assert openrouter_calls
         assert all(call["model"] == main.OPENROUTER_EXPLAINER_MODEL for call in openrouter_calls)
         assert all(call["page_numbers"] == (1, 2, 3, 4) for call in openrouter_calls)
@@ -700,7 +773,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
 
 
 
-def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_context(monkeypatch):
+def test_process_project_pdf_openrouter_primes_mistral_before_classifier_for_all_pages(monkeypatch):
     pdf_path = _create_multi_page_pdf(5)
     try:
         project = {
@@ -740,7 +813,11 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
         monkeypatch.setattr(main, "send_event", _send_event)
         monkeypatch.setattr(main, "sse_manager", _DummySSE())
         monkeypatch.setattr(main, "upload_file_with_retry", lambda *args, **kwargs: SimpleNamespace(uri="uploaded://segment", mime_type="application/pdf"))
-        monkeypatch.setattr(main, "run_page_classifier", lambda *args, **kwargs: (frozenset([1, 2, 4, 5]), _usage(), {}))
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini classifier no debería ejecutarse")),
+        )
         monkeypatch.setattr(
             main,
             "_prepare_mistral_pdf_ocr_context",
@@ -749,13 +826,29 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
                 cache_entry=SimpleNamespace(
                     cache_hit=False,
                     cache_path="cache.json",
-                    expected_page_numbers=(1, 2, 4, 5),
-                    cached_page_numbers=(1, 2, 4, 5),
-                    page_index=(),
+                    expected_page_numbers=(1, 2, 3, 4, 5),
+                    cached_page_numbers=(1, 2, 3, 4, 5),
+                    page_index=(
+                        PdfOcrParsedPage(page_number=1, markdown="Page 1"),
+                        PdfOcrParsedPage(page_number=2, markdown="Page 2"),
+                        PdfOcrParsedPage(page_number=3, markdown="Page 3"),
+                        PdfOcrParsedPage(page_number=4, markdown="Page 4"),
+                        PdfOcrParsedPage(page_number=5, markdown="Page 5"),
+                    ),
                 ),
             ),
         )
-        monkeypatch.setattr(main, "run_segmentador", lambda *args, **kwargs: ({
+        monkeypatch.setattr(
+            main,
+            "run_page_classifier_or",
+            lambda *args, **kwargs: (frozenset([1, 2, 4, 5]), _usage(), {}),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_segmentador",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini segmentador no debería ejecutarse")),
+        )
+        monkeypatch.setattr(main, "run_segmentador_or", lambda *args, **kwargs: ({
             "analisis_texto": "Cinco páginas",
             "decision_num_partes": 1,
             "decision_justificacion": "Una parte",
@@ -774,8 +867,18 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
             "consideraciones_estudiante": "Orden natural",
         }, _usage(total=20)))
         monkeypatch.setattr(main, "run_explainer_or", lambda *args, **kwargs: ({"introduccion": "", "desarrollo": [], "conclusion": "", "conexiones_contextuales": []}, _usage()))
-        monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
-        monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(
+            main,
+            "run_recorrido",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini recorrido no debería ejecutarse")),
+        )
+        monkeypatch.setattr(
+            main,
+            "run_resources",
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Gemini resources no debería ejecutarse")),
+        )
+        monkeypatch.setattr(main, "run_recorrido_or", lambda *args, **kwargs: ({"ok": True}, _usage()))
+        monkeypatch.setattr(main, "run_resources_or", lambda *args, **kwargs: ({"ok": True}, _usage()))
         async def _fake_format(*args, **kwargs):
             return (
                 {"introduccion": "", "desarrollo": [], "conclusion": "", "conexiones_contextuales": []},
@@ -786,7 +889,7 @@ def test_process_project_pdf_openrouter_prepares_only_content_pages_for_mistral_
 
         asyncio.run(main._process_project("proj-openrouter-mistral-backfill", "user-123", explainer_provider="openrouter"))
 
-        assert prepare_calls[0]["content_page_set"] == frozenset({1, 2, 4, 5})
+        assert prepare_calls[0]["content_page_set"] == frozenset({1, 2, 3, 4, 5})
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)

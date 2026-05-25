@@ -116,7 +116,7 @@ describe('landing.js', () => {
       })).toMatch(/Gemini/i);
     });
 
-    it('requires OpenRouter key when OpenRouter (Xiaomi) explainer is selected', () => {
+    it('requires OpenRouter key when OpenRouter explainer is selected', () => {
       expect(validateExplainerProviderSelection({
         sourceType: 'pdf',
         provider: 'openrouter',

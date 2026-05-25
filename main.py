@@ -63,8 +63,8 @@ from backend.gemini_model_routing import (
 )
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
-from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador
-from backend.agents.page_classifier import run_page_classifier
+from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador, run_segmentador_or
+from backend.agents.page_classifier import run_page_classifier, run_page_classifier_or
 from backend.segmentation_page_coverage import (
     MAX_PAGE_COVERAGE_ATTEMPTS,
     SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
@@ -91,18 +91,24 @@ from backend.agents.completeness_validator import (
     ExplainerValidationContext,
     ExplainerValidationError,
 )
-from backend.agents.recorrido import run_recorrido
-from backend.agents.resources import run_resources
+from backend.agents.recorrido import run_recorrido, run_recorrido_or
+from backend.agents.resources import run_resources, run_resources_or
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
 from backend.agents.formatter import format_explainer_content
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
+from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
 from backend.mistral_ocr_client import (
     MISTRAL_OCR_ENGINE,
     MISTRAL_OCR_MODEL,
     get_or_prime_mistral_pdf_ocr_cache,
 )
-from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_page_subset_to_validation_text
+from backend.pdf_ocr_cache import (
+    PdfOcrCacheEntry,
+    PdfOcrError,
+    render_pdf_page_subset_to_text,
+    render_pdf_page_subset_to_validation_text,
+)
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
     WebExtractionError,
@@ -704,6 +710,26 @@ def _prepare_mistral_pdf_ocr_context(
         cache_entry=cache_entry,
         ocr_model=MISTRAL_OCR_MODEL,
     )
+
+
+def _render_mistral_ocr_pages_for_agents(
+    *,
+    cache_entry: PdfOcrCacheEntry,
+    page_numbers: tuple[int, ...] | list[int],
+) -> str:
+    """Render cached OCR pages with explicit page boundaries for OpenRouter agents."""
+    pages = tuple(int(page) for page in page_numbers)
+    if not pages:
+        raise PdfOcrError("No se proporcionaron páginas OCR para el agente OpenRouter.")
+
+    chunks: list[str] = []
+    for page_number in pages:
+        page_text = render_pdf_page_subset_to_text(
+            cache_entry=cache_entry,
+            page_numbers=(page_number,),
+        )
+        chunks.append(f"--- PAGINA {page_number} ---\n{page_text}")
+    return "\n\n".join(chunks).strip()
 
 
 def _build_text_table_of_contents(segmentation: dict, num_partes: int) -> str:
@@ -1783,6 +1809,7 @@ async def _process_project(
     source_title = ""
     resolved_source_url = ""
     source_metadata: dict[str, object] = {}
+    openrouter_full_source_text = ""
     use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
     try:
         explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
@@ -1790,6 +1817,9 @@ async def _process_project(
         await send_event(project_id, {"type": "error", "message": str(exc)})
         update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
         return
+    classifier_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_CLASSIFIER
+    segmentation_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_SEGMENTADOR
+    auxiliary_agents_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_AGENTS
 
     # Establecer contexto de logging
     with LogContext(project_id=project_id, user_id=user_id):
@@ -1816,17 +1846,15 @@ async def _process_project(
         )
 
         if use_openrouter_explainer and source_type == "youtube":
-            error_msg = (
-                "OpenRouter todavía no está disponible para proyectos de YouTube. "
-                "Usa Gemini para esta fuente."
-            )
-            logger.warning(
-                "[Process] Selección OpenRouter no soportada para YouTube",
+            logger.info(
+                "[Process] YouTube no soportado en OpenRouter, usando Gemini automáticamente",
                 extra={"project_id": project_id, "source_type": source_type},
             )
-            await send_event(project_id, {"type": "error", "message": error_msg})
-            update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
-            return
+            use_openrouter_explainer = False
+            explainer_model = MODEL_AGENTS
+            classifier_model = MODEL_CLASSIFIER
+            segmentation_model = MODEL_SEGMENTADOR
+            auxiliary_agents_model = MODEL_AGENTS
 
         # Get user's API keys (BYOK) from Supabase
         api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
@@ -1848,7 +1876,7 @@ async def _process_project(
                         "type": "error",
                         "message": (
                             "No hay API key de OpenRouter configurada. "
-                            "Guárdala en Ajustes para usar Xiaomi en el explainer."
+                            "Guárdala en Ajustes para usar OpenRouter en este flujo."
                         ),
                     },
                 )
@@ -1875,16 +1903,18 @@ async def _process_project(
         from google import genai
         client = genai.Client(api_key=api_key)
         logger.info(
-            "[Process] Enrutamiento de modelos: segmentador=%s, gemini_agents=%s, explainer_provider=%s, explainer_model=%s",
-            MODEL_SEGMENTADOR,
-            MODEL_AGENTS,
+            "[Process] Enrutamiento de modelos: classifier=%s, segmentador=%s, agents=%s, explainer_provider=%s, explainer_model=%s",
+            classifier_model,
+            segmentation_model,
+            auxiliary_agents_model,
             explainer_provider,
             explainer_model,
         )
 
         cumulative_usage = {
-            "segmentation_model": MODEL_SEGMENTADOR,
-            "agents_model": MODEL_AGENTS,
+            "classifier_model": classifier_model,
+            "segmentation_model": segmentation_model,
+            "agents_model": auxiliary_agents_model,
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
             "prompt_tokens": 0,
@@ -2039,27 +2069,37 @@ async def _process_project(
                 source_url=resolved_source_url,
                 blocks=web_blocks,
             )
+            openrouter_full_source_text = web_document
             web_temp_path = await asyncio.to_thread(write_text_document_temp, web_document)
             temp_paths.append(web_temp_path)
 
-            upload_start = time.time()
-            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, web_temp_path, max_retries=5))
-            upload_duration = (time.time() - upload_start) * 1000
-            file_uri = uploaded_file.uri
-            source_mime_type = getattr(uploaded_file, "mime_type", None) or "text/plain"
+            if use_openrouter_explainer:
+                file_uri = f"openrouter-text://{project_id}/full-source"
+                source_mime_type = "text/plain"
+                upload_duration = 0.0
+            else:
+                upload_start = time.time()
+                uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, web_temp_path, max_retries=5))
+                upload_duration = (time.time() - upload_start) * 1000
+                file_uri = uploaded_file.uri
+                source_mime_type = getattr(uploaded_file, "mime_type", None) or "text/plain"
             source_kind = "text"
 
             logger.info(
-                f"[Process] Fuente web preparada y subida en {int(upload_duration)}ms",
+                f"[Process] Fuente web preparada en {int(upload_duration)}ms",
                 extra={
                     "file_uri": file_uri,
                     "upload_duration_ms": int(upload_duration),
                     "block_count": len(web_blocks),
                     "resolved_url": resolved_source_url,
+                    "openrouter_inline_source": use_openrouter_explainer,
                 }
             )
 
-            update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
+            project_update: dict[str, Any] = {"status": "segmenting"}
+            if not use_openrouter_explainer:
+                project_update["file_uri"] = file_uri
+            update_project(project_id, user_id, project_update)
             await send_event(project_id, {"type": "segmenting"})
 
         else:
@@ -2085,19 +2125,50 @@ async def _process_project(
             temp_paths.append(numbered_pdf_path)
             pdf_total_pages = len(PdfReader(numbered_pdf_path).pages)
 
-            upload_start = time.time()
-            uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
-            upload_duration = (time.time() - upload_start) * 1000
+            if use_openrouter_explainer:
+                logger.info(
+                    "[Process] Preparando OCR canónico de Mistral al inicio del flujo OpenRouter",
+                    extra={
+                        "pdf_total_pages": pdf_total_pages,
+                        "mistral_ocr_engine": MISTRAL_OCR_ENGINE,
+                    },
+                )
+                mistral_pdf_context = await asyncio.to_thread(
+                    _prepare_mistral_pdf_ocr_context,
+                    numbered_pdf_path=numbered_pdf_path,
+                    content_page_set=frozenset(range(1, pdf_total_pages + 1)),
+                    api_key=mistral_api_key,
+                    engine=MISTRAL_OCR_ENGINE,
+                )
+                file_uri = f"mistral-ocr://{mistral_pdf_context.cache_entry.source_sha256}"
+                source_mime_type = "application/pdf"
+                openrouter_full_source_text = _render_mistral_ocr_pages_for_agents(
+                    cache_entry=mistral_pdf_context.cache_entry,
+                    page_numbers=tuple(range(1, pdf_total_pages + 1)),
+                )
+                logger.info(
+                    "[Process] OCR canónico de Mistral preparado para OpenRouter",
+                    extra={
+                        "file_uri": file_uri,
+                        "cache_hit": mistral_pdf_context.cache_entry.cache_hit,
+                        "cached_pages_count": len(mistral_pdf_context.cache_entry.cached_page_numbers),
+                        "source_chars": len(openrouter_full_source_text),
+                    },
+                )
+            else:
+                upload_start = time.time()
+                uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
+                upload_duration = (time.time() - upload_start) * 1000
 
-            file_uri = uploaded_file.uri
-            source_mime_type = getattr(uploaded_file, "mime_type", None) or "application/pdf"
-            logger.info(
-                f"[Process] Upload completado en {int(upload_duration)}ms",
-                extra={
-                    "file_uri": file_uri,
-                    "upload_duration_ms": int(upload_duration),
-                }
-            )
+                file_uri = uploaded_file.uri
+                source_mime_type = getattr(uploaded_file, "mime_type", None) or "application/pdf"
+                logger.info(
+                    f"[Process] Upload completado en {int(upload_duration)}ms",
+                    extra={
+                        "file_uri": file_uri,
+                        "upload_duration_ms": int(upload_duration),
+                    }
+                )
 
             update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
             await send_event(project_id, {"type": "segmenting"})
@@ -2105,16 +2176,32 @@ async def _process_project(
         # Clasificador de páginas (solo para PDF): identifica qué páginas son contenido vs. accesorias
         if source_type == "pdf" and numbered_pdf_path and file_uri and pdf_total_pages > 0:
             try:
-                content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
-                    run_page_classifier,
-                    api_key,
-                    file_uri,
-                    pdf_total_pages,
-                    MODEL_CLASSIFIER,
-                )
-                await _locked_apply_usage(clf_usage, phase="page_classifier", cost_model=MODEL_CLASSIFIER)
+                if use_openrouter_explainer:
+                    if not mistral_pdf_context or not openrouter_full_source_text:
+                        raise PdfOcrError(
+                            "OCR Mistral no disponible para el clasificador OpenRouter."
+                        )
+                    content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
+                        run_page_classifier_or,
+                        openrouter_api_key,
+                        openrouter_full_source_text,
+                        pdf_total_pages,
+                    )
+                else:
+                    content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
+                        run_page_classifier,
+                        api_key,
+                        file_uri,
+                        pdf_total_pages,
+                        MODEL_CLASSIFIER,
+                    )
+                await _locked_apply_usage(clf_usage, phase="page_classifier", cost_model=classifier_model)
                 await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
-                clf_cost = calculate_cost(MODEL_CLASSIFIER, clf_usage)
+                clf_cost = (
+                    getattr(clf_usage, "cost_usd", None) or 0.0
+                    if use_openrouter_explainer
+                    else calculate_cost(classifier_model, clf_usage)
+                )
                 logger.info(
                     "[Process] Clasificador: %d páginas de contenido de %d (coste ~$%.6f USD)",
                     len(content_page_set),
@@ -2127,6 +2214,8 @@ async def _process_project(
                     },
                 )
             except Exception as clf_err:
+                if use_openrouter_explainer:
+                    raise
                 content_page_set = frozenset(range(1, pdf_total_pages + 1))
                 logger.warning(
                     "[Process] Clasificador de páginas falló, asumiendo todas como contenido: %s",
@@ -2134,7 +2223,12 @@ async def _process_project(
                     extra={"error_type": type(clf_err).__name__},
                 )
 
-            if use_openrouter_explainer and mistral_api_key and content_page_set and source_type == "pdf":
+            if (
+                not use_openrouter_explainer
+                and mistral_api_key
+                and content_page_set
+                and source_type == "pdf"
+            ):
                 logger.info(
                     "[Process] Preparando OCR canónico de Mistral sobre páginas con contenido",
                     extra={
@@ -2180,17 +2274,37 @@ async def _process_project(
                 base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
                 seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
-            segmentation, usage_meta = await asyncio.to_thread(
-                run_segmentador,
-                api_key,
-                file_uri,
-                seg_description,
-                MODEL_SEGMENTADOR,
-                source_mime_type,
-                source_kind,
-            )
+            if use_openrouter_explainer:
+                if is_pdf_seg:
+                    if not openrouter_full_source_text:
+                        raise PdfOcrError(
+                            "OCR Mistral no disponible para el segmentador OpenRouter."
+                        )
+                else:
+                    if not openrouter_full_source_text:
+                        raise WebExtractionError(
+                            "El documento web está vacío y no puede ser segmentado."
+                        )
+                segmentador_source_text = openrouter_full_source_text
+                segmentation, usage_meta = await asyncio.to_thread(
+                    run_segmentador_or,
+                    openrouter_api_key,
+                    segmentador_source_text,
+                    seg_description,
+                    source_kind,
+                )
+            else:
+                segmentation, usage_meta = await asyncio.to_thread(
+                    run_segmentador,
+                    api_key,
+                    file_uri,
+                    seg_description,
+                    MODEL_SEGMENTADOR,
+                    source_mime_type,
+                    source_kind,
+                )
             phase = "segmentation" if seg_attempt == 0 else f"segmentation_retry_{seg_attempt}"
-            await _locked_apply_usage(usage_meta, phase=phase, cost_model=MODEL_SEGMENTADOR)
+            await _locked_apply_usage(usage_meta, phase=phase, cost_model=segmentation_model)
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
             page_report = (
@@ -2426,6 +2540,7 @@ async def _process_project(
                 agent_prompt = identificacion
                 segment_temp_path = None
                 openrouter_page_scopes: list[tuple[int, ...]] = []
+                openrouter_part_source_text = ""
 
                 nucleo_pi = _optional_int(parte, "pagina_inicio")
                 nucleo_pf = _optional_int(parte, "pagina_fin")
@@ -2525,6 +2640,21 @@ async def _process_project(
                                 buffer=1,
                             )
                         ]
+                    if use_openrouter_explainer:
+                        if mistral_pdf_context is None:
+                            raise PdfOcrError(
+                                "OCR Mistral no disponible para agentes OpenRouter de PDF."
+                            )
+                        openrouter_part_pages = _select_openrouter_pdf_pages(
+                            content_page_set,
+                            start_page=nucleo_pi,
+                            end_page=nucleo_pf,
+                            buffer=1,
+                        )
+                        openrouter_part_source_text = _render_mistral_ocr_pages_for_agents(
+                            cache_entry=mistral_pdf_context.cache_entry,
+                            page_numbers=openrouter_part_pages,
+                        )
 
                 elif is_text_source:
                     bloque_inicio = parte.get("bloque_inicio")
@@ -2544,22 +2674,29 @@ async def _process_project(
                     )
                     segment_temp_path = await asyncio.to_thread(write_text_document_temp, part_document)
                     local_temp_paths.append(segment_temp_path)
+                    openrouter_part_source_text = part_document
 
-                    seg_upload_start = time.time()
-                    segment_uploaded = await asyncio.to_thread(
-                        lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
-                    )
-                    seg_upload_duration = (time.time() - seg_upload_start) * 1000
-                    agent_file_uri = segment_uploaded.uri
-                    agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "text/plain"
+                    if use_openrouter_explainer:
+                        seg_upload_duration = 0.0
+                        agent_file_uri = f"openrouter-text://{project_id}/part/{part_id}"
+                        agent_mime_type = "text/plain"
+                    else:
+                        seg_upload_start = time.time()
+                        segment_uploaded = await asyncio.to_thread(
+                            lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
+                        )
+                        seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                        agent_file_uri = segment_uploaded.uri
+                        agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "text/plain"
 
                     logger.info(
-                        f"[Process] Segmento textual parte {part_id} subido en {int(seg_upload_duration)}ms",
+                        f"[Process] Segmento textual parte {part_id} preparado en {int(seg_upload_duration)}ms",
                         extra={
                             "segment_uri": agent_file_uri,
                             "seg_upload_duration_ms": int(seg_upload_duration),
                             "bloque_inicio": bloque_inicio,
                             "bloque_fin": bloque_fin,
+                            "openrouter_inline_source": use_openrouter_explainer,
                         }
                     )
 
@@ -2643,6 +2780,12 @@ async def _process_project(
                     f"[Process] Parte {part_id}: {num_subparts} subparte(s) — ejecutando agentes en paralelo",
                     extra={"part_id": part_id, "num_subparts": num_subparts}
                 )
+
+                # Fail fast before building any coroutines if OR source text is missing
+                if use_openrouter_explainer and not openrouter_part_source_text:
+                    raise RuntimeError(
+                        "No hay texto fuente inline para los agentes OpenRouter de esta parte."
+                    )
 
                 # Execute all subpart explainers + recorrido + resources in parallel
                 agents_start = time.time()
@@ -2773,10 +2916,41 @@ async def _process_project(
                         )
                         for idx, sp_prompt in enumerate(subpart_prompts)
                     ]
+                if use_openrouter_explainer:
+                    recorrido_task = asyncio.to_thread(
+                        run_recorrido_or,
+                        openrouter_api_key,
+                        openrouter_part_source_text,
+                        agent_prompt,
+                    )
+                    resources_task = asyncio.to_thread(
+                        run_resources_or,
+                        openrouter_api_key,
+                        openrouter_part_source_text,
+                        agent_prompt,
+                    )
+                else:
+                    recorrido_task = asyncio.to_thread(
+                        run_recorrido,
+                        api_key,
+                        agent_file_uri,
+                        agent_prompt,
+                        MODEL_AGENTS,
+                        agent_mime_type,
+                    )
+                    resources_task = asyncio.to_thread(
+                        run_resources,
+                        api_key,
+                        agent_file_uri,
+                        agent_prompt,
+                        MODEL_AGENTS,
+                        agent_mime_type,
+                    )
+
                 results = await asyncio.gather(
                     *parallel_explainer,
-                    asyncio.to_thread(run_recorrido, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
-                    asyncio.to_thread(run_resources, api_key, agent_file_uri, agent_prompt, MODEL_AGENTS, agent_mime_type),
+                    recorrido_task,
+                    resources_task,
                     return_exceptions=True,
                 )
                 agents_duration = (time.time() - agents_start) * 1000
@@ -2834,9 +3008,9 @@ async def _process_project(
                                     cost_model=COMPLETENESS_VALIDATOR_MODEL,
                                 )
                     if usage_rec:
-                        _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=MODEL_AGENTS)
+                        _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=auxiliary_agents_model)
                     if usage_res:
-                        _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=MODEL_AGENTS)
+                        _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=auxiliary_agents_model)
                     await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
                     await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
@@ -3282,17 +3456,13 @@ async def api_process_project(
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
 
-    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
-        if project.get("source_type") == "youtube":
-            raise HTTPException(
-                status_code=400,
-                detail="OpenRouter todavía no está disponible para proyectos de YouTube. Usa Gemini para esta fuente.",
-            )
+    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER and project.get("source_type") != "youtube":
+        # YouTube always falls back to Gemini automatically — skip OpenRouter key checks for that source type
         if not has_user_api_key(user_id, provider=PROVIDER_OPENROUTER):
             logger.warning(f"[API] Usuario sin API key OpenRouter configurada: {user_id[:8]}...")
             raise HTTPException(
                 status_code=400,
-                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar Xiaomi en el explainer.",
+                detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar OpenRouter en este flujo.",
             )
         if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
             logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")

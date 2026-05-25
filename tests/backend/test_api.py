@@ -271,20 +271,26 @@ class TestProcessProject:
         assert r.status_code == 400
         assert "OpenRouter" in r.json()["detail"]
 
-    def test_rejects_openrouter_for_youtube_projects(self, auth_client):
+    def test_youtube_with_openrouter_falls_back_to_gemini_automatically(self, auth_client):
+        scheduled: dict = {}
+
+        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
+            scheduled.update({"project_id": project_id, "explainer_provider": explainer_provider})
+
         with patch(
             "main.get_project",
             return_value={"id": "yt-1", "name": "Vídeo", "status": "pending", "source_type": "youtube"},
         ):
             with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
-                r = auth_client.post(
-                    "/api/projects/yt-1/process",
-                    headers={"Authorization": "Bearer fake-token"},
-                    json={"explainer_provider": "openrouter"},
-                )
+                with patch("main._process_project", new=_fake_process):
+                    r = auth_client.post(
+                        "/api/projects/yt-1/process",
+                        headers={"Authorization": "Bearer fake-token"},
+                        json={"explainer_provider": "openrouter"},
+                    )
 
-        assert r.status_code == 400
-        assert "YouTube" in r.json()["detail"]
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
 
     def test_accepts_supported_openrouter_model_selection(self, auth_client):
         scheduled: dict = {}

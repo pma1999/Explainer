@@ -56,11 +56,34 @@ def test_total_pages_mismatch_logs_warning_but_returns_pages(caplog):
     assert any("12" in rec.message or "10" in rec.message for rec in caplog.records)
 
 
+def test_missing_reported_total_logs_warning_but_returns_pages(caplog):
+    import logging
+    from backend.agents.page_classifier import _parse_classifier_result
+
+    r = {"rangos_contenido": [{"inicio": 1, "fin": 2}], "rangos_no_contenido": []}
+
+    with caplog.at_level(logging.WARNING, logger="backend.agents.page_classifier"):
+        pages = _parse_classifier_result(r, total_pages=3)
+
+    assert pages == frozenset({1, 2})
+    assert any("None" in rec.getMessage() and "3" in rec.getMessage() for rec in caplog.records)
+
+
 def test_single_page_range():
     from backend.agents.page_classifier import _parse_classifier_result
     r = {"total_paginas": 3, "rangos_contenido": [{"inicio": 2, "fin": 2}], "rangos_no_contenido": []}
     pages = _parse_classifier_result(r, total_pages=3)
     assert pages == frozenset([2])
+
+
+def test_content_range_accepts_two_item_list_shape():
+    from backend.agents.page_classifier import _parse_classifier_result
+
+    r = {"total_paginas": 21, "rangos_contenido": [[1, 15]], "rangos_no_contenido": [[16, 21]]}
+
+    pages = _parse_classifier_result(r, total_pages=21)
+
+    assert pages == frozenset(range(1, 16))
 
 
 def test_validate_classifier_partition_ok():

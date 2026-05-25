@@ -8,6 +8,11 @@ from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTA
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
+from backend.openrouter_client import OpenRouterError, call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+)
 
 from google import genai
 from google.genai import types
@@ -941,6 +946,121 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
 
 DEFAULT_DESCRIPTION = "Procesar TODO el documento completo sin omitir ninguna sección. Segmentar el contenido completo según su estructura natural, cubriendo TODAS las partes del texto sin dejar nada fuera."
 
+OPENROUTER_PDF_JSON_CONTRACT = """Devuelve exactamente el objeto JSON raíz siguiente, sin array raíz y sin texto fuera del JSON:
+{
+  "analisis_texto": "string",
+  "decision_num_partes": 1,
+  "decision_justificacion": "string",
+  "partes": [
+    {
+      "numero": 1,
+      "titulo": "string",
+      "contenido": "string",
+      "identificacion": "string",
+      "pagina_inicio": 1,
+      "pagina_fin": 1,
+      "extension_estimada": "baja | media | alta",
+      "complejidad": "baja | media | alta",
+      "expansion_prevista": "baja | media | alta",
+      "subpartes": [
+        {
+          "numero_subparte": 1,
+          "titulo": "string",
+          "contenido": "string",
+          "identificacion": "string",
+          "delimitacion_explainer": {
+            "inicio": {"encabezado": "string", "ancla_texto": "string"},
+            "fin": {"ancla_texto": "string", "encabezado_siguiente_excluido": "string"},
+            "transicion_compartida": {
+              "hay_transicion": false,
+              "pagina": 0,
+              "hasta_texto_inclusive": "string",
+              "desde_texto_inclusive": "string"
+            }
+          },
+          "pagina_inicio": 1,
+          "pagina_fin": 1
+        }
+      ],
+      "introduccion": "string",
+      "conclusion": "string",
+      "conexiones_contextuales": [
+        {"seccion_temario_relacionada": "string", "descripcion_conexion": "string"}
+      ]
+    }
+  ],
+  "consideraciones_estudiante": "string"
+}
+Todas las claves anteriores son obligatorias. Si una lista no tiene elementos, devuelve []."""
+
+OPENROUTER_TEXT_JSON_CONTRACT = """Devuelve exactamente el objeto JSON raíz siguiente, sin array raíz y sin texto fuera del JSON:
+{
+  "evaluacion_fuente": {"es_segmentable": true, "motivo": "string", "indicios": []},
+  "analisis_texto": "string",
+  "decision_num_partes": 1,
+  "decision_justificacion": "string",
+  "partes": [
+    {
+      "numero": 1,
+      "titulo": "string",
+      "contenido": "string",
+      "identificacion": "string",
+      "bloque_inicio": 1,
+      "bloque_fin": 1,
+      "extension_estimada": "baja | media | alta",
+      "complejidad": "baja | media | alta",
+      "expansion_prevista": "baja | media | alta",
+      "subpartes": [
+        {
+          "numero_subparte": 1,
+          "titulo": "string",
+          "contenido": "string",
+          "identificacion": "string",
+          "bloque_inicio": 1,
+          "bloque_fin": 1
+        }
+      ],
+      "introduccion": "string",
+      "conclusion": "string",
+      "conexiones_contextuales": [
+        {"seccion_temario_relacionada": "string", "descripcion_conexion": "string"}
+      ]
+    }
+  ],
+  "consideraciones_estudiante": "string"
+}
+Todas las claves anteriores son obligatorias. Si `evaluacion_fuente.es_segmentable` es false, devuelve `decision_num_partes: 0` y `partes: []`."""
+
+
+def _openrouter_segmentador_json_contract(source_kind: str) -> str:
+    return OPENROUTER_PDF_JSON_CONTRACT if source_kind == "pdf" else OPENROUTER_TEXT_JSON_CONTRACT
+
+
+def _openrouter_segmentador_system_instruction(source_kind: str) -> str:
+    base = SYSTEM_INSTRUCTION if source_kind == "pdf" else TEXT_SYSTEM_INSTRUCTION
+    if source_kind == "pdf":
+        source_note = (
+            "\n\n<openrouter_source_contract>\n"
+            "La fuente se entrega como texto OCR completo, con separadores explícitos `--- PAGINA X ---`. "
+            "Usa esos separadores como fuente de verdad para `pagina_inicio` y `pagina_fin`. "
+            "No recortes el documento: debes razonar con todo el texto recibido.\n"
+            "</openrouter_source_contract>"
+        )
+    else:
+        source_note = (
+            "\n\n<openrouter_source_contract>\n"
+            "La fuente se entrega como texto marcado completo. Respeta los marcadores `=== BLOQUE X ===` "
+            "como unidades atómicas y no recortes el documento.\n"
+            "</openrouter_source_contract>"
+        )
+    return (
+        base
+        + source_note
+        + "\n\n<openrouter_json_contract>\n"
+        + _openrouter_segmentador_json_contract(source_kind)
+        + "\n</openrouter_json_contract>"
+    )
+
 
 @gemini_retry(max_retries=5)
 def run_segmentador(
@@ -1055,3 +1175,71 @@ def run_segmentador(
             }
         )
         raise
+
+
+def run_segmentador_or(
+    api_key: str,
+    source_text: str,
+    description: str,
+    source_kind: str = "pdf",
+    model: str = OPENROUTER_MODEL_AUXILIARY,
+) -> tuple[dict[str, Any], Any]:
+    """Run the Segmentador agent via OpenRouter on inline OCR/text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente segmentador OpenRouter",
+        extra={
+            "description_length": len(description) if description else 0,
+            "has_custom_description": bool(description and description.strip()),
+            "source_kind": source_kind,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
+    json_contract = _openrouter_segmentador_json_contract(source_kind)
+    content, usage = call_openrouter_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_completa>\n"
+                    f"{source_text}\n"
+                    "</fuente_completa>\n\n"
+                    "<instrucciones_usuario>\n"
+                    f"{effective_description}\n"
+                    "</instrucciones_usuario>\n\n"
+                    "<formato_json_obligatorio>\n"
+                    "Devuelve exactamente el objeto JSON descrito aquí. La raíz debe ser un objeto, nunca un array:\n"
+                    f"{json_contract}\n"
+                    "</formato_json_obligatorio>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=_openrouter_segmentador_system_instruction(source_kind),
+        api_key=api_key,
+        response_format="json_object",
+        enable_response_healing=True,
+        temperature=TEMPERATURE_SEGMENTADOR,
+        provider=deepseek_provider_preferences(),
+        json_retry_instruction=json_contract,
+    )
+    if not isinstance(content, dict):
+        raise OpenRouterError("El segmentador OpenRouter no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Segmentación OpenRouter completada: %d partes en %dms",
+        len(content.get("partes", [])),
+        total_duration,
+        extra={
+            "num_partes": len(content.get("partes", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return content, usage

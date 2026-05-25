@@ -43,6 +43,12 @@ describe('parseRoute', () => {
       partId: 1,
       tab: 'recursos',
     });
+    expect(parseRoute('#/p/abc123/s/4/t/esquema')).toEqual({
+      view: 'project',
+      projectId: 'abc123',
+      partId: 4,
+      tab: 'esquema',
+    });
   });
 
   it('defaults tab to explicacion when partId present but tab missing', () => {
@@ -96,6 +102,12 @@ describe('parseRoute', () => {
       shareToken: 'token123',
       partId: 1,
       tab: 'recursos',
+    });
+    expect(parseRoute('#/s/token123/s/4/t/esquema')).toEqual({
+      view: 'shared',
+      shareToken: 'token123',
+      partId: 4,
+      tab: 'esquema',
     });
   });
 
@@ -160,6 +172,12 @@ describe('buildHash', () => {
       partId: 2,
       tab: 'recorrido',
     })).toBe('#/p/abc/s/2/t/recorrido');
+    expect(buildHash({
+      view: 'project',
+      projectId: 'abc',
+      partId: 2,
+      tab: 'esquema',
+    })).toBe('#/p/abc/s/2/t/esquema');
   });
 
   it('defaults tab to explicacion when invalid in project', () => {
@@ -208,7 +226,7 @@ describe('buildHash', () => {
 });
 
 describe('VALID_TABS', () => {
-  it('contains explicacion, recorrido, recursos', () => {
-    expect(VALID_TABS).toEqual(['explicacion', 'recorrido', 'recursos']);
+  it('contains every supported tab', () => {
+    expect(VALID_TABS).toEqual(['explicacion', 'recorrido', 'recursos', 'esquema']);
   });
 });

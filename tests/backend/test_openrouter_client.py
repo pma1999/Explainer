@@ -365,14 +365,86 @@ def test_call_openrouter_chat_json_schema_mode_adds_schema_and_parses_json(monke
     assert captured_request["json"]["plugins"] == [{"id": "response-healing"}]
 
 
+def test_call_openrouter_chat_includes_server_tools_and_exposes_web_search_usage(monkeypatch):
+    captured_request: dict = {}
+
+    def _fake_post(url, headers, json, timeout):
+        captured_request["json"] = json
+        payload = _success_payload('{"ok": true}')
+        payload["usage"]["server_tool_use"] = {"web_search_requests": 2}
+        return _make_response(status_code=200, payload=payload)
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    content, usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Busca recursos actuales"}],
+        model="deepseek/deepseek-v4-flash",
+        system_prompt="Devuelve JSON",
+        api_key="sk-or-v1-test",
+        response_format="json_object",
+        tools=[
+            {
+                "type": "openrouter:web_search",
+                "parameters": {
+                    "engine": "auto",
+                    "max_results": 5,
+                    "max_total_results": 20,
+                    "search_context_size": "high",
+                },
+            }
+        ],
+    )
+
+    assert content == {"ok": True}
+    assert captured_request["json"]["tools"] == [
+        {
+            "type": "openrouter:web_search",
+            "parameters": {
+                "engine": "auto",
+                "max_results": 5,
+                "max_total_results": 20,
+                "search_context_size": "high",
+            },
+        }
+    ]
+    assert usage.server_tool_use == {"web_search_requests": 2}
+
+
+def test_call_openrouter_chat_adds_json_instruction_for_json_object_mode(monkeypatch):
+    captured_request: dict = {}
+
+    def _fake_post(url, headers, json, timeout):
+        captured_request["json"] = json
+        return _make_response(status_code=200, payload=_success_payload('{"ok": true}'))
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+
+    content, _usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Responde con el objeto solicitado"}],
+        model="deepseek/deepseek-v4-flash",
+        system_prompt="Devuelve la estructura solicitada",
+        api_key="sk-or-v1-test",
+        response_format="json_object",
+    )
+
+    assert content == {"ok": True}
+    assert "JSON" in captured_request["json"]["messages"][0]["content"]
+    assert "objeto JSON" in captured_request["json"]["messages"][0]["content"]
+
+
 def test_call_openrouter_chat_retries_invalid_json_in_json_mode(monkeypatch):
     responses = [
         _make_response(status_code=200, payload=_success_payload("not-json")),
         _make_response(status_code=200, payload=_success_payload('{"ok": true}')),
     ]
+    requests_seen: list[dict] = []
     sleep_calls: list[int] = []
 
-    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: responses.pop(0))
+    def _fake_post(url, headers, json, timeout):
+        requests_seen.append(json.copy())
+        return responses.pop(0)
+
+    monkeypatch.setattr(requests, "post", _fake_post)
     monkeypatch.setattr("backend.openrouter_client.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
     content, usage = call_openrouter_chat(
@@ -383,11 +455,49 @@ def test_call_openrouter_chat_retries_invalid_json_in_json_mode(monkeypatch):
         response_format="json_object",
         enable_response_healing=True,
         max_retries=2,
+        json_retry_instruction="El objeto JSON esperado es: {\"ok\": boolean}.",
     )
 
     assert content == {"ok": True}
     assert usage.total_token_count == 21
     assert sleep_calls == [2]
+    assert len(requests_seen) == 2
+    assert requests_seen[1]["messages"][-2] == {"role": "assistant", "content": "not-json"}
+    correction = requests_seen[1]["messages"][-1]
+    assert correction["role"] == "user"
+    assert "respuesta anterior no ha pasado la validación" in correction["content"]
+    assert "objeto JSON esperado" in correction["content"]
+    assert "{\"ok\": boolean}" in correction["content"]
+
+
+def test_call_openrouter_chat_retries_non_object_json_with_conversation(monkeypatch):
+    responses = [
+        _make_response(status_code=200, payload=_success_payload('["x"]')),
+        _make_response(status_code=200, payload=_success_payload('{"ok": true}')),
+    ]
+    requests_seen: list[dict] = []
+
+    def _fake_post(url, headers, json, timeout):
+        requests_seen.append(json.copy())
+        return responses.pop(0)
+
+    monkeypatch.setattr(requests, "post", _fake_post)
+    monkeypatch.setattr("backend.openrouter_client.time.sleep", lambda seconds: None)
+
+    content, _usage = call_openrouter_chat(
+        messages=[{"role": "user", "content": "Hola"}],
+        model="test/model",
+        system_prompt="Devuelve JSON",
+        api_key="sk-or-v1-test",
+        response_format="json_object",
+        max_retries=2,
+        json_retry_instruction="Devuelve un objeto JSON raíz, no un array.",
+    )
+
+    assert content == {"ok": True}
+    assert requests_seen[1]["messages"][-2] == {"role": "assistant", "content": '["x"]'}
+    assert "no un objeto JSON" in requests_seen[1]["messages"][-1]["content"]
+    assert "no un array" in requests_seen[1]["messages"][-1]["content"]
 
 
 def test_call_openrouter_chat_raises_on_non_object_json(monkeypatch):

@@ -8,6 +8,11 @@ from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_RECORRIDO_REFUERZO_XML
+from backend.openrouter_client import OpenRouterError, call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+)
 
 from google import genai
 from google.genai import types
@@ -260,6 +265,43 @@ Solo después de este análisis, comienza el recorrido anotado.
 </thinking_protocol>
 </system_instruction>"""
 
+OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
+
+<openrouter_source_contract>
+La fuente se entrega como texto inline completo ya delimitado para esta parte.
+Si procede de PDF, conserva separadores `--- PAGINA X ---`; usa esas marcas para ubicar citas.
+No recortes el contenido por longitud de contexto.
+</openrouter_source_contract>
+
+<openrouter_json_contract>
+Devuelve exclusivamente un objeto JSON raíz con esta estructura:
+{
+  "recorrido_anotado": [
+    {
+      "ubicacion": "string",
+      "tipo_entrada": "cita_anotada | contenido_no_citado",
+      "cita_textual": "string",
+      "traduccion": "string",
+      "apuntes_traductologicos": "string",
+      "anotacion": "string"
+    }
+  ],
+  "sintesis_de_cobertura": {
+    "secciones_procesadas": "string",
+    "alcance": "string",
+    "contenido_excluido": "string",
+    "idioma_original": "string",
+    "observaciones_globales": "string"
+  }
+}
+No devuelvas un array raíz ni texto fuera del JSON.
+</openrouter_json_contract>"""
+
+OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene exactamente dos claves raíz:
+`recorrido_anotado` (array de entradas con ubicacion, tipo_entrada, cita_textual, traduccion, apuntes_traductologicos, anotacion)
+y `sintesis_de_cobertura` (objeto con secciones_procesadas, alcance, contenido_excluido, idioma_original, observaciones_globales).
+La raíz debe ser un objeto JSON, nunca un array."""
+
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
     required=["recorrido_anotado", "sintesis_de_cobertura"],
@@ -438,3 +480,62 @@ def run_recorrido(
             }
         )
         raise
+
+
+def run_recorrido_or(
+    api_key: str,
+    source_text: str,
+    identificacion: str,
+    model: str = OPENROUTER_MODEL_AUXILIARY,
+) -> tuple[dict[str, Any], Any]:
+    """Run the Recorrido Anotado agent via OpenRouter on inline OCR/text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente recorrido OpenRouter",
+        extra={
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = call_openrouter_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        api_key=api_key,
+        response_format="json_object",
+        enable_response_healing=True,
+        provider=deepseek_provider_preferences(),
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise OpenRouterError("El recorrido OpenRouter no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Recorrido OpenRouter completado: %d entradas en %dms",
+        len(content.get("recorrido_anotado", [])),
+        total_duration,
+        extra={
+            "num_entradas": len(content.get("recorrido_anotado", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return content, usage
