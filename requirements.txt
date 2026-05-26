@@ -21,6 +21,7 @@ mistralai==2.3.2
 
 # PDF manipulation (page numbering + extraction)
 pypdf>=4.0.0
+pymupdf>=1.24.0
 reportlab>=4.0
 trafilatura==2.0.0
 readability-lxml==0.8.4.1
