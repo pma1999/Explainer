@@ -739,10 +739,17 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             ),
         )
 
-        async def _fake_format(api_key, explainer_data):
+        formatter_or_calls: list[dict] = []
+
+        async def _fake_format_or(api_key, explainer_data):
+            formatter_or_calls.append({"api_key": api_key, "explainer": explainer_data})
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
-        monkeypatch.setattr(main, "format_explainer_content", _fake_format)
+        async def _fail_gemini_format(*args, **kwargs):
+            raise AssertionError("Gemini formatter must not run in OpenRouter flow")
+
+        monkeypatch.setattr(main, "format_explainer_content_or", _fake_format_or)
+        monkeypatch.setattr(main, "format_explainer_content", _fail_gemini_format)
 
         asyncio.run(main._process_project("proj-openrouter-explicit", "user-123", explainer_provider="openrouter"))
 
@@ -769,8 +776,11 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         usage_updates = [payload["usage"] for payload in updates if "usage" in payload]
         assert usage_updates[0]["explainer_provider"] == "openrouter"
         assert usage_updates[0]["explainer_model"] == main.OPENROUTER_EXPLAINER_MODEL
+        assert usage_updates[0]["formatter_model"] == main.OPENROUTER_MODEL_AUXILIARY
         assert usage_updates[0]["validator_model"] == main.OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
         assert usage_updates[0]["openrouter_pdf_priming_model"] == main.OPENROUTER_PDF_PRIMING_MODEL
+        assert formatter_or_calls
+        assert all(call["api_key"] == "sk-or-v1-test" for call in formatter_or_calls)
     finally:
         if os.path.isfile(pdf_path):
             os.unlink(pdf_path)

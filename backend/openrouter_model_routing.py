@@ -5,6 +5,7 @@ from typing import Any
 
 OPENROUTER_MODEL_AUXILIARY = "deepseek/deepseek-v4-flash"
 OPENROUTER_DEEPSEEK_PROVIDER_ORDER = ("deepseek",)
+OPENROUTER_MAX_REASONING_EFFORT = "xhigh"
 
 
 def deepseek_provider_preferences() -> dict[str, Any]:
@@ -12,6 +13,14 @@ def deepseek_provider_preferences() -> dict[str, Any]:
     return {
         "order": list(OPENROUTER_DEEPSEEK_PROVIDER_ORDER),
         "allow_fallbacks": False,
+    }
+
+
+def max_reasoning_preferences() -> dict[str, Any]:
+    """Use the highest OpenRouter reasoning effort while keeping reasoning text hidden."""
+    return {
+        "effort": OPENROUTER_MAX_REASONING_EFFORT,
+        "exclude": True,
     }
 
 

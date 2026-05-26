@@ -95,7 +95,7 @@ from backend.agents.completeness_validator import (
 from backend.agents.recorrido import run_recorrido, run_recorrido_or
 from backend.agents.resources import run_resources, run_resources_or
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
-from backend.agents.formatter import format_explainer_content
+from backend.agents.formatter import format_explainer_content, format_explainer_content_or
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
@@ -687,19 +687,19 @@ class PreparedPdfOcrContext:
 
 def _prepare_mistral_pdf_ocr_context(
     *,
-    numbered_pdf_path: str,
+    source_path: str,
     content_page_set: frozenset[int],
     api_key: str,
     engine: str,
 ) -> "PreparedPdfOcrContext":
-    """Prepare Mistral native OCR cache for the content pages of the numbered source PDF.
+    """Prepare Mistral native OCR cache for the content pages of a PDF.
 
-    The cache is keyed by the numbered source document itself, not by a
-    reconstructed per-run subset PDF. This allows future executions to reuse
-    already processed pages even if the classifier adds or removes pages.
+    The cache is keyed by the source document itself, not by a reconstructed
+    per-run subset PDF. This allows future executions to reuse already
+    processed pages even if the classifier adds or removes pages.
     """
     cache_entry = get_or_prime_mistral_pdf_ocr_cache(
-        source_path=numbered_pdf_path,
+        source_path=source_path,
         api_key=api_key,
         model=MISTRAL_OCR_MODEL,
         engine=engine,
@@ -707,7 +707,7 @@ def _prepare_mistral_pdf_ocr_context(
         expected_page_numbers=tuple(sorted(content_page_set)),
     )
     return PreparedPdfOcrContext(
-        source_pdf_path=numbered_pdf_path,
+        source_pdf_path=source_path,
         cache_entry=cache_entry,
         ocr_model=MISTRAL_OCR_MODEL,
     )
@@ -1742,6 +1742,9 @@ async def _format_and_finalize_part(
     part_id: int,
     explainer_data: dict,
     partes_contenido: dict,
+    *,
+    use_openrouter: bool = False,
+    openrouter_api_key: str = "",
 ) -> None:
     """Background task: format explainer content then persist and notify.
 
@@ -1754,7 +1757,12 @@ async def _format_and_finalize_part(
     try:
         is_markdown_format = isinstance(explainer_data, dict) and explainer_data.get("_format") == "markdown"
         if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict) and not is_markdown_format:
-            formatted, fmt_usage = await format_explainer_content(api_key, explainer_data)
+            if use_openrouter:
+                formatted, fmt_usage = await format_explainer_content_or(
+                    openrouter_api_key, explainer_data
+                )
+            else:
+                formatted, fmt_usage = await format_explainer_content(api_key, explainer_data)
             partes_contenido[str(part_id)]["explainer"] = formatted
             partes_contenido[str(part_id)]["formatter_usage"] = fmt_usage
             logger.info(
@@ -1916,6 +1924,9 @@ async def _process_project(
             "segmentation_model": segmentation_model,
             "agents_model": auxiliary_agents_model,
             "validator_model": validator_model,
+            "formatter_model": (
+                OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_AGENTS
+            ),
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
             "prompt_tokens": 0,
@@ -2119,14 +2130,12 @@ async def _process_project(
             logger.info(f"[Process] PDF descargado temporalmente: {pdf_temp_path}")
             temp_paths.append(pdf_temp_path)
 
-            # Add visible page numbers to the PDF before uploading
-            logger.info("[Process] Añadiendo numeración de páginas al PDF")
-            numbered_pdf_path = await asyncio.to_thread(add_page_numbers, pdf_temp_path)
-            logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
-            temp_paths.append(numbered_pdf_path)
-            pdf_total_pages = len(PdfReader(numbered_pdf_path).pages)
+            # Page count is read from the original PDF (same for both flows).
+            pdf_total_pages = len(PdfReader(pdf_temp_path).pages)
 
             if use_openrouter_explainer:
+                # OpenRouter flow: Mistral extracts text via PDF structure, so no
+                # visual page-number watermarks are needed. Use the original PDF directly.
                 logger.info(
                     "[Process] Preparando OCR canónico de Mistral al inicio del flujo OpenRouter",
                     extra={
@@ -2136,7 +2145,7 @@ async def _process_project(
                 )
                 mistral_pdf_context = await asyncio.to_thread(
                     _prepare_mistral_pdf_ocr_context,
-                    numbered_pdf_path=numbered_pdf_path,
+                    source_path=pdf_temp_path,
                     content_page_set=frozenset(range(1, pdf_total_pages + 1)),
                     api_key=mistral_api_key,
                     engine=MISTRAL_OCR_ENGINE,
@@ -2157,6 +2166,13 @@ async def _process_project(
                     },
                 )
             else:
+                # Gemini flow: add visible page-number watermarks before uploading.
+                # Gemini processes the PDF visually, so the watermarks let it identify
+                # absolute page numbers regardless of where in the document it is reading.
+                logger.info("[Process] Añadiendo numeración de páginas al PDF")
+                numbered_pdf_path = await asyncio.to_thread(add_page_numbers, pdf_temp_path)
+                logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
+                temp_paths.append(numbered_pdf_path)
                 upload_start = time.time()
                 uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
                 upload_duration = (time.time() - upload_start) * 1000
@@ -2175,7 +2191,7 @@ async def _process_project(
             await send_event(project_id, {"type": "segmenting"})
 
         # Clasificador de páginas (solo para PDF): identifica qué páginas son contenido vs. accesorias
-        if source_type == "pdf" and numbered_pdf_path and file_uri and pdf_total_pages > 0:
+        if source_type == "pdf" and file_uri and pdf_total_pages > 0:
             try:
                 if use_openrouter_explainer:
                     if not mistral_pdf_context or not openrouter_full_source_text:
@@ -2240,7 +2256,7 @@ async def _process_project(
                 mistral_pdf_prepare_task = asyncio.create_task(
                     asyncio.to_thread(
                         _prepare_mistral_pdf_ocr_context,
-                        numbered_pdf_path=numbered_pdf_path,
+                        source_path=pdf_temp_path,
                         content_page_set=content_page_set,
                         api_key=mistral_api_key,
                         engine=MISTRAL_OCR_ENGINE,
@@ -2546,57 +2562,58 @@ async def _process_project(
                 nucleo_pi = _optional_int(parte, "pagina_inicio")
                 nucleo_pf = _optional_int(parte, "pagina_fin")
 
-                if is_pdf_source and numbered_pdf_path:
-                    pagina_inicio = parte.get("pagina_inicio")
-                    pagina_fin = parte.get("pagina_fin")
-                    subpdf_buffered_ok = False
+                if is_pdf_source:
+                    pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = "full_document"
 
-                    if pagina_inicio and pagina_fin:
-                        try:
-                            # Extract sub-PDF with buffer pages
-                            logger.info(
-                                f"[Process] Extrayendo páginas {pagina_inicio}-{pagina_fin} (±1 buffer) para parte {part_id}",
-                                extra={"pagina_inicio": pagina_inicio, "pagina_fin": pagina_fin}
-                            )
-                            segment_temp_path = await asyncio.to_thread(
-                                extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
-                            )
-                            local_segment_pdf_paths.append(segment_temp_path)
-                            local_temp_paths.append(segment_temp_path)
+                    if not use_openrouter_explainer and numbered_pdf_path:
+                        # Gemini flow: extract a sub-PDF for this part and upload it.
+                        # OpenRouter flow skips this — it works entirely from OCR text.
+                        pagina_inicio = parte.get("pagina_inicio")
+                        pagina_fin = parte.get("pagina_fin")
+                        subpdf_buffered_ok = False
 
-                            # Upload sub-PDF to Gemini
-                            seg_upload_start = time.time()
-                            segment_uploaded = await asyncio.to_thread(
-                                lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
-                            )
-                            seg_upload_duration = (time.time() - seg_upload_start) * 1000
-                            agent_file_uri = segment_uploaded.uri
-                            agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
-                            subpdf_buffered_ok = True
+                        if pagina_inicio and pagina_fin:
+                            try:
+                                logger.info(
+                                    f"[Process] Extrayendo páginas {pagina_inicio}-{pagina_fin} (±1 buffer) para parte {part_id}",
+                                    extra={"pagina_inicio": pagina_inicio, "pagina_fin": pagina_fin}
+                                )
+                                segment_temp_path = await asyncio.to_thread(
+                                    extract_page_range, numbered_pdf_path, pagina_inicio, pagina_fin, buffer=1
+                                )
+                                local_segment_pdf_paths.append(segment_temp_path)
+                                local_temp_paths.append(segment_temp_path)
 
-                            logger.info(
-                                f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
-                                extra={
-                                    "segment_uri": agent_file_uri,
-                                    "seg_upload_duration_ms": int(seg_upload_duration),
-                                }
-                            )
-                        except Exception as seg_err:
-                            # Fallback: use full PDF if sub-PDF extraction fails
+                                seg_upload_start = time.time()
+                                segment_uploaded = await asyncio.to_thread(
+                                    lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
+                                )
+                                seg_upload_duration = (time.time() - seg_upload_start) * 1000
+                                agent_file_uri = segment_uploaded.uri
+                                agent_mime_type = getattr(segment_uploaded, "mime_type", None) or "application/pdf"
+                                subpdf_buffered_ok = True
+
+                                logger.info(
+                                    f"[Process] Sub-PDF parte {part_id} subido en {int(seg_upload_duration)}ms",
+                                    extra={
+                                        "segment_uri": agent_file_uri,
+                                        "seg_upload_duration_ms": int(seg_upload_duration),
+                                    }
+                                )
+                            except Exception as seg_err:
+                                logger.warning(
+                                    f"[Process] Error extrayendo sub-PDF para parte {part_id}, usando PDF completo: {seg_err}",
+                                    extra={"error_type": type(seg_err).__name__}
+                                )
+                                agent_file_uri = file_uri
+                        else:
                             logger.warning(
-                                f"[Process] Error extrayendo sub-PDF para parte {part_id}, usando PDF completo: {seg_err}",
-                                extra={"error_type": type(seg_err).__name__}
+                                f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
                             )
-                            agent_file_uri = file_uri
-                    else:
-                        logger.warning(
-                            f"[Process] Parte {part_id} sin pagina_inicio/pagina_fin, usando PDF completo"
-                        )
 
-                    pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = (
-                        "subpdf_buffered" if subpdf_buffered_ok else "full_document"
-                    )
-                    # Build part-level prompt (for recorrido and resources)
+                        pdf_scope_mode = "subpdf_buffered" if subpdf_buffered_ok else "full_document"
+
+                    # Build part-level prompt (for recorrido and resources) — both flows.
                     agent_prompt = _build_pdf_agent_prompt(
                         table_of_contents,
                         identificacion,
@@ -2610,7 +2627,7 @@ async def _process_project(
                         nucleo_fin=nucleo_pf,
                     )
 
-                    # Build subpart-level prompts (for explainer)
+                    # Build subpart-level prompts and page scopes — both flows.
                     subpartes = parte.get("subpartes") or []
                     if subpartes:
                         subpart_prompts = [
@@ -2632,7 +2649,7 @@ async def _process_project(
                             for sp in subpartes
                         ]
                     else:
-                        subpart_prompts = [agent_prompt]  # fallback: whole part as single subpart
+                        subpart_prompts = [agent_prompt]
                         openrouter_page_scopes = [
                             _select_openrouter_pdf_pages(
                                 content_page_set,
@@ -2641,6 +2658,7 @@ async def _process_project(
                                 buffer=1,
                             )
                         ]
+
                     if use_openrouter_explainer:
                         if mistral_pdf_context is None:
                             raise PdfOcrError(
@@ -3069,6 +3087,8 @@ async def _process_project(
                     part_id,
                     assembled_explainer,
                     partes_contenido,
+                    use_openrouter=use_openrouter_explainer,
+                    openrouter_api_key=openrouter_api_key,
                 )
             )
             return formatter_task, local_segment_pdf_paths, local_temp_paths
@@ -3306,12 +3326,26 @@ async def api_reformat_project(
             detail="El proyecto debe estar completado para poder reformatear.",
         )
 
-    api_key = get_user_api_key(user_id)
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay API key de Gemini configurada. Configúrala en Ajustes.",
-        )
+    project_usage = project.get("usage") or {}
+    use_openrouter = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_OPENROUTER
+
+    if use_openrouter:
+        api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No hay API key de OpenRouter configurada. "
+                    "Guárdala en Ajustes para reformatear este proyecto."
+                ),
+            )
+    else:
+        api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Gemini configurada. Configúrala en Ajustes.",
+            )
 
     partes_contenido: dict = dict(project.get("partes_contenido") or {})
 
@@ -3322,7 +3356,10 @@ async def api_reformat_project(
             and isinstance(explainer, dict)
             and "error" not in explainer
         ):
-            formatted, fmt_usage = await format_explainer_content(api_key, explainer)
+            if use_openrouter:
+                formatted, fmt_usage = await format_explainer_content_or(api_key, explainer)
+            else:
+                formatted, fmt_usage = await format_explainer_content(api_key, explainer)
             return pid, {**part_data, "explainer": formatted, "formatter_usage": fmt_usage, "formatter_version": 1}
         # No explainer or explainer errored — just mark version so we skip next time.
         return pid, {**part_data, "formatter_usage": {}, "formatter_version": 1}

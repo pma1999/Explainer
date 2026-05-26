@@ -215,6 +215,37 @@ def test_add_page_numbers_errors():
 
 
 # ============================================================
+# TEST 4b: add_page_numbers - Text content preserved on every page
+# Regression test: pypdf merge_page emptied content streams on pages that
+# use compressed or form-XObject resources (e.g. UOC-format section titles).
+# ============================================================
+
+def test_add_page_numbers_preserves_text_content():
+    """Every page must retain its original text after add_page_numbers."""
+    unique_texts = {
+        1: "Introduction chapter text that must survive numbering.",
+        2: "Section two paragraph unique content here.",
+        3: "Chapter three body with distinctive words.",
+    }
+    test_pdf = create_test_pdf(3, content_per_page=unique_texts)
+    numbered_pdf = None
+    try:
+        numbered_pdf = add_page_numbers(test_pdf)
+        reader = PdfReader(numbered_pdf)
+        for page_num, expected_fragment in unique_texts.items():
+            extracted = (reader.pages[page_num - 1].extract_text() or "").replace("\n", " ")
+            assert expected_fragment in extracted, (
+                f"Page {page_num}: original text lost after add_page_numbers.\n"
+                f"Expected: {expected_fragment!r}\nGot: {extracted[:200]!r}"
+            )
+    finally:
+        if os.path.isfile(test_pdf):
+            os.unlink(test_pdf)
+        if numbered_pdf and os.path.isfile(numbered_pdf):
+            os.unlink(numbered_pdf)
+
+
+# ============================================================
 # TEST 5: extract_page_range - Basic extraction
 # ============================================================
 

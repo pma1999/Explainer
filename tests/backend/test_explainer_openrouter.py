@@ -126,6 +126,7 @@ def test_run_subpart_explainer_or_returns_validated_desarrollo(monkeypatch):
     }
     assert captured_call["model"] == "xiaomi/mimo-v2.5-pro"
     assert captured_call["response_format"] == "json_object"
+    assert captured_call["reasoning"] == {"effort": "xhigh", "exclude": True}
 
 
 def test_run_subpart_explainer_or_uses_json_schema_for_supported_models(monkeypatch):

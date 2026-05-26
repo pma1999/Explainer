@@ -208,6 +208,7 @@ def test_check_explainer_validation_or_uses_openrouter_json_contract(monkeypatch
     assert captured["model"] == module.OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
     assert captured["model"] == "deepseek/deepseek-v4-flash"
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["reasoning"] == {"effort": "xhigh", "exclude": True}
     assert captured["response_format"] == "json_object"
     assert captured["enable_response_healing"] is True
     assert "is_complete" in captured["json_retry_instruction"]

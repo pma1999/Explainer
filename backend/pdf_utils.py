@@ -8,76 +8,17 @@ Provides:
 
 from __future__ import annotations
 
-import io
 import os
 import tempfile
 
+import fitz  # PyMuPDF
 from pypdf import PdfReader, PdfWriter
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
 
 from backend.logging_config import get_logger
 
 logger = get_logger("backend.pdf_utils")
 
-
-def _create_page_number_overlay(page_width: float, page_height: float, page_num: int, total_pages: int) -> io.BytesIO:
-    """Create a single-page transparent PDF with a page number stamp.
-
-    The stamp is placed at the bottom-center of the page with a semi-transparent
-    white background rectangle for readability against any content.
-
-    Args:
-        page_width: Width of the target page in points.
-        page_height: Height of the target page in points.
-        page_num: Current page number (1-indexed).
-        total_pages: Total number of pages.
-
-    Returns:
-        BytesIO buffer containing the single-page overlay PDF.
-    """
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=(page_width, page_height))
-
-    label = f"— Página {page_num} / {total_pages} —"
-
-    # Font setup
-    font_name = "Helvetica-Bold"
-    font_size = 10
-    c.setFont(font_name, font_size)
-
-    # Measure text width for centering and background rectangle
-    text_width = c.stringWidth(label, font_name, font_size)
-
-    # Position: bottom-center, 8mm from bottom edge
-    x = page_width / 2
-    y = 8 * mm
-
-    # Draw semi-transparent white background rectangle for readability
-    padding_h = 6
-    padding_v = 3
-    rect_x = x - text_width / 2 - padding_h
-    rect_y = y - padding_v
-    rect_w = text_width + 2 * padding_h
-    rect_h = font_size + 2 * padding_v
-
-    c.saveState()
-    c.setFillColorRGB(1, 1, 1, alpha=0.85)
-    c.setStrokeColorRGB(0.6, 0.6, 0.6, alpha=0.5)
-    c.setLineWidth(0.5)
-    c.roundRect(rect_x, rect_y, rect_w, rect_h, radius=3, fill=1, stroke=1)
-    c.restoreState()
-
-    # Draw text
-    c.setFillColorRGB(0.15, 0.15, 0.15)
-    c.setFont(font_name, font_size)
-    c.drawCentredString(x, y, label)
-
-    c.showPage()
-    c.save()
-    buf.seek(0)
-    return buf
+_MM_TO_PT = 2.834645669  # 1 mm in PDF points
 
 
 def add_page_numbers(input_path: str) -> str:
@@ -85,6 +26,11 @@ def add_page_numbers(input_path: str) -> str:
 
     Creates a new temporary PDF with "— Página X / N —" overlaid at the
     bottom-center of each page. The original file is not modified.
+
+    Uses PyMuPDF (fitz) to insert text directly into the page content stream
+    so that OCR engines can read the watermark and the original page text is
+    fully preserved (pypdf's merge_page corrupts content streams on pages that
+    use compressed or form-XObject resources).
 
     Args:
         input_path: Path to the source PDF file.
@@ -100,60 +46,52 @@ def add_page_numbers(input_path: str) -> str:
     if not os.path.isfile(input_path):
         raise FileNotFoundError(f"PDF not found: {input_path}")
 
-    logger.info(
-        "Adding page numbers to PDF",
-        extra={"input_path": input_path}
-    )
+    logger.info("Adding page numbers to PDF", extra={"input_path": input_path})
 
-    reader = PdfReader(input_path)
-    writer = PdfWriter()
-    total_pages = len(reader.pages)
+    doc = fitz.open(input_path)
+    total_pages = len(doc)
 
-    logger.info(
-        f"PDF has {total_pages} pages",
-        extra={"total_pages": total_pages}
-    )
+    logger.info(f"PDF has {total_pages} pages", extra={"total_pages": total_pages})
 
-    for i, page in enumerate(reader.pages):
-        page_num = i + 1
+    font_name = "hebo"  # Helvetica-Bold (built-in PDF font)
+    font_size = 10
+    pad_h = 6  # horizontal padding around label (points)
+    pad_v = 3  # vertical padding around label (points)
+    y_from_bottom = 8 * _MM_TO_PT  # baseline distance from page bottom
 
-        # Get page dimensions
-        media_box = page.mediabox
-        page_width = float(media_box.width)
-        page_height = float(media_box.height)
+    for page in doc:
+        label = f"— Página {page.number + 1} / {total_pages} —"
+        rect = page.rect
 
-        # Create overlay with page number
-        overlay_buf = _create_page_number_overlay(page_width, page_height, page_num, total_pages)
-        overlay_reader = PdfReader(overlay_buf)
-        overlay_page = overlay_reader.pages[0]
+        text_width = fitz.get_text_length(label, fontname=font_name, fontsize=font_size)
+        x = (rect.width - text_width) / 2
+        # In PyMuPDF y=0 is the top; insert_text point is the text baseline.
+        y_baseline = rect.height - y_from_bottom
 
-        # Merge overlay onto the original page
-        page.merge_page(overlay_page)
-        writer.add_page(page)
+        bg = fitz.Rect(
+            x - pad_h,
+            y_baseline - font_size - pad_v,
+            x + text_width + pad_h,
+            y_baseline + pad_v,
+        )
+        page.draw_rect(bg, color=(0.6, 0.6, 0.6), fill=(1, 1, 1), fill_opacity=0.85, width=0.5)
+        page.insert_text((x, y_baseline), label, fontname=font_name, fontsize=font_size, color=(0.15, 0.15, 0.15))
 
-    # Write to temp file
     fd, output_path = tempfile.mkstemp(suffix="_numbered.pdf")
+    os.close(fd)
     try:
-        with os.fdopen(fd, "wb") as f:
-            writer.write(f)
+        doc.save(output_path)
     except Exception:
-        # Clean up on failure
-        try:
-            os.close(fd)
-        except OSError:
-            pass
         if os.path.isfile(output_path):
             os.unlink(output_path)
         raise
+    finally:
+        doc.close()
 
     output_size = os.path.getsize(output_path)
     logger.info(
         f"Numbered PDF created: {output_path} ({output_size} bytes)",
-        extra={
-            "output_path": output_path,
-            "output_size_bytes": output_size,
-            "total_pages": total_pages,
-        }
+        extra={"output_path": output_path, "output_size_bytes": output_size, "total_pages": total_pages},
     )
 
     return output_path

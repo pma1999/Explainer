@@ -326,14 +326,14 @@ def test_prepare_mistral_pdf_ocr_context_requests_only_content_pages(monkeypatch
     monkeypatch.setattr(m, "get_or_prime_mistral_pdf_ocr_cache", _fake_get_or_prime)
 
     context = m._prepare_mistral_pdf_ocr_context(
-        numbered_pdf_path="document-numbered.pdf",
+        source_path="document.pdf",
         content_page_set=frozenset({3, 1}),
         api_key="mistral-test-key",
         engine="mistral-native",
     )
 
     assert captured["expected_page_numbers"] == (1, 3)
-    assert context.source_pdf_path == "document-numbered.pdf"
+    assert context.source_pdf_path == "document.pdf"
     assert context.cache_entry is fake_cache_entry
 
 

@@ -12,6 +12,7 @@ from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
     deepseek_provider_preferences,
+    max_reasoning_preferences,
 )
 
 from google import genai
@@ -519,6 +520,7 @@ def run_recorrido_or(
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,
+        reasoning=max_reasoning_preferences(),
         provider=deepseek_provider_preferences(),
         json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
     )

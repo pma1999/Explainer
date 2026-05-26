@@ -18,6 +18,7 @@ from backend.openrouter_client import (
     call_openrouter_chat,
     get_or_prime_pdf_parse_cache,
 )
+from backend.openrouter_model_routing import max_reasoning_preferences
 from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_pages_with_xml_tags
 from backend.agents.explainer_prompts import (
     SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
@@ -549,7 +550,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 response_format=response_format,
                 plugins=None,
                 enable_response_healing=True,
-                reasoning={"effort": "xhigh", "exclude": True},
+                reasoning=max_reasoning_preferences(),
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 provider=provider,
             )
@@ -572,7 +573,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 response_format=response_format,
                 plugins=fallback_plugins,
                 enable_response_healing=True,
-                reasoning={"effort": "xhigh", "exclude": True},
+                reasoning=max_reasoning_preferences(),
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 provider=provider,
             )
@@ -593,7 +594,7 @@ def _call_openrouter_json_with_pdf_fallback(
         response_format=response_format,
         plugins=plugins,
         enable_response_healing=True,
-        reasoning={"effort": "xhigh", "exclude": True},
+        reasoning=max_reasoning_preferences(),
         temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
         provider=provider,
     )

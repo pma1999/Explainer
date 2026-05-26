@@ -3,6 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 
+MAX_REASONING = {"effort": "xhigh", "exclude": True}
+
+
 def _usage():
     return SimpleNamespace(
         prompt_token_count=10,
@@ -42,6 +45,7 @@ def test_run_resources_or_uses_deepseek_provider_and_web_search_auto(monkeypatch
     assert usage.total_token_count == 15
     assert captured["model"] == "deepseek/deepseek-v4-flash"
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["reasoning"] == MAX_REASONING
     assert captured["response_format"] == "json_object"
     assert "titulo_mapa" in captured["json_retry_instruction"]
     assert "ejes_tematicos" in captured["json_retry_instruction"]
@@ -100,6 +104,7 @@ def test_run_recorrido_or_uses_deepseek_provider(monkeypatch):
     assert usage.total_token_count == 15
     assert captured["model"] == "deepseek/deepseek-v4-flash"
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["reasoning"] == MAX_REASONING
     assert "recorrido_anotado" in captured["json_retry_instruction"]
     assert "sintesis_de_cobertura" in captured["json_retry_instruction"]
     assert "openrouter:web_search" not in str(captured.get("tools"))
@@ -151,6 +156,7 @@ def test_run_segmentador_or_uses_deepseek_provider(monkeypatch):
     assert usage.total_token_count == 15
     assert captured["model"] == "deepseek/deepseek-v4-flash"
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["reasoning"] == MAX_REASONING
     assert "objeto JSON raíz" in captured["json_retry_instruction"]
     assert '"partes"' in captured["json_retry_instruction"]
     assert '"pagina_inicio"' in captured["json_retry_instruction"]
@@ -188,6 +194,7 @@ def test_run_page_classifier_or_returns_content_pages(monkeypatch):
     assert usage.total_token_count == 15
     assert captured["model"] == "deepseek/deepseek-v4-flash"
     assert captured["provider"] == {"order": ["deepseek"], "allow_fallbacks": False}
+    assert captured["reasoning"] == MAX_REASONING
     assert "total_paginas" in captured["json_retry_instruction"]
     assert "rangos_contenido" in captured["json_retry_instruction"]
     assert "<pagina_1>" in captured["messages"][0]["content"]

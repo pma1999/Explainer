@@ -1,12 +1,15 @@
-"""Formatter agent: post-processes explainer content with a fast Gemini model.
+"""Formatter agent: post-processes explainer content with a fast model.
 
 After the explainer agent generates its structured JSON output, this module
 sends every text field (introduccion, conclusion, each subsection's
 explicacion_detallada, each section's explicacion_introductoria, and each
-conexion's descripcion_conexion) to MODEL_AGENTS (Flash Lite preview) in a single
-parallel batch for markdown formatting. Each call uses JSON mode with a single
-``markdown`` field so only the body is persisted (no metatext or duplicate titles),
-and ``thinking_level="low"`` for lighter internal reasoning (lower latency/cost than ``high``).
+conexion's descripcion_conexion) in a single parallel batch for markdown formatting.
+
+- Gemini flow: MODEL_AGENTS (Flash Lite) via ``format_explainer_content``.
+- OpenRouter flow: ``deepseek/deepseek-v4-flash`` via ``format_explainer_content_or``.
+
+Each call uses JSON mode with a single ``markdown`` field so only the body is
+persisted (no metatext or duplicate titles).
 
 KEY RULES:
 - Content is never shortened, summarized, or substantively rewritten.
@@ -25,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import math
 import time
 from typing import Any
 
@@ -32,14 +36,21 @@ from google import genai
 from google.genai import types
 
 from backend.logging_config import get_logger
+from backend.openrouter_client import OpenRouterError, call_openrouter_chat
+from backend.openrouter_model_routing import (
+    OPENROUTER_MODEL_AUXILIARY,
+    deepseek_provider_preferences,
+    max_reasoning_preferences,
+)
 from backend.pricing import calculate_cost
 from backend.gemini_model_routing import MODEL_AGENTS
 from backend.agents.language_policy import FORMATTER_CASTELLANO_RULE
 
 logger = get_logger("backend.agents.formatter")
 
-# Fast, low-latency model used exclusively for the formatting pass.
+# Fast, low-latency models used for the formatting pass.
 FORMATTER_MODEL = MODEL_AGENTS
+FORMATTER_OPENROUTER_MODEL = OPENROUTER_MODEL_AUXILIARY
 
 # JSON field name for the formatted Markdown body (forced via response_schema).
 FORMATTER_MARKDOWN_FIELD = "markdown"
@@ -62,12 +73,15 @@ FORMATTER_RESPONSE_SCHEMA = types.Schema(
 )
 
 
-def _extract_formatted_markdown(raw: str) -> str | None:
+def _extract_formatted_markdown(raw: str | dict[str, Any]) -> str | None:
     """Parse formatter JSON output; return markdown string or None if invalid or empty."""
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+    if isinstance(raw, dict):
+        obj = raw
+    else:
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
     if not isinstance(obj, dict):
         return None
     md = obj.get(FORMATTER_MARKDOWN_FIELD)
@@ -75,6 +89,14 @@ def _extract_formatted_markdown(raw: str) -> str | None:
         return None
     stripped = md.strip()
     return stripped if stripped else None
+
+
+OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene exactamente una clave raíz:
+{
+  "markdown": "string"
+}
+`markdown` debe contener solo el cuerpo formateado en Markdown válido para el lector.
+La raíz debe ser un objeto JSON, nunca un array ni texto fuera del JSON."""
 
 
 def _usage_int_field(meta: Any, field: str) -> int:
@@ -139,6 +161,14 @@ FORMATTER_SYSTEM_PROMPT = (
   <output_format>
   Tu respuesta debe cumplir el esquema JSON indicado por la API: un único campo con el texto formateado en Markdown válido. Sin preámbulos fuera de ese campo, sin comentarios finales, sin bloques de explicación.
   </output_format>
+
+  <openrouter_json_contract>
+  Devuelve exclusivamente un objeto JSON raíz con esta estructura exacta:
+  {
+    "markdown": "cuerpo formateado en Markdown válido"
+  }
+  No devuelvas un array raíz ni texto fuera del JSON.
+  </openrouter_json_contract>
 </system_instruction>
 
 <few_shot_examples>
@@ -215,9 +245,7 @@ async def _format_text(
         return text, None
 
     try:
-        user_message = text
-        if context:
-            user_message = f"[Contexto del apartado: {context}]\n\n{text}"
+        user_message = _build_formatter_user_message(text, context)
 
         response = await client.aio.models.generate_content(
             model=FORMATTER_MODEL,
@@ -259,6 +287,226 @@ async def _format_text(
         return text, None
 
 
+def _build_formatter_user_message(text: str, context: str = "") -> str:
+    if context:
+        return f"[Contexto del apartado: {context}]\n\n{text}"
+    return text
+
+
+def _collect_formatter_field_tasks(
+    result: dict[str, Any],
+) -> list[tuple[tuple[Any, ...], str, str]]:
+    """Return (path, text, context) tuples for every prose field to format."""
+    tasks: list[tuple[tuple[Any, ...], str, str]] = []
+
+    def _add(path: tuple[Any, ...], text: str, ctx: str = "") -> None:
+        if text and text.strip():
+            tasks.append((path, text, ctx))
+
+    _add(("introduccion",), result.get("introduccion", ""))
+    _add(("conclusion",), result.get("conclusion", ""))
+
+    for i, sec in enumerate(result.get("desarrollo") or []):
+        ctx_sec = sec.get("titulo_seccion", "")
+        _add(
+            ("desarrollo", i, "explicacion_introductoria"),
+            sec.get("explicacion_introductoria", ""),
+            ctx_sec,
+        )
+        for j, sub in enumerate(sec.get("subsecciones") or []):
+            ctx_sub = f"{ctx_sec} · {sub.get('titulo_subseccion', '')}"
+            _add(
+                ("desarrollo", i, "subsecciones", j, "explicacion_detallada"),
+                sub.get("explicacion_detallada", ""),
+                ctx_sub,
+            )
+
+    for k, cx in enumerate(result.get("conexiones_contextuales") or []):
+        _add(
+            ("conexiones_contextuales", k, "descripcion_conexion"),
+            cx.get("descripcion_conexion", ""),
+            cx.get("seccion_temario_relacionada", ""),
+        )
+
+    return tasks
+
+
+def _openrouter_field_cost(usage_meta: Any) -> float | None:
+    """Return per-call USD cost when OpenRouter reports ``cost_usd``."""
+    raw_cost = getattr(usage_meta, "cost_usd", None)
+    if isinstance(raw_cost, (int, float)) and math.isfinite(raw_cost) and raw_cost >= 0:
+        return round(float(raw_cost), 6)
+    return None
+
+
+def _empty_formatter_usage() -> dict[str, Any]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "thoughts_tokens": 0,
+        "total_tokens": 0,
+        "cost": 0.0,
+    }
+
+
+def _build_formatter_usage_summary(
+    *,
+    model: str,
+    usages: list[Any | None],
+    total_input: int,
+    total_candidates: int,
+    total_thoughts: int,
+) -> dict[str, Any]:
+    billed_output = total_candidates + total_thoughts
+    per_field_costs: list[float] = []
+    sum_openrouter_costs = True
+    for usage in usages:
+        if usage is None:
+            per_field_costs.append(0.0)
+            continue
+        field_cost = _openrouter_field_cost(usage)
+        if field_cost is None:
+            sum_openrouter_costs = False
+            break
+        per_field_costs.append(field_cost)
+
+    if sum_openrouter_costs and per_field_costs:
+        fmt_cost = round(sum(per_field_costs), 6)
+    else:
+        fmt_cost = calculate_cost(
+            model,
+            {
+                "prompt_token_count": total_input,
+                "candidates_token_count": total_candidates,
+                "thoughts_token_count": total_thoughts,
+            },
+        )
+    return {
+        "input_tokens": total_input,
+        "output_tokens": billed_output,
+        "thoughts_tokens": total_thoughts,
+        "total_tokens": total_input + billed_output,
+        "cost": fmt_cost,
+    }
+
+
+async def _apply_parallel_formatter_results(
+    result: dict[str, Any],
+    field_tasks: list[tuple[tuple[Any, ...], str, str]],
+    gathered: list[Any],
+    *,
+    provider_label: str,
+    start_time: float,
+) -> tuple[dict[str, Any], dict[str, Any], list[Any | None]]:
+    """Write gathered formatter outputs into *result* and build usage aggregates."""
+    paths = [path for path, _, _ in field_tasks]
+    success_count = 0
+    total_input = 0
+    total_candidates = 0
+    total_thoughts = 0
+    usages: list[Any | None] = []
+
+    for path, value in zip(paths, gathered):
+        if isinstance(value, Exception):
+            logger.warning(
+                f"Formatter ({provider_label}) task failed for path {path}, keeping original: {value}",
+                extra={"path": str(path), "error": str(value)[:200]},
+            )
+            usages.append(None)
+            continue
+
+        formatted_text, usage_meta = value
+        usages.append(usage_meta)
+
+        if usage_meta is not None:
+            total_input += _usage_int_field(usage_meta, "prompt_token_count")
+            total_candidates += _usage_int_field(usage_meta, "candidates_token_count")
+            total_thoughts += _usage_int_field(usage_meta, "thoughts_token_count")
+
+        target: Any = result
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = formatted_text
+        success_count += 1
+
+    elapsed_ms = int((time.time() - start_time) * 1000)
+    total_tasks = len(field_tasks)
+    logger.info(
+        f"Formatter ({provider_label}) completed: {success_count}/{total_tasks} fields formatted "
+        f"in {elapsed_ms}ms",
+        extra={
+            "formatted_fields": success_count,
+            "total_fields": total_tasks,
+            "elapsed_ms": elapsed_ms,
+            "provider": provider_label,
+        },
+    )
+    return result, usages, [total_input, total_candidates, total_thoughts]
+
+
+def _format_text_or_sync(
+    api_key: str,
+    text: str,
+    context: str = "",
+) -> tuple[str, Any]:
+    """Format one text block via OpenRouter (sync; run in a thread from async code)."""
+    if not text or not text.strip():
+        return text, None
+
+    user_message = _build_formatter_user_message(text, context)
+
+    try:
+        content, usage = call_openrouter_chat(
+            messages=[{"role": "user", "content": user_message}],
+            model=FORMATTER_OPENROUTER_MODEL,
+            system_prompt=FORMATTER_SYSTEM_PROMPT,
+            api_key=api_key,
+            response_format="json_object",
+            enable_response_healing=True,
+            reasoning=max_reasoning_preferences(),
+            provider=deepseek_provider_preferences(),
+            temperature=0.1,
+            json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+        )
+    except OpenRouterError as exc:
+        logger.warning(
+            f"Formatter OpenRouter call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"Formatter OpenRouter call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+
+    if not isinstance(content, dict):
+        logger.warning(
+            "Formatter OpenRouter returned non-object JSON, keeping original text",
+            extra={"context_preview": context[:80], "content_type": type(content).__name__},
+        )
+        return text, usage
+
+    parsed = _extract_formatted_markdown(content)
+    if parsed is not None:
+        return parsed, usage
+
+    logger.warning(
+        "Formatter OpenRouter JSON parse failed or empty markdown field, keeping original text",
+        extra={"context_preview": context[:80], "response_preview": str(content)[:200]},
+    )
+    return text, usage
+
+
+async def _format_text_or(
+    api_key: str,
+    text: str,
+    context: str = "",
+) -> tuple[str, Any]:
+    return await asyncio.to_thread(_format_text_or_sync, api_key, text, context)
+
+
 async def format_explainer_content(
     api_key: str,
     explainer_data: dict[str, Any],
@@ -292,116 +540,71 @@ async def format_explainer_content(
     On partial failure individual fields fall back to their originals.
     """
     start_time = time.time()
-
     result = copy.deepcopy(explainer_data)
     client = genai.Client(api_key=api_key)
+    field_tasks = _collect_formatter_field_tasks(result)
 
-    # Build a flat ordered list of (path_tuple, coroutine) pairs.
-    # path_tuple encodes how to navigate and update *result* after gather.
-    tasks: list[tuple[tuple, Any]] = []
+    if not field_tasks:
+        return result, _empty_formatter_usage()
 
-    def _add(path: tuple, text: str, ctx: str = "") -> None:
-        if text and text.strip():
-            tasks.append((path, _format_text(client, text, ctx)))
-
-    _add(("introduccion",), result.get("introduccion", ""))
-    _add(("conclusion",), result.get("conclusion", ""))
-
-    for i, sec in enumerate(result.get("desarrollo") or []):
-        ctx_sec = sec.get("titulo_seccion", "")
-        _add(
-            ("desarrollo", i, "explicacion_introductoria"),
-            sec.get("explicacion_introductoria", ""),
-            ctx_sec,
-        )
-        for j, sub in enumerate(sec.get("subsecciones") or []):
-            ctx_sub = f"{ctx_sec} · {sub.get('titulo_subseccion', '')}"
-            _add(
-                ("desarrollo", i, "subsecciones", j, "explicacion_detallada"),
-                sub.get("explicacion_detallada", ""),
-                ctx_sub,
-            )
-
-    for k, cx in enumerate(result.get("conexiones_contextuales") or []):
-        _add(
-            ("conexiones_contextuales", k, "descripcion_conexion"),
-            cx.get("descripcion_conexion", ""),
-            cx.get("seccion_temario_relacionada", ""),
-        )
-
-    _empty_usage: dict[str, Any] = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "thoughts_tokens": 0,
-        "total_tokens": 0,
-        "cost": 0.0,
-    }
-
-    if not tasks:
-        return result, _empty_usage
-
-    paths, coros = zip(*tasks)
-
-    # Run ALL formatting requests in a single parallel batch.
+    coros = [
+        _format_text(client, text, ctx)
+        for _, text, ctx in field_tasks
+    ]
     gathered = await asyncio.gather(*coros, return_exceptions=True)
 
-    success_count = 0
-    total_input = 0
-    total_candidates = 0
-    total_thoughts = 0
-
-    for path, value in zip(paths, gathered):
-        if isinstance(value, Exception):
-            logger.warning(
-                f"Formatter task failed for path {path}, keeping original: {value}",
-                extra={"path": str(path), "error": str(value)[:200]},
-            )
-            continue
-
-        # Unpack (formatted_text, usage_metadata) returned by _format_text.
-        formatted_text, usage_meta = value
-
-        # Accumulate token counts for cost reporting (thinking billed as output per Google pricing).
-        if usage_meta is not None:
-            total_input += _usage_int_field(usage_meta, "prompt_token_count")
-            total_candidates += _usage_int_field(usage_meta, "candidates_token_count")
-            total_thoughts += _usage_int_field(usage_meta, "thoughts_token_count")
-
-        # Navigate the path and set the leaf value.
-        target: Any = result
-        for key in path[:-1]:
-            target = target[key]
-        target[path[-1]] = formatted_text
-        success_count += 1
-
-    elapsed_ms = int((time.time() - start_time) * 1000)
-    total_tasks = len(tasks)
-    logger.info(
-        f"Formatter completed: {success_count}/{total_tasks} fields formatted "
-        f"in {elapsed_ms}ms",
-        extra={
-            "formatted_fields": success_count,
-            "total_fields": total_tasks,
-            "elapsed_ms": elapsed_ms,
-        },
+    result, usages, token_totals = await _apply_parallel_formatter_results(
+        result,
+        field_tasks,
+        gathered,
+        provider_label="gemini",
+        start_time=start_time,
     )
-
-    fmt_cost = calculate_cost(
-        FORMATTER_MODEL,
-        {
-            "prompt_token_count": total_input,
-            "candidates_token_count": total_candidates,
-            "thoughts_token_count": total_thoughts,
-        },
+    total_input, total_candidates, total_thoughts = token_totals
+    usage_summary = _build_formatter_usage_summary(
+        model=FORMATTER_MODEL,
+        usages=usages,
+        total_input=total_input,
+        total_candidates=total_candidates,
+        total_thoughts=total_thoughts,
     )
-    # output_tokens = all generation billed at output rate (candidates + internal thinking).
-    billed_output = total_candidates + total_thoughts
-    usage_summary: dict[str, Any] = {
-        "input_tokens": total_input,
-        "output_tokens": billed_output,
-        "thoughts_tokens": total_thoughts,
-        "total_tokens": total_input + billed_output,
-        "cost": fmt_cost,
-    }
+    return result, usage_summary
 
+
+async def format_explainer_content_or(
+    api_key: str,
+    explainer_data: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Format all prose fields via OpenRouter (DeepSeek Flash) in parallel.
+
+    Same schema and fail-safe semantics as ``format_explainer_content``.
+    """
+    start_time = time.time()
+    result = copy.deepcopy(explainer_data)
+    field_tasks = _collect_formatter_field_tasks(result)
+
+    if not field_tasks:
+        return result, _empty_formatter_usage()
+
+    coros = [
+        _format_text_or(api_key, text, ctx)
+        for _, text, ctx in field_tasks
+    ]
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+
+    result, usages, token_totals = await _apply_parallel_formatter_results(
+        result,
+        field_tasks,
+        gathered,
+        provider_label="openrouter",
+        start_time=start_time,
+    )
+    total_input, total_candidates, total_thoughts = token_totals
+    usage_summary = _build_formatter_usage_summary(
+        model=FORMATTER_OPENROUTER_MODEL,
+        usages=usages,
+        total_input=total_input,
+        total_candidates=total_candidates,
+        total_thoughts=total_thoughts,
+    )
     return result, usage_summary

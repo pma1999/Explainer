@@ -26,6 +26,7 @@ from backend.openrouter_client import call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
     deepseek_provider_preferences,
+    max_reasoning_preferences,
 )
 
 logger = get_logger("backend.agents.completeness_validator")
@@ -525,6 +526,7 @@ def check_explainer_validation_or(
             api_key=openrouter_api_key,
             response_format="json_object",
             enable_response_healing=True,
+            reasoning=max_reasoning_preferences(),
             provider=deepseek_provider_preferences(),
             json_retry_instruction=_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION,
         )

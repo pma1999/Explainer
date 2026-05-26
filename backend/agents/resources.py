@@ -12,6 +12,7 @@ from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
     deepseek_provider_preferences,
+    max_reasoning_preferences,
     openrouter_web_search_tool_auto,
 )
 
@@ -172,8 +173,19 @@ OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
 
 <openrouter_tool_contract>
 Cuando estas instrucciones mencionen Google Search, usa la herramienta de servidor
-`openrouter:web_search` disponible en esta llamada. La búsqueda está configurada con
+`openrouter_web_search` disponible en esta llamada. La búsqueda está configurada con
 motor `auto`; utilízala para verificar recursos, títulos, autoría, vigencia y enlaces.
+
+FORMATO OBLIGATORIO DE TOOL CALLS:
+Usa ÚNICAMENTE el formato estándar JSON de tool_calls de OpenAI para invocar herramientas.
+Ejemplo correcto:
+  {"name": "openrouter_web_search", "arguments": {"query": "tu consulta aquí"}}
+
+PROHIBIDO — estos formatos NO están soportados y causarán fallos de parseo:
+- Formato DSML: <｜｜DSML｜｜tool_calls>, <｜｜DSML｜｜invoke name="...">, etc.
+- Cualquier otro markup XML o propietario para tool calls.
+Si usas DSML u otro formato no estándar, tu respuesta completa será rechazada con
+error de JSON inválido. Solo el mecanismo estándar de tool_calls JSON será procesado.
 </openrouter_tool_contract>
 
 <openrouter_source_contract>
@@ -467,6 +479,7 @@ def run_resources_or(
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,
+        reasoning=max_reasoning_preferences(),
         provider=deepseek_provider_preferences(),
         tools=[openrouter_web_search_tool_auto()],
         json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,

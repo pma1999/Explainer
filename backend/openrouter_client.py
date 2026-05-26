@@ -35,6 +35,7 @@ No incluyas Markdown, comentarios ni texto fuera del JSON.
 _OPENROUTER_COST_NUMBER_RE = re.compile(
     r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
 )
+_DSML_TOOL_CALL_RE = re.compile(r"<｜｜DSML｜｜", re.IGNORECASE)
 _PDF_PAGE_MARKER_RE = re.compile(r"— Página\s+(\d+)\s*/\s*(\d+)\s+—")
 _PDF_CACHE_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 _PDF_CACHE_LOCKS_GUARD = threading.Lock()
@@ -80,7 +81,12 @@ def _with_json_response_instruction(system_prompt: str) -> str:
     return f"{system_prompt.rstrip()}{_JSON_RESPONSE_SYSTEM_SUFFIX}"
 
 
-def _json_retry_user_message(exc: OpenRouterError, json_retry_instruction: str | None) -> str:
+def _json_retry_user_message(
+    exc: OpenRouterError,
+    json_retry_instruction: str | None,
+    *,
+    raw_content: str = "",
+) -> str:
     details = [
         "Tu respuesta anterior no ha pasado la validación local.",
         f"Error detectado: {exc}",
@@ -88,6 +94,17 @@ def _json_retry_user_message(exc: OpenRouterError, json_retry_instruction: str |
         "Tienes que responder otra vez usando el mismo contexto anterior, pero corrigiendo SOLO el formato.",
         "Devuelve exclusivamente un objeto JSON raíz válido. No devuelvas arrays como raíz, Markdown, comentarios ni texto fuera del JSON.",
     ]
+    if raw_content and _DSML_TOOL_CALL_RE.search(raw_content):
+        details.extend([
+            "",
+            "CAUSA RAÍZ DEL ERROR: Tu respuesta contenía markup DSML de tool calls "
+            "(<｜｜DSML｜｜tool_calls>, <｜｜DSML｜｜invoke>, etc.).",
+            "Este formato propietario NO está soportado y no será procesado.",
+            "Si necesitas buscar información, usa el formato estándar JSON de OpenAI tool_calls:",
+            '  {"name": "openrouter_web_search", "arguments": {"query": "tu consulta"}}',
+            "NO uses formato DSML, XML ni ningún otro markup propietario para las tool calls.",
+            "Si ya tienes suficiente conocimiento, devuelve directamente el JSON solicitado sin tool calls.",
+        ])
     if json_retry_instruction and json_retry_instruction.strip():
         details.extend(
             [
@@ -1209,6 +1226,7 @@ def call_openrouter_chat_full(
                                 "content": _json_retry_user_message(
                                     exc,
                                     json_retry_instruction,
+                                    raw_content=content_text,
                                 ),
                             },
                         ]
