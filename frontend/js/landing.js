@@ -11,9 +11,12 @@ import { updateApiKeyUI, showSettings } from './auth.js';
 let selectedFile = null;
 let currentSourceType = 'pdf';
 let currentExplainerProvider = 'gemini';
+let currentTargetLanguage = 'es-ES';
 export const OPENROUTER_MODEL_MIMO_PRO = 'xiaomi/mimo-v2.5-pro';
 export const OPENROUTER_MODEL_MIMO = 'xiaomi/mimo-v2.5';
 export const OPENROUTER_MODEL_DEEPSEEK_V4_PRO = 'deepseek/deepseek-v4-pro';
+export const DEFAULT_TARGET_LANGUAGE = 'es-ES';
+export const SUPPORTED_TARGET_LANGUAGES = ['es-ES', 'en', 'fr', 'de', 'it', 'pt-PT'];
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 
 export function extractYouTubeVideoId(url) {
@@ -57,6 +60,10 @@ export function isExplainerProviderSupportedForSource(sourceType, provider) {
 
 export function isValidOpenRouterModel(model) {
   return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
+}
+
+export function isValidTargetLanguage(language) {
+  return SUPPORTED_TARGET_LANGUAGES.includes(language);
 }
 
 function openRouterModelLabel(model) {
@@ -125,6 +132,7 @@ export function initLanding() {
   const descInput = $('project-description');
   const youtubeUrlInput = $('youtube-url');
   const webUrlInput = $('web-url');
+  const targetLanguageSelect = $('target-language');
   const providerGemini = $('explainer-provider-gemini');
   const providerOpenRouter = $('explainer-provider-openrouter');
   const modelPro = $('openrouter-model-pro');
@@ -182,6 +190,11 @@ export function initLanding() {
     syncExplainerProviderUI();
   }
 
+  function setTargetLanguage(language) {
+    currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
+    if (targetLanguageSelect) targetLanguageSelect.value = currentTargetLanguage;
+  }
+
   function switchSourceType(type) {
     currentSourceType = type;
 
@@ -231,6 +244,10 @@ export function initLanding() {
   modelDeepseek.addEventListener('change', () => {
     if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
   });
+  if (targetLanguageSelect) {
+    setTargetLanguage(targetLanguageSelect.value || DEFAULT_TARGET_LANGUAGE);
+    targetLanguageSelect.addEventListener('change', () => setTargetLanguage(targetLanguageSelect.value));
+  }
 
   function checkReady() {
     const hasName = nameInput.value.trim();
@@ -415,7 +432,8 @@ async function handleUpload() {
     $('project-description').value = '';
     $('youtube-url').value = '';
     $('web-url').value = '';
-    const processPayload = { explainer_provider: currentExplainerProvider };
+    const processPayload = { explainer_provider: currentExplainerProvider, target_language: currentTargetLanguage };
+    setTargetLanguage(DEFAULT_TARGET_LANGUAGE);
     if (currentExplainerProvider === 'openrouter') {
       processPayload.openrouter_model = currentOpenRouterModel;
     }

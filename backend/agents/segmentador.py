@@ -7,7 +7,7 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTADOR
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
-from backend.agents.language_policy import CASTELLANO_ESPANIA_XML
+from backend.agents.language_policy import CASTELLANO_ESPANIA_XML, build_language_policy_xml
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -1037,8 +1037,13 @@ def _openrouter_segmentador_json_contract(source_kind: str) -> str:
     return OPENROUTER_PDF_JSON_CONTRACT if source_kind == "pdf" else OPENROUTER_TEXT_JSON_CONTRACT
 
 
-def _openrouter_segmentador_system_instruction(source_kind: str) -> str:
+def _segmentador_system_instruction(source_kind: str, target_language: str = "es-ES") -> str:
     base = SYSTEM_INSTRUCTION if source_kind == "pdf" else TEXT_SYSTEM_INSTRUCTION
+    return base.replace(CASTELLANO_ESPANIA_XML, build_language_policy_xml(target_language, context="segmentador"))
+
+
+def _openrouter_segmentador_system_instruction(source_kind: str, target_language: str = "es-ES") -> str:
+    base = _segmentador_system_instruction(source_kind, target_language)
     if source_kind == "pdf":
         source_note = (
             "\n\n<openrouter_source_contract>\n"
@@ -1072,6 +1077,7 @@ def run_segmentador(
     model: str = MODEL_SEGMENTADOR,
     mime_type: str = "application/pdf",
     source_kind: str = "pdf",
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Segmentador agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
@@ -1102,7 +1108,7 @@ def run_segmentador(
     ]
 
     response_schema = RESPONSE_SCHEMA if source_kind == "pdf" else TEXT_RESPONSE_SCHEMA
-    system_instruction = SYSTEM_INSTRUCTION if source_kind == "pdf" else TEXT_SYSTEM_INSTRUCTION
+    system_instruction = _segmentador_system_instruction(source_kind, target_language)
 
     config = types.GenerateContentConfig(
         temperature=TEMPERATURE_SEGMENTADOR,
@@ -1185,6 +1191,7 @@ def run_segmentador_or(
     description: str,
     source_kind: str = "pdf",
     model: str = OPENROUTER_MODEL_AUXILIARY,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Segmentador agent via OpenRouter on inline OCR/text."""
     start_time = time.time()
@@ -1220,7 +1227,7 @@ def run_segmentador_or(
             }
         ],
         model=model,
-        system_prompt=_openrouter_segmentador_system_instruction(source_kind),
+        system_prompt=_openrouter_segmentador_system_instruction(source_kind, target_language),
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,

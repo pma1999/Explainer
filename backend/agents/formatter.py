@@ -15,7 +15,7 @@ KEY RULES:
 - Content is never shortened, summarized, or substantively rewritten.
 - The formatter may apply minimal surface normalization when the source contains
   accidental anglicisms, foreign-language contamination, mojibake, or malformed
-  token fragments that break readability in Spanish. This cleanup must preserve
+  token fragments that break readability in the selected target language. This cleanup must preserve
   all meaning and all factual content.
 - Every call is fail-safe: if the model fails for any reason, the original
   text is preserved unchanged.
@@ -44,7 +44,7 @@ from backend.openrouter_model_routing import (
 )
 from backend.pricing import calculate_cost
 from backend.gemini_model_routing import MODEL_AGENTS
-from backend.agents.language_policy import FORMATTER_CASTELLANO_RULE
+from backend.agents.language_policy import FORMATTER_CASTELLANO_RULE, build_formatter_language_rule
 
 logger = get_logger("backend.agents.formatter")
 
@@ -131,7 +131,7 @@ FORMATTER_SYSTEM_PROMPT = (
   - **Coherencia tipográfica:** las mismas categorías de información reciben el mismo tratamiento visual a lo largo de todo el texto.
   - **Proporcionalidad:** el formato aplicado es proporcional a la extensión y complejidad del texto — textos breves reciben formato ligero; textos extensos pueden beneficiarse de más estructura.
   - **Limpieza:** el cuerpo formateado no incluye metacomentarios, listas sobre cómo vas a formatear, encabezados que dupliquen el título del apartado, ni explicaciones del proceso.
-  - **Legibilidad lingüística:** si el texto contiene anglicismos accidentales, palabras sueltas en otro idioma, mojibake, transliteraciones rotas o fragmentos claramente corruptos que dificultan la lectura en español, se corrigen al español natural sin acortar ni alterar el significado.
+  - **Legibilidad lingüística:** si el texto contiene palabras accidentales en otro idioma, mojibake, transliteraciones rotas o fragmentos claramente corruptos que dificultan la lectura en el idioma objetivo, se corrigen de forma natural en ese mismo idioma objetivo sin acortar ni alterar el significado.
   </quality_criteria>
 
   <context_rule>
@@ -214,7 +214,7 @@ FORMATTER_SYSTEM_PROMPT = (
 </few_shot_examples>
 
 <task>
-Formatea en Markdown el texto proporcionado (el cuerpo tras el contexto, si existe). Preserva todo el contenido sustantivo del original. Además, limpia anglicismos accidentales y artefactos lingüísticos que rompan la lectura en español, sin acortar nada ni perder información. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Rellena el campo JSON únicamente con ese cuerpo formateado.
+Formatea en Markdown el texto proporcionado (el cuerpo tras el contexto, si existe). Preserva todo el contenido sustantivo del original. Además, limpia artefactos lingüísticos accidentales que rompan la lectura en el idioma objetivo, sin acortar nada, sin traducir a otro idioma ni perder información. Aplica formato tipográfico proporcionado a la naturaleza y complejidad del texto. Rellena el campo JSON únicamente con ese cuerpo formateado.
 </task>
 
 <thinking_protocol>
@@ -230,10 +230,20 @@ El valor del campo JSON ``markdown`` debe ser solo el cuerpo formateado para el 
 )
 
 
+def build_formatter_system_prompt(target_language: str = "es-ES") -> str:
+    """Return formatter prompt for the selected target language."""
+
+    return FORMATTER_SYSTEM_PROMPT.replace(
+        FORMATTER_CASTELLANO_RULE,
+        build_formatter_language_rule(target_language),
+    )
+
+
 async def _format_text(
     client: genai.Client,
     text: str,
     context: str = "",
+    target_language: str = "es-ES",
 ) -> tuple[str, Any]:
     """Format a single text block as Markdown using the fast model.
 
@@ -251,7 +261,7 @@ async def _format_text(
             model=FORMATTER_MODEL,
             contents=user_message,
             config=types.GenerateContentConfig(
-                system_instruction=FORMATTER_SYSTEM_PROMPT,
+                system_instruction=build_formatter_system_prompt(target_language),
                 temperature=0.1,
                 thinking_config=types.ThinkingConfig(thinking_level="low"),
                 response_mime_type="application/json",
@@ -448,6 +458,7 @@ def _format_text_or_sync(
     api_key: str,
     text: str,
     context: str = "",
+    target_language: str = "es-ES",
 ) -> tuple[str, Any]:
     """Format one text block via OpenRouter (sync; run in a thread from async code)."""
     if not text or not text.strip():
@@ -459,7 +470,7 @@ def _format_text_or_sync(
         content, usage = call_openrouter_chat(
             messages=[{"role": "user", "content": user_message}],
             model=FORMATTER_OPENROUTER_MODEL,
-            system_prompt=FORMATTER_SYSTEM_PROMPT,
+            system_prompt=build_formatter_system_prompt(target_language),
             api_key=api_key,
             response_format="json_object",
             enable_response_healing=True,
@@ -503,13 +514,15 @@ async def _format_text_or(
     api_key: str,
     text: str,
     context: str = "",
+    target_language: str = "es-ES",
 ) -> tuple[str, Any]:
-    return await asyncio.to_thread(_format_text_or_sync, api_key, text, context)
+    return await asyncio.to_thread(_format_text_or_sync, api_key, text, context, target_language)
 
 
 async def format_explainer_content(
     api_key: str,
     explainer_data: dict[str, Any],
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Format all prose text fields in an explainer result dict in parallel.
 
@@ -548,7 +561,7 @@ async def format_explainer_content(
         return result, _empty_formatter_usage()
 
     coros = [
-        _format_text(client, text, ctx)
+        _format_text(client, text, ctx, target_language)
         for _, text, ctx in field_tasks
     ]
     gathered = await asyncio.gather(*coros, return_exceptions=True)
@@ -574,6 +587,7 @@ async def format_explainer_content(
 async def format_explainer_content_or(
     api_key: str,
     explainer_data: dict[str, Any],
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Format all prose fields via OpenRouter (DeepSeek Flash) in parallel.
 
@@ -587,7 +601,7 @@ async def format_explainer_content_or(
         return result, _empty_formatter_usage()
 
     coros = [
-        _format_text_or(api_key, text, ctx)
+        _format_text_or(api_key, text, ctx, target_language)
         for _, text, ctx in field_tasks
     ]
     gathered = await asyncio.gather(*coros, return_exceptions=True)

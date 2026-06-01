@@ -96,6 +96,7 @@ from backend.agents.recorrido import run_recorrido, run_recorrido_or
 from backend.agents.resources import run_resources, run_resources_or
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
 from backend.agents.formatter import format_explainer_content, format_explainer_content_or
+from backend.agents.language_policy import normalize_target_language
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
@@ -160,6 +161,7 @@ ACTIVE_PROJECT_STATUSES = frozenset({"uploading", "segmenting", "processing"})
 class ProcessProjectRequest(BaseModel):
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI
     openrouter_model: OpenRouterExplainerModel | None = None
+    target_language: str = "es-ES"
 
 
 def _resolve_explainer_model(
@@ -1059,20 +1061,20 @@ def _call_agent_with_optional_validation_context(
     fn: Callable[..., Any],
     *args: Any,
     validation_context: ExplainerValidationContext | None,
+    target_language: str = "es-ES",
 ) -> Any:
     try:
         signature = inspect.signature(fn)
     except (TypeError, ValueError):
-        return fn(*args, validation_context=validation_context)
+        return fn(*args, validation_context=validation_context, target_language=target_language)
 
-    accepts_context = False
-    for parameter in signature.parameters.values():
-        if parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "validation_context":
-            accepts_context = True
-            break
-    if accepts_context:
-        return fn(*args, validation_context=validation_context)
-    return fn(*args)
+    accepts_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+    call_kwargs: dict[str, Any] = {}
+    if accepts_kwargs or "validation_context" in signature.parameters:
+        call_kwargs["validation_context"] = validation_context
+    if accepts_kwargs or "target_language" in signature.parameters:
+        call_kwargs["target_language"] = target_language
+    return fn(*args, **call_kwargs)
 
 
 def _unpack_explainer_result(sp_result: Any) -> tuple[dict, Any, list[Any]]:
@@ -1745,6 +1747,7 @@ async def _format_and_finalize_part(
     *,
     use_openrouter: bool = False,
     openrouter_api_key: str = "",
+    target_language: str = "es-ES",
 ) -> None:
     """Background task: format explainer content then persist and notify.
 
@@ -1759,10 +1762,10 @@ async def _format_and_finalize_part(
         if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict) and not is_markdown_format:
             if use_openrouter:
                 formatted, fmt_usage = await format_explainer_content_or(
-                    openrouter_api_key, explainer_data
+                    openrouter_api_key, explainer_data, target_language
                 )
             else:
-                formatted, fmt_usage = await format_explainer_content(api_key, explainer_data)
+                formatted, fmt_usage = await format_explainer_content(api_key, explainer_data, target_language)
             partes_contenido[str(part_id)]["explainer"] = formatted
             partes_contenido[str(part_id)]["formatter_usage"] = fmt_usage
             logger.info(
@@ -1792,6 +1795,7 @@ async def _process_project(
     user_id: str,
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI,
     openrouter_model: OpenRouterExplainerModel | str | None = None,
+    target_language: str = "es-ES",
 ) -> None:
     process_start_time = time.time()
     project: dict[str, Any] | None = None
@@ -1812,6 +1816,8 @@ async def _process_project(
     source_metadata: dict[str, object] = {}
     openrouter_full_source_text = ""
     use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
+    target_language_obj = normalize_target_language(target_language)
+    target_language_code = target_language_obj.code
     try:
         explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
     except ValueError as exc:
@@ -1842,6 +1848,8 @@ async def _process_project(
             return
 
         source_type = project.get("source_type", "pdf")
+        source_metadata = {**(project.get("source_metadata") or {}), "target_language": target_language_code}
+        update_project(project_id, user_id, {"source_metadata": source_metadata})
         logger.info(
             f"[Process] Proyecto cargado: {project.get('name', 'unnamed')}",
             extra={
@@ -2020,7 +2028,7 @@ async def _process_project(
             update_project(project_id, user_id, {"status": "uploading"})
 
             source_text = project.get("source_text")
-            source_metadata = project.get("source_metadata") or {}
+            source_metadata = {**(project.get("source_metadata") or {}), "target_language": target_language_code}
             extraction_usage = None
 
             if not source_text:
@@ -2034,7 +2042,9 @@ async def _process_project(
                 source_title = extracted_content.title
                 resolved_source_url = extracted_content.resolved_url
                 source_metadata = {
+                    **source_metadata,
                     **(extracted_content.metadata or {}),
+                    "target_language": target_language_code,
                     "title": extracted_content.title,
                     "resolved_url": extracted_content.resolved_url,
                     "content_type": extracted_content.content_type,
@@ -2309,6 +2319,7 @@ async def _process_project(
                     segmentador_source_text,
                     seg_description,
                     source_kind,
+                    target_language=target_language_code,
                 )
             else:
                 segmentation, usage_meta = await asyncio.to_thread(
@@ -2319,6 +2330,7 @@ async def _process_project(
                     MODEL_SEGMENTADOR,
                     source_mime_type,
                     source_kind,
+                    target_language=target_language_code,
                 )
             phase = "segmentation" if seg_attempt == 0 else f"segmentation_retry_{seg_attempt}"
             await _locked_apply_usage(usage_meta, phase=phase, cost_model=segmentation_model)
@@ -2853,6 +2865,7 @@ async def _process_project(
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
                                     validation_context=validation_context,
+                                    target_language=target_language_code,
                                 )
                             return asyncio.to_thread(
                                 _call_agent_with_optional_validation_context,
@@ -2864,6 +2877,7 @@ async def _process_project(
                                 openrouter_api_key,
                                 openrouter_api_key,
                                 validation_context=validation_context,
+                                target_language=target_language_code,
                             )
                         return asyncio.to_thread(
                             _call_agent_with_optional_validation_context,
@@ -2874,6 +2888,7 @@ async def _process_project(
                             MODEL_AGENTS,
                             agent_mime_type,
                             validation_context=validation_context,
+                            target_language=target_language_code,
                         )
 
                     if use_or_canonical:
@@ -2902,6 +2917,7 @@ async def _process_project(
                                 mistral_pdf_context.cache_entry,
                                 page_scope,
                                 validation_context=subpart_validation_contexts[idx],
+                                target_language=target_language_code,
                             )
                             for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
                         ]
@@ -2917,6 +2933,7 @@ async def _process_project(
                                 openrouter_api_key,
                                 openrouter_api_key,
                                 validation_context=subpart_validation_contexts[idx],
+                                target_language=target_language_code,
                             )
                             for idx, sp_prompt in enumerate(subpart_prompts)
                         ]
@@ -2932,6 +2949,7 @@ async def _process_project(
                             MODEL_AGENTS,
                             agent_mime_type,
                             validation_context=subpart_validation_contexts[idx],
+                            target_language=target_language_code,
                         )
                         for idx, sp_prompt in enumerate(subpart_prompts)
                     ]
@@ -2941,12 +2959,14 @@ async def _process_project(
                         openrouter_api_key,
                         openrouter_part_source_text,
                         agent_prompt,
+                        target_language=target_language_code,
                     )
                     resources_task = asyncio.to_thread(
                         run_resources_or,
                         openrouter_api_key,
                         openrouter_part_source_text,
                         agent_prompt,
+                        target_language=target_language_code,
                     )
                 else:
                     recorrido_task = asyncio.to_thread(
@@ -2956,6 +2976,7 @@ async def _process_project(
                         agent_prompt,
                         MODEL_AGENTS,
                         agent_mime_type,
+                        target_language=target_language_code,
                     )
                     resources_task = asyncio.to_thread(
                         run_resources,
@@ -2964,6 +2985,7 @@ async def _process_project(
                         agent_prompt,
                         MODEL_AGENTS,
                         agent_mime_type,
+                        target_language=target_language_code,
                     )
 
                 results = await asyncio.gather(
@@ -3089,6 +3111,7 @@ async def _process_project(
                     partes_contenido,
                     use_openrouter=use_openrouter_explainer,
                     openrouter_api_key=openrouter_api_key,
+                    target_language=target_language_code,
                 )
             )
             return formatter_task, local_segment_pdf_paths, local_temp_paths
@@ -3349,6 +3372,8 @@ async def api_reformat_project(
 
     partes_contenido: dict = dict(project.get("partes_contenido") or {})
 
+    reformat_target_language = normalize_target_language((project.get("source_metadata") or {}).get("target_language")).code
+
     async def _fmt_part(pid: str, part_data: dict) -> tuple[str, dict]:
         explainer = part_data.get("explainer")
         if (
@@ -3357,9 +3382,9 @@ async def api_reformat_project(
             and "error" not in explainer
         ):
             if use_openrouter:
-                formatted, fmt_usage = await format_explainer_content_or(api_key, explainer)
+                formatted, fmt_usage = await format_explainer_content_or(api_key, explainer, reformat_target_language)
             else:
-                formatted, fmt_usage = await format_explainer_content(api_key, explainer)
+                formatted, fmt_usage = await format_explainer_content(api_key, explainer, reformat_target_language)
             return pid, {**part_data, "explainer": formatted, "formatter_usage": fmt_usage, "formatter_version": 1}
         # No explainer or explainer errored — just mark version so we skip next time.
         return pid, {**part_data, "formatter_usage": {}, "formatter_version": 1}
@@ -3451,6 +3476,11 @@ async def api_process_project(
     """Start processing a project using the user's own API key (BYOK)."""
     explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
     openrouter_model = payload.openrouter_model if payload else None
+    try:
+        target_language_obj = normalize_target_language(payload.target_language if payload else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    target_language_code = target_language_obj.code
     explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
@@ -3460,6 +3490,7 @@ async def api_process_project(
             "endpoint": "POST /api/projects/{project_id}/process",
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
+            "target_language": target_language_code,
         }
     )
 
@@ -3519,14 +3550,16 @@ async def api_process_project(
             "agents_model": MODEL_AGENTS,
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
+            "target_language": target_language_code,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider, openrouter_model)
+    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider, openrouter_model, target_language_code)
     return {
         "ok": True,
         "status": "started",
         "explainer_provider": explainer_provider,
         "explainer_model": explainer_model,
+        "target_language": target_language_code,
     }
 
 

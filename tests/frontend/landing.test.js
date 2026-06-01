@@ -13,6 +13,9 @@ import {
   OPENROUTER_MODEL_MIMO_PRO,
   OPENROUTER_MODEL_DEEPSEEK_V4_PRO,
   validateExplainerProviderSelection,
+  DEFAULT_TARGET_LANGUAGE,
+  SUPPORTED_TARGET_LANGUAGES,
+  isValidTargetLanguage,
 } from '../../frontend/js/landing.js';
 
 describe('landing.js', () => {
@@ -163,4 +166,15 @@ describe('landing.js', () => {
       })).toBeNull();
     });
   });
+
+  describe('target language selection', () => {
+    it('defaults to Spain Spanish and validates supported languages', () => {
+      expect(DEFAULT_TARGET_LANGUAGE).toBe('es-ES');
+      expect(SUPPORTED_TARGET_LANGUAGES).toContain('es-ES');
+      expect(isValidTargetLanguage('es-ES')).toBe(true);
+      expect(isValidTargetLanguage('en')).toBe(true);
+      expect(isValidTargetLanguage('xx')).toBe(false);
+    });
+  });
+
 });

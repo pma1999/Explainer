@@ -8,8 +8,8 @@ from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.explainer_prompts import (
-    SUBPART_SYSTEM_INSTRUCTION,
-    SYSTEM_INSTRUCTION,
+    build_explainer_system_instruction,
+    build_subpart_explainer_system_instruction,
 )
 from backend.agents.completeness_validator import (
     ExplainerValidationContext,
@@ -97,6 +97,7 @@ def run_explainer(
     identificacion: str,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Explainer agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
@@ -126,7 +127,7 @@ def run_explainer(
         thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         response_mime_type="application/json",
         response_schema=RESPONSE_SCHEMA,
-        system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
+        system_instruction=[types.Part.from_text(text=build_explainer_system_instruction(target_language))],
     )
 
     logger.debug("Enviando request a Gemini para generar explicación")
@@ -248,6 +249,7 @@ def run_subpart_explainer(
     identificacion: str,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Explainer agent for a single subpart — returns only desarrollo."""
     start_time = time.time()
@@ -277,7 +279,7 @@ def run_subpart_explainer(
         thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
         response_mime_type="application/json",
         response_schema=SUBPART_RESPONSE_SCHEMA,
-        system_instruction=[types.Part.from_text(text=SUBPART_SYSTEM_INSTRUCTION)],
+        system_instruction=[types.Part.from_text(text=build_subpart_explainer_system_instruction(target_language))],
     )
 
     response = generate_content_with_retry(
@@ -332,6 +334,7 @@ def _run_explainer_for_retry(
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Reintento de run_explainer con contexto de validación de la salida anterior."""
     logger.info(
@@ -350,7 +353,7 @@ def _run_explainer_for_retry(
         validation_report,
         validation_context=validation_context,
     )
-    extended_system = SYSTEM_INSTRUCTION + build_explainer_retry_system_suffix(
+    extended_system = build_explainer_system_instruction(target_language) + build_explainer_retry_system_suffix(
         validation_report,
         validation_context=validation_context,
     )
@@ -400,6 +403,7 @@ def _run_subpart_explainer_for_retry(
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Reintento de run_subpart_explainer con contexto de validación de la salida anterior."""
     logger.info(
@@ -418,7 +422,7 @@ def _run_subpart_explainer_for_retry(
         validation_report,
         validation_context=validation_context,
     )
-    extended_system = SUBPART_SYSTEM_INSTRUCTION + build_explainer_retry_system_suffix(
+    extended_system = build_subpart_explainer_system_instruction(target_language) + build_explainer_retry_system_suffix(
         validation_report,
         validation_context=validation_context,
     )
@@ -472,6 +476,7 @@ def run_explainer_validated(
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     """run_explainer con validación de completitud y reintento automático.
 
@@ -479,7 +484,7 @@ def run_explainer_validated(
         (result, usage_metadata, validator_usages_list)
     """
     return run_with_explainer_validation(
-        initial_call=lambda: run_explainer(api_key, file_uri, identificacion, model, mime_type),
+        initial_call=lambda: run_explainer(api_key, file_uri, identificacion, model, mime_type, target_language),
         retry_call=lambda prev, report: _run_explainer_for_retry(
             api_key,
             file_uri,
@@ -489,6 +494,7 @@ def run_explainer_validated(
             model,
             mime_type,
             validation_context,
+            target_language,
         ),
         gemini_api_key=api_key,
         label=f"Explainer Gemini [{file_uri[:40]}]",
@@ -503,6 +509,7 @@ def run_subpart_explainer_validated(
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     """run_subpart_explainer con validación de completitud y reintento automático.
 
@@ -510,7 +517,7 @@ def run_subpart_explainer_validated(
         (result, usage_metadata, validator_usages_list)
     """
     return run_with_explainer_validation(
-        initial_call=lambda: run_subpart_explainer(api_key, file_uri, identificacion, model, mime_type),
+        initial_call=lambda: run_subpart_explainer(api_key, file_uri, identificacion, model, mime_type, target_language),
         retry_call=lambda prev, report: _run_subpart_explainer_for_retry(
             api_key,
             file_uri,
@@ -520,6 +527,7 @@ def run_subpart_explainer_validated(
             model,
             mime_type,
             validation_context,
+            target_language,
         ),
         gemini_api_key=api_key,
         label=f"Subpart Explainer Gemini [{file_uri[:40]}]",

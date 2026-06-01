@@ -21,8 +21,8 @@ from backend.openrouter_client import (
 from backend.openrouter_model_routing import max_reasoning_preferences
 from backend.pdf_ocr_cache import PdfOcrCacheEntry, PdfOcrError, render_pdf_pages_with_xml_tags
 from backend.agents.explainer_prompts import (
-    SUBPART_SYSTEM_INSTRUCTION as SHARED_SUBPART_SYSTEM_INSTRUCTION,
-    SYSTEM_INSTRUCTION as SHARED_SYSTEM_INSTRUCTION,
+    build_explainer_system_instruction,
+    build_subpart_explainer_system_instruction,
 )
 from backend.agents.completeness_validator import (
     ExplainerValidationContext,
@@ -139,15 +139,22 @@ def _append_json_output_contract(base_prompt: str, contract: str) -> str:
     return f"{base_prompt}{contract}"
 
 
-OR_EXPLAINER_SYSTEM_PROMPT = _append_json_output_contract(
-    SHARED_SYSTEM_INSTRUCTION,
-    _FULL_JSON_OUTPUT_CONTRACT,
-)
+def build_openrouter_explainer_system_prompt(target_language: str = "es-ES") -> str:
+    return _append_json_output_contract(
+        build_explainer_system_instruction(target_language),
+        _FULL_JSON_OUTPUT_CONTRACT,
+    )
 
-OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = _append_json_output_contract(
-    SHARED_SUBPART_SYSTEM_INSTRUCTION,
-    _SUBPART_JSON_OUTPUT_CONTRACT,
-)
+
+def build_openrouter_subpart_explainer_system_prompt(target_language: str = "es-ES") -> str:
+    return _append_json_output_contract(
+        build_subpart_explainer_system_instruction(target_language),
+        _SUBPART_JSON_OUTPUT_CONTRACT,
+    )
+
+
+OR_EXPLAINER_SYSTEM_PROMPT = build_openrouter_explainer_system_prompt("es-ES")
+OR_SUBPART_EXPLAINER_SYSTEM_PROMPT = build_openrouter_subpart_explainer_system_prompt("es-ES")
 
 
 def prime_pdf_parse_cache_with_fallback(
@@ -642,6 +649,7 @@ def run_explainer_or(
     api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
     start = time.time()
@@ -666,7 +674,7 @@ def run_explainer_or(
             identificacion=identificacion,
             mime_type=mime_type,
             model=model,
-            system_prompt=OR_EXPLAINER_SYSTEM_PROMPT,
+            system_prompt=build_openrouter_explainer_system_prompt(target_language),
             response_format=response_format,
             api_key=api_key,
             pdf_cache_entry=pdf_cache_entry,
@@ -707,6 +715,7 @@ def run_subpart_explainer_or(
     api_key: str = "",
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer de subparte vía OpenRouter — retorna solo `desarrollo` estructurado."""
     start = time.time()
@@ -731,7 +740,7 @@ def run_subpart_explainer_or(
             identificacion=identificacion,
             mime_type=mime_type,
             model=model,
-            system_prompt=OR_SUBPART_EXPLAINER_SYSTEM_PROMPT,
+            system_prompt=build_openrouter_subpart_explainer_system_prompt(target_language),
             response_format=response_format,
             api_key=api_key,
             pdf_cache_entry=pdf_cache_entry,
@@ -780,6 +789,7 @@ def _run_explainer_or_for_retry(
     pdf_cache_entry: "PdfOcrCacheEntry | None",
     page_numbers: tuple[int, ...] | None,
     validation_context: ExplainerValidationContext | None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Reintento de run_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
@@ -798,7 +808,7 @@ def _run_explainer_or_for_retry(
     )
     extended_identificacion = f"{identificacion}\n\n{retry_ctx}"
     extended_system = (
-        f"{OR_EXPLAINER_SYSTEM_PROMPT}"
+        f"{build_openrouter_explainer_system_prompt(target_language)}"
         f"{build_explainer_retry_system_suffix(validation_report, validation_context=validation_context)}"
     )
 
@@ -835,6 +845,7 @@ def _run_subpart_explainer_or_for_retry(
     pdf_cache_entry: "PdfOcrCacheEntry | None",
     page_numbers: tuple[int, ...] | None,
     validation_context: ExplainerValidationContext | None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Reintento de run_subpart_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
@@ -853,7 +864,7 @@ def _run_subpart_explainer_or_for_retry(
     )
     extended_identificacion = f"{identificacion}\n\n{retry_ctx}"
     extended_system = (
-        f"{OR_SUBPART_EXPLAINER_SYSTEM_PROMPT}"
+        f"{build_openrouter_subpart_explainer_system_prompt(target_language)}"
         f"{build_explainer_retry_system_suffix(validation_report, validation_context=validation_context)}"
     )
 
@@ -895,6 +906,7 @@ def run_explainer_or_validated(
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_explainer_or con validación de completitud y reintento automático.
 
@@ -908,7 +920,7 @@ def run_explainer_or_validated(
     """
     return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_explainer_or(
-            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
+            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language
         ),
         retry_call=lambda prev, report: _run_explainer_or_for_retry(
             source_path,
@@ -921,6 +933,7 @@ def run_explainer_or_validated(
             pdf_cache_entry,
             page_numbers,
             validation_context,
+            target_language,
         ),
         openrouter_api_key=validator_api_key or api_key,
         label=f"Explainer OpenRouter [{model}]",
@@ -938,6 +951,7 @@ def run_subpart_explainer_or_validated(
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_subpart_explainer_or con validación de completitud y reintento automático.
 
@@ -951,7 +965,7 @@ def run_subpart_explainer_or_validated(
     """
     return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_subpart_explainer_or(
-            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers
+            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language
         ),
         retry_call=lambda prev, report: _run_subpart_explainer_or_for_retry(
             source_path,
@@ -964,6 +978,7 @@ def run_subpart_explainer_or_validated(
             pdf_cache_entry,
             page_numbers,
             validation_context,
+            target_language,
         ),
         openrouter_api_key=validator_api_key or api_key,
         label=f"Subpart Explainer OpenRouter [{model}]",

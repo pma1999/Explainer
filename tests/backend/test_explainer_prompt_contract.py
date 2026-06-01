@@ -26,3 +26,18 @@ def test_subpart_prompt_removes_global_scaffold_sections():
     assert "conclusión" not in lowered
     assert "conexiones contextuales" not in lowered
     assert "conexiones_contextuales" not in lowered
+
+
+def test_explainer_prompts_use_target_language_not_source_language():
+    from backend.agents.explainer_prompts import (
+        SYSTEM_INSTRUCTION,
+        SUBPART_SYSTEM_INSTRUCTION,
+        build_explainer_system_instruction,
+    )
+
+    assert "mismo idioma en el que esté escrito el fragmento objetivo" not in SYSTEM_INSTRUCTION
+    assert "mismo idioma en el que esté escrito el fragmento objetivo" not in SUBPART_SYSTEM_INSTRUCTION
+    prompt = build_explainer_system_instruction("es-ES")
+    assert "idioma objetivo elegido" in prompt
+    assert "castellano de España / español de España" in prompt
+    assert "español hispanoamericano" in prompt
