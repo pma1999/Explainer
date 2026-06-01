@@ -222,6 +222,18 @@
               placeholder="Ej: Capítulos 1, 2 y 6 del libro completo / Minutos 10-30 del vídeo / Solo el artículo completo / Dejar vacío para todo el contenido"></textarea>
           </div>
           <div class="form-group">
+            <label for="target-language" class="form-label">Idioma de la explicación</label>
+            <select id="target-language" class="form-input">
+              <option value="es-ES" selected>Castellano de España</option>
+              <option value="en">English</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+              <option value="pt-PT">Português de Portugal</option>
+            </select>
+            <p class="input-hint">Por defecto se usará español de España (no hispanoamericano). Las citas del texto original se conservarán sin traducir.</p>
+          </div>
+          <div class="form-group">
             <label class="form-label">Motor del explainer</label>
             <div class="provider-grid" id="explainer-provider-group">
               <label class="provider-card" id="provider-card-gemini" for="explainer-provider-gemini">

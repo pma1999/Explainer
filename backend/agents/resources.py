@@ -7,7 +7,7 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
-from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML
+from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML, build_language_policy_xml
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -60,7 +60,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   <objectives>
   **Tu objetivo es producir una selección curada de recursos que logre:**
 
-  1. **Profundización real**: Que el usuario disponga de los mejores materiales existentes en el mundo para ampliar su conocimiento sobre los temas del texto.
+  1. **Profundización real**: Que el usuario disponga de los mejores materiales existentes en el mundo para ampliar su conocimiento sobre los temas del texto, estén en el idioma que estén; la explicación pedagógica de por qué sirven sí va en el idioma objetivo elegido.
   2. **Integridad bibliográfica**: Que cada recurso recomendado sea REAL, VERIFICABLE y descrito con precisión absoluta.
   3. **Diversidad de perspectivas**: Que, cuando sea pertinente, los recursos ofrezcan distintos ángulos sobre el mismo tema.
   4. **Claridad de propósito**: Que para cada recurso, el usuario entienda "esto me sirve para entender mejor X que aparece en el texto".
@@ -86,6 +86,7 @@ SYSTEM_INSTRUCTION = """<system_instruction>
   - Indicación de nivel de dificultad o accesibilidad.
 
   **Sobre la diversidad:**
+  - Recursos en cualquier idioma cuando sean los mejores por calidad, autoridad y pertinencia; no priorices artificialmente el idioma objetivo.
   - Variedad equilibrada de formatos (siempre que el tema lo permita).
   - Mezcla coherente de fuentes académicas canónicas y materiales de divulgación de alta calidad.
 
@@ -169,7 +170,7 @@ Solo tras este proceso, genera el output estructurado.
 </thinking_protocol>
 </system_instruction>"""
 
-OPENROUTER_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
+OPENROUTER_CONTRACT_SUFFIX = """
 
 <openrouter_tool_contract>
 Cuando estas instrucciones mencionen Google Search, usa la herramienta de servidor
@@ -219,6 +220,22 @@ Devuelve exclusivamente un objeto JSON raíz con esta estructura:
 }
 No devuelvas un array raíz ni texto fuera del JSON.
 </openrouter_json_contract>"""
+
+
+
+def build_resources_system_instruction(target_language: str = "es-ES") -> str:
+    """Return resources prompt with the selected target-language policy."""
+
+    return SYSTEM_INSTRUCTION.replace(
+        CASTELLANO_ESPANIA_RESOURCES_XML,
+        build_language_policy_xml(target_language, context="resources"),
+    )
+
+
+def build_resources_openrouter_system_instruction(target_language: str = "es-ES") -> str:
+    return build_resources_system_instruction(target_language) + OPENROUTER_CONTRACT_SUFFIX
+
+OPENROUTER_SYSTEM_INSTRUCTION = build_resources_openrouter_system_instruction("es-ES")
 
 OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene las claves raíz `titulo_mapa`, `vision_general`, `ejes_tematicos` y `nota_de_integridad`.
 `ejes_tematicos` es un array de objetos con `nombre_eje` y `recursos`.
@@ -322,6 +339,7 @@ def run_resources(
     identificacion: str,
     model: str = MODEL_AGENTS,
     mime_type: str = "application/pdf",
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Resources agent and return (structured_result, usage_metadata)."""
     start_time = time.time()
@@ -349,7 +367,7 @@ def run_resources(
                     text=(
                         f"Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
                         f"{identificacion}\n\n"
-                        f"Busca y recomienda los mejores recursos disponibles (libros, artículos, "
+                        f"Busca y recomienda los mejores recursos disponibles en cualquier idioma (libros, artículos, "
                         f"documentales, podcasts, sitios web, cursos) para profundizar en los temas "
                         f"de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
                         f"verificables con alta confianza."
@@ -364,7 +382,7 @@ def run_resources(
         tools=tools,
         response_mime_type="application/json",
         response_schema=RESPONSE_SCHEMA,
-        system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
+        system_instruction=[types.Part.from_text(text=build_resources_system_instruction(target_language))],
     )
 
     logger.debug("Enviando request a Gemini para generar mapa de recursos (con tool Google Search)")
@@ -441,6 +459,7 @@ def run_resources_or(
     source_text: str,
     identificacion: str,
     model: str = OPENROUTER_MODEL_AUXILIARY,
+    target_language: str = "es-ES",
 ) -> tuple[dict[str, Any], Any]:
     """Run the Resources agent via OpenRouter with server-side web search."""
     start_time = time.time()
@@ -467,7 +486,7 @@ def run_resources_or(
                     "<identificacion>\n"
                     f"{identificacion}\n"
                     "</identificacion>\n\n"
-                    "Busca y recomienda los mejores recursos disponibles (libros, artículos, "
+                    "Busca y recomienda los mejores recursos disponibles en cualquier idioma (libros, artículos, "
                     "documentales, podcasts, sitios web, cursos) para profundizar en los temas "
                     "de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
                     "verificables con alta confianza."
@@ -475,7 +494,7 @@ def run_resources_or(
             }
         ],
         model=model,
-        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        system_prompt=build_resources_openrouter_system_instruction(target_language),
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,

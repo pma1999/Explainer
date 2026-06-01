@@ -1,6 +1,8 @@
 """Shared prompt source of truth for the explainer agents."""
 from __future__ import annotations
 
+from backend.agents.language_policy import build_language_policy_xml
+
 
 SYSTEM_INSTRUCTION = """<system_instruction>
 
@@ -343,7 +345,7 @@ Tu respuesta visible al usuario es la EJECUCIÓN redactada del plan, no la repre
   - Omitir completamente esta sección si no hay tabla de contenidos o si no existen conexiones relevantes identificables.
 
   **Especificaciones de formato:**
-  - Idioma del output: el mismo idioma en el que esté escrito el fragmento objetivo (si está en español, respondes en español; si en otro idioma, en ese idioma).
+  - Idioma del output: el idioma objetivo elegido por el usuario según el bloque dinámico `<idioma_salida>`. Si el idioma objetivo es castellano de España / español de España, NO uses español hispanoamericano.
   - Términos técnicos y artículos normativos: mantenerlos exactamente como aparecen en el texto fuente, con su explicación accesible asociada.
   - Listas: cuando el texto fuente presente enumeraciones, preserva la enumeración pero desarrolla cada elemento de la lista individualmente.
 
@@ -502,7 +504,7 @@ Basándote en todo el contexto proporcionado anteriormente —el fragmento objet
 3. Mantenga profundidad uniforme desde el primer hasta el último microelemento desarrollado.
 4. Use generosamente ejemplos hipotéticos ilustrativos, analogías y reformulaciones accesibles, siempre fieles al texto fuente.
 5. Siga la estructura obligatoria de output (Introducción breve → Desarrollo completo → Conclusión breve → opcional Conexiones Contextuales).
-6. Esté redactada en el mismo idioma del fragmento objetivo y términos técnicos preservados exactamente como en el texto fuente.
+6. Esté redactada en el idioma objetivo elegido por el usuario, con los términos técnicos preservados exactamente como en el texto fuente cuando proceda.
 
 Recuerda los criterios de calidad: el lector debe poder responder cualquier pregunta de examen sobre cualquier microelemento del fragmento objetivo tras leer tu explicación. Tu responsabilidad es académica: la omisión de cualquier elemento puede suponer un suspenso para el usuario.
 
@@ -827,7 +829,7 @@ SUBPART_SYSTEM_INSTRUCTION = """<system_instruction>
     - Si el contrato de alcance o las fronteras negativas excluyen un bloque, ese bloque no puede aparecer como desarrollo sustantivo.
 
   **Especificaciones de formato:**
-  - Idioma del output: el mismo idioma en el que esté escrito el fragmento objetivo (si está en español, respondes en español; si en otro idioma, en ese idioma).
+  - Idioma del output: el idioma objetivo elegido por el usuario según el bloque dinámico `<idioma_salida>`. Si el idioma objetivo es castellano de España / español de España, NO uses español hispanoamericano.
   - Términos técnicos y artículos normativos: mantenerlos exactamente como aparecen en el texto fuente, con su explicación accesible asociada.
   - Listas: cuando el texto fuente presente enumeraciones, preserva la enumeración pero desarrolla cada elemento de la lista individualmente.
 
@@ -960,7 +962,7 @@ Basándote en todo el contexto proporcionado anteriormente —el fragmento objet
 3. Mantenga profundidad uniforme desde el primer hasta el último microelemento desarrollado.
 4. Use generosamente ejemplos hipotéticos ilustrativos, analogías y reformulaciones accesibles, siempre fieles al texto fuente.
 5. Desarrolle exclusivamente el fragmento objetivo actual y respete de forma estricta el contrato de alcance y las fronteras negativas si aparecen en el prompt.
-6. Esté redactada en el mismo idioma del fragmento objetivo y términos técnicos preservados exactamente como en el texto fuente.
+6. Esté redactada en el idioma objetivo elegido por el usuario, con los términos técnicos preservados exactamente como en el texto fuente cuando proceda.
 
 Recuerda los criterios de calidad: el lector debe poder responder cualquier pregunta de examen sobre cualquier microelemento del fragmento objetivo tras leer tu explicación. Tu responsabilidad es académica: la omisión de cualquier elemento puede suponer un suspenso para el usuario.
 
@@ -1009,3 +1011,23 @@ Antes de generar la respuesta final, ejecuta razonamiento explícito en un bloqu
 Solo después de completar estas siete fases internamente, procede a generar la respuesta final siguiendo la estructura de output_format. Recuerda: ni la lista de microelementos ni el plan estructural deben aparecer en el output visible.
 
 </thinking_protocol>"""
+
+
+def build_explainer_system_instruction(target_language: str = "es-ES") -> str:
+    """Return the full explainer prompt with the selected target-language policy."""
+
+    return SYSTEM_INSTRUCTION.replace(
+        "</system_instruction>",
+        build_language_policy_xml(target_language, context="explainer") + "\n</system_instruction>",
+        1,
+    )
+
+
+def build_subpart_explainer_system_instruction(target_language: str = "es-ES") -> str:
+    """Return the subpart explainer prompt with the selected target-language policy."""
+
+    return SUBPART_SYSTEM_INSTRUCTION.replace(
+        "</system_instruction>",
+        build_language_policy_xml(target_language, context="explainer") + "\n</system_instruction>",
+        1,
+    )
