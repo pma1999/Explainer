@@ -70,6 +70,12 @@ export function isValidTargetLanguage(language) {
   return SUPPORTED_TARGET_LANGUAGES.includes(language);
 }
 
+function setTargetLanguage(language) {
+  currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
+  const targetLanguageSelect = $('target-language');
+  if (targetLanguageSelect) targetLanguageSelect.value = currentTargetLanguage;
+}
+
 function openRouterModelLabel(model) {
   if (model === OPENROUTER_MODEL_MIMO) return 'Xiaomi MiMo V2.5';
   if (model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO) return 'DeepSeek V4 Pro';
@@ -255,11 +261,6 @@ export function initLanding() {
     if (!isValidOpenRouterModel(model)) return;
     currentOpenRouterModel = model;
     syncExplainerProviderUI();
-  }
-
-  function setTargetLanguage(language) {
-    currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
-    if (targetLanguageSelect) targetLanguageSelect.value = currentTargetLanguage;
   }
 
   function setDeepSeekModel(model) {
