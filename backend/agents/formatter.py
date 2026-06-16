@@ -36,6 +36,8 @@ from google import genai
 from google.genai import types
 
 from backend.logging_config import get_logger
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -51,6 +53,7 @@ logger = get_logger("backend.agents.formatter")
 # Fast, low-latency models used for the formatting pass.
 FORMATTER_MODEL = MODEL_AGENTS
 FORMATTER_OPENROUTER_MODEL = OPENROUTER_MODEL_AUXILIARY
+FORMATTER_DEEPSEEK_MODEL = DEEPSEEK_MODEL_AUXILIARY
 
 # JSON field name for the formatted Markdown body (forced via response_schema).
 FORMATTER_MARKDOWN_FIELD = "markdown"
@@ -519,6 +522,69 @@ async def _format_text_or(
     return await asyncio.to_thread(_format_text_or_sync, api_key, text, context, target_language)
 
 
+def _format_text_ds_sync(
+    api_key: str,
+    text: str,
+    context: str = "",
+    target_language: str = "es-ES",
+) -> tuple[str, Any]:
+    """Format one text block via direct DeepSeek (sync; run in a thread from async code)."""
+    if not text or not text.strip():
+        return text, None
+
+    user_message = _build_formatter_user_message(text, context)
+
+    try:
+        content, usage = call_deepseek_chat(
+            messages=[{"role": "user", "content": user_message}],
+            model=FORMATTER_DEEPSEEK_MODEL,
+            system_prompt=build_formatter_system_prompt(target_language),
+            api_key=api_key,
+            response_format="json_object",
+            reasoning_effort=max_reasoning_effort(),
+            temperature=0.1,
+            json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+        )
+    except DeepSeekError as exc:
+        logger.warning(
+            f"Formatter DeepSeek call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"Formatter DeepSeek call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+
+    if not isinstance(content, dict):
+        logger.warning(
+            "Formatter DeepSeek returned non-object JSON, keeping original text",
+            extra={"context_preview": context[:80], "content_type": type(content).__name__},
+        )
+        return text, usage
+
+    parsed = _extract_formatted_markdown(content)
+    if parsed is not None:
+        return parsed, usage
+
+    logger.warning(
+        "Formatter DeepSeek JSON parse failed or empty markdown field, keeping original text",
+        extra={"context_preview": context[:80], "response_preview": str(content)[:200]},
+    )
+    return text, usage
+
+
+async def _format_text_ds(
+    api_key: str,
+    text: str,
+    context: str = "",
+    target_language: str = "es-ES",
+) -> tuple[str, Any]:
+    return await asyncio.to_thread(_format_text_ds_sync, api_key, text, context, target_language)
+
+
 async def format_explainer_content(
     api_key: str,
     explainer_data: dict[str, Any],
@@ -561,7 +627,7 @@ async def format_explainer_content(
         return result, _empty_formatter_usage()
 
     coros = [
-        _format_text(client, text, ctx, target_language)
+        _format_text(client, text, ctx, target_language=target_language)
         for _, text, ctx in field_tasks
     ]
     gathered = await asyncio.gather(*coros, return_exceptions=True)
@@ -616,6 +682,46 @@ async def format_explainer_content_or(
     total_input, total_candidates, total_thoughts = token_totals
     usage_summary = _build_formatter_usage_summary(
         model=FORMATTER_OPENROUTER_MODEL,
+        usages=usages,
+        total_input=total_input,
+        total_candidates=total_candidates,
+        total_thoughts=total_thoughts,
+    )
+    return result, usage_summary
+
+
+async def format_explainer_content_ds(
+    api_key: str,
+    explainer_data: dict[str, Any],
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Format all prose fields via direct DeepSeek Flash in parallel.
+
+    Same schema and fail-safe semantics as ``format_explainer_content``.
+    """
+    start_time = time.time()
+    result = copy.deepcopy(explainer_data)
+    field_tasks = _collect_formatter_field_tasks(result)
+
+    if not field_tasks:
+        return result, _empty_formatter_usage()
+
+    coros = [
+        _format_text_ds(api_key, text, ctx, target_language)
+        for _, text, ctx in field_tasks
+    ]
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+
+    result, usages, token_totals = await _apply_parallel_formatter_results(
+        result,
+        field_tasks,
+        gathered,
+        provider_label="deepseek",
+        start_time=start_time,
+    )
+    total_input, total_candidates, total_thoughts = token_totals
+    usage_summary = _build_formatter_usage_summary(
+        model=FORMATTER_DEEPSEEK_MODEL,
         usages=usages,
         total_input=total_input,
         total_candidates=total_candidates,

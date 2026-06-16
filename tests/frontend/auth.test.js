@@ -15,6 +15,14 @@ describe('auth.js', () => {
     vi.mocked(global.fetch).mockReset();
     vi.spyOn(storageModule, 'getCachedApiKeyStatus').mockReturnValue(null);
     vi.spyOn(storageModule, 'setCachedApiKeyStatus').mockImplementation(() => {});
+    vi.spyOn(storageModule, 'getCachedOpenRouterKeyStatus').mockReturnValue(null);
+    vi.spyOn(storageModule, 'setCachedOpenRouterKeyStatus').mockImplementation(() => {});
+    vi.spyOn(storageModule, 'getCachedMistralKeyStatus').mockReturnValue(null);
+    vi.spyOn(storageModule, 'setCachedMistralKeyStatus').mockImplementation(() => {});
+    vi.spyOn(storageModule, 'getCachedDeepSeekKeyStatus').mockReturnValue(null);
+    vi.spyOn(storageModule, 'setCachedDeepSeekKeyStatus').mockImplementation(() => {});
+    vi.spyOn(storageModule, 'getCachedTavilyKeyStatus').mockReturnValue(null);
+    vi.spyOn(storageModule, 'setCachedTavilyKeyStatus').mockImplementation(() => {});
   });
 
   describe('refreshApiKeyStatus', () => {
@@ -80,4 +88,29 @@ it('refreshApiKeyStatus hydrates mistral key state from the API payload', async 
 
   expect(state.hasMistralKey).toBe(true);
   expect(state.mistralKeyStatus).toBe('has');
+});
+
+it('refreshApiKeyStatus hydrates DeepSeek and Tavily key state from the API payload', async () => {
+  state.hasDeepSeekKey = false;
+  state.deepSeekKeyStatus = 'loading';
+  state.hasTavilyKey = false;
+  state.tavilyKeyStatus = 'loading';
+  vi.spyOn(storageModule, 'getCachedDeepSeekKeyStatus').mockReturnValue(null);
+  vi.spyOn(storageModule, 'setCachedDeepSeekKeyStatus').mockImplementation(() => {});
+  vi.spyOn(storageModule, 'getCachedTavilyKeyStatus').mockReturnValue(null);
+  vi.spyOn(storageModule, 'setCachedTavilyKeyStatus').mockImplementation(() => {});
+  vi.spyOn(apiModule, 'api').mockResolvedValue({
+    has_api_key: false,
+    has_openrouter_key: false,
+    has_mistral_key: false,
+    has_deepseek_key: true,
+    has_tavily_key: true,
+  });
+
+  await refreshApiKeyStatus();
+
+  expect(state.hasDeepSeekKey).toBe(true);
+  expect(state.deepSeekKeyStatus).toBe('has');
+  expect(state.hasTavilyKey).toBe(true);
+  expect(state.tavilyKeyStatus).toBe('has');
 });

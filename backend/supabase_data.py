@@ -864,6 +864,8 @@ def list_projects_with_stored_source_objects() -> list[dict[str, Any]]:
 PROVIDER_GEMINI = "google_gemini"
 PROVIDER_OPENROUTER = "openrouter"
 PROVIDER_MISTRAL = "mistral"
+PROVIDER_DEEPSEEK = "deepseek"
+PROVIDER_TAVILY = "tavily"
 
 
 def has_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:
@@ -974,11 +976,15 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     Backwards-compatible: always includes has_api_key / provider / updated_at for Gemini.
     Adds has_openrouter_key / openrouter_updated_at for OpenRouter.
     Adds has_mistral_key / mistral_updated_at for Mistral.
+    Adds has_deepseek_key / deepseek_updated_at for DeepSeek.
+    Adds has_tavily_key / tavily_updated_at for Tavily.
     """
     client = _client()
     gemini_data: dict = {}
     openrouter_data: dict = {}
     mistral_data: dict = {}
+    deepseek_data: dict = {}
+    tavily_data: dict = {}
 
     try:
         rows = (
@@ -995,6 +1001,10 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
                     openrouter_data = row
                 elif row.get("provider") == PROVIDER_MISTRAL:
                     mistral_data = row
+                elif row.get("provider") == PROVIDER_DEEPSEEK:
+                    deepseek_data = row
+                elif row.get("provider") == PROVIDER_TAVILY:
+                    tavily_data = row
     except Exception as e:
         logger.error(f"[API Key Status] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
 
@@ -1009,4 +1019,10 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
         # Mistral (new fields)
         "has_mistral_key": bool(mistral_data),
         "mistral_updated_at": mistral_data.get("updated_at") or None,
+        # DeepSeek direct
+        "has_deepseek_key": bool(deepseek_data),
+        "deepseek_updated_at": deepseek_data.get("updated_at") or None,
+        # Tavily Search
+        "has_tavily_key": bool(tavily_data),
+        "tavily_updated_at": tavily_data.get("updated_at") or None,
     }

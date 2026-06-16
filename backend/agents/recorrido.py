@@ -8,6 +8,8 @@ from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_RECORRIDO_REFUERZO_XML, build_language_policy_xml
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -545,6 +547,65 @@ def run_recorrido_or(
     total_duration = int((time.time() - start_time) * 1000)
     logger.info(
         "Recorrido OpenRouter completado: %d entradas en %dms",
+        len(content.get("recorrido_anotado", [])),
+        total_duration,
+        extra={
+            "num_entradas": len(content.get("recorrido_anotado", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return content, usage
+
+
+def run_recorrido_ds(
+    api_key: str,
+    source_text: str,
+    identificacion: str,
+    model: str = DEEPSEEK_MODEL_AUXILIARY,
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], Any]:
+    """Run the Recorrido Anotado agent via direct DeepSeek on inline OCR/text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente recorrido DeepSeek",
+        extra={
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = call_deepseek_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=build_recorrido_openrouter_system_instruction(target_language),
+        api_key=api_key,
+        response_format="json_object",
+        reasoning_effort=max_reasoning_effort(),
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise DeepSeekError("El recorrido DeepSeek no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Recorrido DeepSeek completado: %d entradas en %dms",
         len(content.get("recorrido_anotado", [])),
         total_duration,
         extra={

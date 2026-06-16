@@ -8,6 +8,8 @@ from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTA
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML, build_language_policy_xml
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -1242,6 +1244,74 @@ def run_segmentador_or(
     total_duration = int((time.time() - start_time) * 1000)
     logger.info(
         "Segmentación OpenRouter completada: %d partes en %dms",
+        len(content.get("partes", [])),
+        total_duration,
+        extra={
+            "num_partes": len(content.get("partes", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return content, usage
+
+
+def run_segmentador_ds(
+    api_key: str,
+    source_text: str,
+    description: str,
+    source_kind: str = "pdf",
+    model: str = DEEPSEEK_MODEL_AUXILIARY,
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], Any]:
+    """Run the Segmentador agent via direct DeepSeek on inline OCR/text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente segmentador DeepSeek",
+        extra={
+            "description_length": len(description) if description else 0,
+            "has_custom_description": bool(description and description.strip()),
+            "source_kind": source_kind,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
+    json_contract = _openrouter_segmentador_json_contract(source_kind)
+    content, usage = call_deepseek_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_completa>\n"
+                    f"{source_text}\n"
+                    "</fuente_completa>\n\n"
+                    "<instrucciones_usuario>\n"
+                    f"{effective_description}\n"
+                    "</instrucciones_usuario>\n\n"
+                    "<formato_json_obligatorio>\n"
+                    "Devuelve exactamente el objeto JSON descrito aquí. La raíz debe ser un objeto, nunca un array:\n"
+                    f"{json_contract}\n"
+                    "</formato_json_obligatorio>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=_openrouter_segmentador_system_instruction(source_kind, target_language),
+        api_key=api_key,
+        response_format="json_object",
+        reasoning_effort=max_reasoning_effort(),
+        temperature=TEMPERATURE_SEGMENTADOR,
+        json_retry_instruction=json_contract,
+    )
+    if not isinstance(content, dict):
+        raise DeepSeekError("El segmentador DeepSeek no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Segmentación DeepSeek completada: %d partes en %dms",
         len(content.get("partes", [])),
         total_duration,
         extra={

@@ -8,7 +8,10 @@ import {
   normalizeWebUrl,
   isValidWebUrl,
   isExplainerProviderSupportedForSource,
+  isValidDeepSeekModel,
   isValidOpenRouterModel,
+  DEEPSEEK_MODEL_V4_FLASH,
+  DEEPSEEK_MODEL_V4_PRO,
   OPENROUTER_MODEL_MIMO,
   OPENROUTER_MODEL_MIMO_PRO,
   OPENROUTER_MODEL_DEEPSEEK_V4_PRO,
@@ -89,10 +92,13 @@ describe('landing.js', () => {
       expect(isExplainerProviderSupportedForSource('youtube', 'gemini')).toBe(true);
     });
 
-    it('disables OpenRouter for YouTube only', () => {
+    it('disables OpenRouter and DeepSeek direct for YouTube only', () => {
       expect(isExplainerProviderSupportedForSource('pdf', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('web', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('youtube', 'openrouter')).toBe(false);
+      expect(isExplainerProviderSupportedForSource('pdf', 'deepseek')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('web', 'deepseek')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('youtube', 'deepseek')).toBe(false);
     });
   });
 
@@ -109,8 +115,20 @@ describe('landing.js', () => {
     });
   });
 
+  describe('isValidDeepSeekModel', () => {
+    it('accepts supported DeepSeek direct model choices', () => {
+      expect(isValidDeepSeekModel(DEEPSEEK_MODEL_V4_PRO)).toBe(true);
+      expect(isValidDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH)).toBe(true);
+    });
+
+    it('rejects unsupported DeepSeek direct model ids', () => {
+      expect(isValidDeepSeekModel('deepseek-chat')).toBe(false);
+      expect(isValidDeepSeekModel('')).toBe(false);
+    });
+  });
+
   describe('validateExplainerProviderSelection', () => {
-    it('requires Gemini key for any execution', () => {
+    it('requires Gemini key for Gemini execution', () => {
       expect(validateExplainerProviderSelection({
         sourceType: 'pdf',
         provider: 'gemini',
@@ -126,6 +144,15 @@ describe('landing.js', () => {
         hasGeminiKey: true,
         hasOpenRouterKey: false,
       })).toMatch(/OpenRouter/i);
+    });
+
+    it('requires Gemini key for OpenRouter compatibility', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'openrouter',
+        hasGeminiKey: false,
+        hasOpenRouterKey: true,
+      })).toMatch(/Gemini/i);
     });
 
     it('rejects OpenRouter on YouTube even with both keys', () => {
@@ -164,6 +191,48 @@ describe('landing.js', () => {
         hasOpenRouterKey: true,
         hasMistralKey: false,
       })).toBeNull();
+    });
+
+    it('accepts DeepSeek direct for web without Gemini when DeepSeek and Tavily keys exist', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'deepseek',
+        hasGeminiKey: false,
+        hasDeepSeekKey: true,
+        hasTavilyKey: true,
+        hasMistralKey: false,
+      })).toBeNull();
+    });
+
+    it('requires DeepSeek key when DeepSeek direct is selected', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'deepseek',
+        hasGeminiKey: false,
+        hasDeepSeekKey: false,
+        hasTavilyKey: true,
+      })).toMatch(/DeepSeek/i);
+    });
+
+    it('requires Tavily key when DeepSeek direct is selected', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'deepseek',
+        hasGeminiKey: false,
+        hasDeepSeekKey: true,
+        hasTavilyKey: false,
+      })).toMatch(/Tavily/i);
+    });
+
+    it('requires Mistral when DeepSeek direct is selected for PDFs', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'deepseek',
+        hasGeminiKey: false,
+        hasDeepSeekKey: true,
+        hasTavilyKey: true,
+        hasMistralKey: false,
+      })).toMatch(/Mistral/i);
     });
   });
 

@@ -4,10 +4,10 @@ Aplicación full-stack para estudiar textos académicos con IA. Segmenta PDFs, g
 
 ## ✨ Características
 
-- **🔑 BYOK (Bring Your Own Key)**: Cada usuario almacena sus API keys de Gemini y OpenRouter encriptadas en Supabase, disponibles en todos sus dispositivos
+- **🔑 BYOK (Bring Your Own Key)**: Cada usuario almacena sus API keys de Gemini, OpenRouter, DeepSeek, Tavily y Mistral encriptadas en Supabase, disponibles en todos sus dispositivos
 - **📄 Procesamiento de PDFs**: Upload y análisis automático con Gemini File API
 - **🤖 4 Agentes IA**: Segmentador, Explainer, Recorrido Anotado y Recursos
-- **🧠 Selector por ejecución**: El usuario elige en frontend si el explainer usa Gemini o MiniMax vía OpenRouter
+- **🧠 Selector por ejecución**: El usuario elige en frontend si el explainer usa Gemini, modelos OpenRouter o DeepSeek directo
 - **📊 Progreso en tiempo real**: Server-Sent Events (SSE) para ver el avance
 - **💰 Tracking de costos**: Cálculo automático de tokens y costos por proyecto
 - **🎨 UI/UX elegante**: Tema "Scholarly Forge" con diseño dark academic
@@ -15,7 +15,7 @@ Aplicación full-stack para estudiar textos académicos con IA. Segmenta PDFs, g
 ## 🏗️ Arquitectura
 
 ```
-Frontend (Vercel)          Backend (Koyeb)            Supabase          Gemini + OpenRouter
+Frontend (Vercel)          Backend (Koyeb)            Supabase          Gemini / OpenRouter / DeepSeek
 ┌─────────────┐            ┌───────────────┐        ┌──────────────┐       ┌────────────┐
 │  HTML/CSS   │  HTTPS     │  FastAPI      │        │  PostgreSQL  │       │  Google    │
 │  Vanilla JS │◄──────────►│  BYOK Auth    │◄──────►│  Auth        │◄─────►│  Model APIs│
@@ -92,7 +92,7 @@ explainer/
 │   ├── rate_limit.py         # Rate limiting
 │   ├── middleware.py         # Security headers
 │   ├── pricing.py            # Cálculo de costos
-│   └── agents/               # Agentes Gemini + explainer OpenRouter
+│   └── agents/               # Agentes Gemini + OpenRouter + DeepSeek directo
 │       ├── segmentador.py
 │       ├── explainer.py
 │       ├── recorrido.py
@@ -106,7 +106,7 @@ explainer/
 
 ## 🔒 Seguridad
 
-- **Encriptación**: API keys de Gemini y OpenRouter encriptadas con AES (clave de aplicación)
+- **Encriptación**: API keys de proveedores IA y búsqueda encriptadas con AES (clave de aplicación)
 - **Headers**: CSP, X-Frame-Options, HSTS, Referrer-Policy
 - **XSS**: Escaping de HTML en salida
 - **Rate limiting**: Límite por IP en creación de proyectos
@@ -120,6 +120,9 @@ explainer/
 | Vercel (Hobby) | **$0/mes** |
 | Gemini API | **Paga cada usuario con su propia key** |
 | OpenRouter API | **Opcional; paga cada usuario con su propia key** |
+| DeepSeek API | **Opcional; paga cada usuario con su propia key** |
+| Tavily Search API | **Opcional para DeepSeek directo; paga cada usuario con su propia key** |
+| Mistral OCR API | **Opcional para PDFs con OpenRouter/DeepSeek; paga cada usuario con su propia key** |
 
 ## 🛠️ Tecnologías
 

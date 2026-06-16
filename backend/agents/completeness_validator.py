@@ -20,6 +20,8 @@ from typing import Any, Callable, Literal
 from google import genai
 from google.genai import types
 
+from backend.deepseek_client import call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.gemini_client import generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.openrouter_client import call_openrouter_chat
@@ -35,6 +37,8 @@ logger = get_logger("backend.agents.completeness_validator")
 COMPLETENESS_VALIDATOR_MODEL = "gemini-3.1-flash-lite-preview"
 # Modelo OpenRouter usado por el validador cuando el flujo explainer es OpenRouter.
 OPENROUTER_COMPLETENESS_VALIDATOR_MODEL = OPENROUTER_MODEL_AUXILIARY
+# Modelo DeepSeek directo usado por el validador cuando el flujo explainer es DeepSeek.
+DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL = DEEPSEEK_MODEL_AUXILIARY
 
 # Numero maximo de reintentos de validacion (sin contar el intento inicial).
 MAX_COMPLETENESS_RETRIES = 2
@@ -171,6 +175,13 @@ _OPENROUTER_VALIDATOR_SYSTEM_PROMPT = f"""{_VALIDATOR_SYSTEM_PROMPT}
 Para OpenRouter JSON mode, cumple explícitamente este contrato adicional:
 {_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION}
 </openrouter_json_mode_contract>"""
+
+_DEEPSEEK_VALIDATOR_SYSTEM_PROMPT = f"""{_VALIDATOR_SYSTEM_PROMPT}
+
+<deepseek_json_mode_contract>
+Para DeepSeek JSON mode, cumple explícitamente este contrato adicional:
+{_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION}
+</deepseek_json_mode_contract>"""
 
 _VALIDATOR_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
@@ -564,6 +575,67 @@ def check_explainer_validation_or(
         return _accepted_report(f"Error en validador OpenRouter ({type(exc).__name__}); resultado aceptado."), None
 
 
+def check_explainer_validation_ds(
+    explanation: dict,
+    deepseek_api_key: str,
+    validation_context: ExplainerValidationContext | None = None,
+    model: str = DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL,
+) -> tuple[ExplainerValidationReport, Any]:
+    """Validate an explainer output with direct DeepSeek.
+
+    Returns:
+        (report, usage). If the reviewer fails, returns an accepted fail-open
+        report with usage None, matching the Gemini/OpenRouter validator policy.
+    """
+    start = time.time()
+    try:
+        user_message = _build_validator_user_message(explanation, validation_context)
+        if user_message is None:
+            return _accepted_report("Explicacion vacia; se acepta por defecto."), None
+
+        content, usage = call_deepseek_chat(
+            messages=[{"role": "user", "content": user_message}],
+            model=model,
+            system_prompt=_DEEPSEEK_VALIDATOR_SYSTEM_PROMPT,
+            api_key=deepseek_api_key,
+            response_format="json_object",
+            reasoning_effort=max_reasoning_effort(),
+            json_retry_instruction=_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION,
+        )
+        if not isinstance(content, dict):
+            raise TypeError("El validador DeepSeek no devolvio un objeto JSON.")
+
+        report = _parse_validation_report(content)
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.info(
+            "Explainer validado con DeepSeek: complete=%s scope=%s — %s (%dms)",
+            report.is_complete,
+            report.scope_status,
+            report.reason[:150],
+            elapsed_ms,
+            extra={
+                "is_complete": report.is_complete,
+                "scope_status": report.scope_status,
+                "reason": report.reason[:200],
+                "elapsed_ms": elapsed_ms,
+                "prompt_tokens": getattr(usage, "prompt_token_count", 0) if usage else 0,
+                "candidates_tokens": getattr(usage, "candidates_token_count", 0) if usage else 0,
+                "model": model,
+            },
+        )
+        return report, usage
+
+    except Exception as exc:
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.warning(
+            "Error en validador DeepSeek de explainer (%dms) — se acepta fail-open. Error: %s",
+            elapsed_ms,
+            str(exc)[:200],
+            extra={"error_type": type(exc).__name__, "elapsed_ms": elapsed_ms},
+        )
+        return _accepted_report(f"Error en validador DeepSeek ({type(exc).__name__}); resultado aceptado."), None
+
+
 def check_explanation_completeness(
     explanation: dict,
     gemini_api_key: str,
@@ -803,6 +875,27 @@ def run_with_openrouter_explainer_validation(
         check_validation=lambda result: check_explainer_validation_or(
             result,
             openrouter_api_key=openrouter_api_key,
+            validation_context=validation_context,
+        ),
+        label=label,
+    )
+
+
+def run_with_deepseek_explainer_validation(
+    *,
+    initial_call: Callable[[], tuple[dict, Any]],
+    retry_call: Callable[..., tuple[dict, Any]],
+    deepseek_api_key: str,
+    label: str,
+    validation_context: ExplainerValidationContext | None = None,
+) -> tuple[dict, Any, list[Any]]:
+    """Run an explainer call, validate it with direct DeepSeek, and regenerate on confirmed failures."""
+    return _run_with_explainer_validation_core(
+        initial_call=initial_call,
+        retry_call=retry_call,
+        check_validation=lambda result: check_explainer_validation_ds(
+            result,
+            deepseek_api_key=deepseek_api_key,
             validation_context=validation_context,
         ),
         label=label,

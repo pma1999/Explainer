@@ -9,7 +9,7 @@
 ├─────────────────────────────────────────────────────────────┤
 │  SUPABASE — Auth + Postgres + Storage                       │
 │  ├── Usuarios, proyectos, PDFs                              │
-│  └── 🔐 API Keys encriptadas por usuario (Gemini/OpenRouter)│
+│  └── 🔐 API Keys encriptadas por usuario (Gemini/OpenRouter/DeepSeek/Tavily/Mistral)│
 ├─────────────────────────────────────────────────────────────┤
 │  KOYEB (Backend API) — $0                                   │
 │  └── criminal-leoline-pma00-1cbf79ad.koyeb.app             │
@@ -21,7 +21,7 @@
 
 ## 🔐 Seguridad API Keys (BYOK - Bring Your Own Key)
 
-Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporciona y controla sus propias API keys de Gemini y, opcionalmente, OpenRouter:
+Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporciona y controla sus propias API keys de Gemini y, opcionalmente, OpenRouter, DeepSeek, Tavily y Mistral:
 
 ### Modelo de Seguridad
 
@@ -48,7 +48,7 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 
 - **Multi-dispositivo**: La API key del usuario está disponible en todos sus dispositivos
 - **Segregación total**: Un usuario no puede acceder a las keys de otro (RLS a nivel de BD)
-- **Compliance**: Cada usuario es responsable de su propia cuota y facturación con Google y/o OpenRouter
+- **Compliance**: Cada usuario es responsable de su propia cuota y facturación con Google, OpenRouter, DeepSeek, Tavily y Mistral
 - **Sin riesgo de fuga**: Incluso si la BD se compromete, las keys están encriptadas
 
 ## Requisitos
@@ -61,7 +61,7 @@ Explainer implementa un modelo de seguridad **BYOK** donde cada usuario proporci
 
 ### 1. Variables de Entorno de Seguridad
 
-**APP_ENCRYPTION_KEY** es obligatoria en producción. Se usa para encriptar las API keys de Gemini y OpenRouter de los usuarios (BYOK). La aplicación **no arrancará** si en `ENVIRONMENT=production` la clave está ausente o coincide con valores conocidos débiles.
+**APP_ENCRYPTION_KEY** es obligatoria en producción. Se usa para encriptar las API keys BYOK de los usuarios. La aplicación **no arrancará** si en `ENVIRONMENT=production` la clave está ausente o coincide con valores conocidos débiles.
 
 Genera una clave segura con:
 
@@ -283,8 +283,9 @@ El archivo `vercel.json` ya tiene configurada la URL de Koyeb. Si cambia, actual
 ### Test Funcional
 
 1. **Configurar API keys (BYOK)**:
-  - Ve a "Ajustes" y guarda tu API key de Gemini
-  - Si quieres usar MiniMax en el explainer, guarda además tu API key de OpenRouter
+  - Ve a "Ajustes" y guarda tu API key de Gemini, o las claves de DeepSeek + Tavily si quieres usar DeepSeek directo.
+  - Si quieres usar modelos OpenRouter en el explainer, guarda además tu API key de OpenRouter.
+  - Para PDFs con OpenRouter o DeepSeek directo, guarda también tu API key de Mistral.
   - Verifica que el estado muestra "Configurada"
   - Recarga la página y confirma que persiste (sincronización multi-dispositivo)
 2. **Seguridad API keys**:
@@ -402,6 +403,9 @@ Verifica que `FRONTEND_URL` en los secrets de Koyeb coincida exactamente con tu 
 | Vercel (Hobby)                  | **$0/mes**                          |
 | Gemini API                      | **Paga cada usuario** (tú no pagas) |
 | OpenRouter API                  | **Opcional; paga cada usuario**     |
+| DeepSeek API                    | **Opcional; paga cada usuario**     |
+| Tavily Search API               | **Opcional para DeepSeek directo**  |
+| Mistral OCR API                 | **Opcional para PDFs directos/OR**  |
 | **Total**                       | **$0/mes**                          |
 
 

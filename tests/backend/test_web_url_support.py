@@ -358,7 +358,15 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
 
     monkeypatch.setattr(main, "upload_file_with_retry", _fake_upload)
 
-    def _fake_segmentador(api_key, file_uri, description, model, mime_type, source_kind):
+    def _fake_segmentador(
+        api_key,
+        file_uri,
+        description,
+        model,
+        mime_type,
+        source_kind,
+        target_language="es-ES",
+    ):
         segmentador_calls.append(
             {
                 "file_uri": file_uri,
@@ -395,17 +403,24 @@ def test_process_project_web_routes_segmentador_and_agents_with_text_mime(monkey
             _usage(),
         )
 
-    def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_explainer(
+        api_key,
+        file_uri,
+        agent_prompt,
+        model,
+        mime_type,
+        target_language="es-ES",
+    ):
         explainer_calls.append(
             {"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt, "model": model}
         )
         return ({"ok": True}, _usage())
 
-    def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
         recorrido_calls.append({"file_uri": file_uri, "mime_type": mime_type, "model": model})
         return ({"ok": True}, _usage())
 
-    def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
         resources_calls.append({"file_uri": file_uri, "mime_type": mime_type, "model": model})
         return ({"ok": True}, _usage())
 
@@ -485,7 +500,15 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
 
     monkeypatch.setattr(main, "upload_file_with_retry", _fake_upload)
 
-    def _fake_segmentador(api_key, file_uri, description, model, mime_type, source_kind):
+    def _fake_segmentador(
+        api_key,
+        file_uri,
+        description,
+        model,
+        mime_type,
+        source_kind,
+        target_language="es-ES",
+    ):
         segmentador_calls.append(
             {
                 "file_uri": file_uri,
@@ -514,15 +537,22 @@ def test_process_project_web_aborts_when_segmentador_detects_bad_scrape(monkeypa
             _usage(),
         )
 
-    def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_explainer(
+        api_key,
+        file_uri,
+        agent_prompt,
+        model,
+        mime_type,
+        target_language="es-ES",
+    ):
         explainer_calls.append({"file_uri": file_uri, "mime_type": mime_type, "prompt": agent_prompt})
         return ({"ok": True}, _usage())
 
-    def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
         recorrido_calls.append({"file_uri": file_uri, "mime_type": mime_type})
         return ({"ok": True}, _usage())
 
-    def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type):
+    def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
         resources_calls.append({"file_uri": file_uri, "mime_type": mime_type})
         return ({"ok": True}, _usage())
 

@@ -148,6 +148,10 @@ export const state = {
   openRouterKeyStatus: 'loading',
   hasMistralKey: false,
   mistralKeyStatus: 'loading',
+  hasDeepSeekKey: false,
+  deepSeekKeyStatus: 'loading',
+  hasTavilyKey: false,
+  tavilyKeyStatus: 'loading',
   session: null,
   user: null,
   previousUserId: null,
@@ -165,4 +169,6 @@ export const SESSION_VIEW_KEY = 'explainer.current_view.v1';
 export const API_KEY_CACHE_KEY_PREFIX = 'explainer.apiKeyStatus.v1.';
 export const OPENROUTER_KEY_CACHE_KEY_PREFIX = 'explainer.openrouterKeyStatus.v1.';
 export const MISTRAL_KEY_CACHE_KEY_PREFIX = 'explainer.mistralKeyStatus.v1.';
+export const DEEPSEEK_KEY_CACHE_KEY_PREFIX = 'explainer.deepseekKeyStatus.v1.';
+export const TAVILY_KEY_CACHE_KEY_PREFIX = 'explainer.tavilyKeyStatus.v1.';
 export const API_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;

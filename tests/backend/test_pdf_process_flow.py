@@ -115,7 +115,15 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
 
         monkeypatch.setattr(main, "upload_file_with_retry", _fake_upload)
 
-        def _fake_segmentador(api_key, file_uri, description, model, mime_type, source_kind):
+        def _fake_segmentador(
+            api_key,
+            file_uri,
+            description,
+            model,
+            mime_type,
+            source_kind,
+            target_language="es-ES",
+        ):
             segmentador_calls.append(
                 {
                     "file_uri": file_uri,
@@ -138,7 +146,15 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
                 _usage(total=100),
             )
 
-        def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type, validation_context=None):
+        def _fake_explainer(
+            api_key,
+            file_uri,
+            agent_prompt,
+            model,
+            mime_type,
+            validation_context=None,
+            target_language="es-ES",
+        ):
             explainer_calls.append(
                 {
                     "file_uri": file_uri,
@@ -150,10 +166,10 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
             )
             return ({"ok": True}, _usage())
 
-        def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type):
+        def _fake_recorrido(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
             return ({"ok": True}, _usage())
 
-        def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type):
+        def _fake_resources(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
             return ({"ok": True}, _usage())
 
         monkeypatch.setattr(main, "run_segmentador", _fake_segmentador)
@@ -161,7 +177,7 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         monkeypatch.setattr(main, "run_recorrido", _fake_recorrido)
         monkeypatch.setattr(main, "run_resources", _fake_resources)
 
-        async def _fake_format(api_key, explainer_data):
+        async def _fake_format(api_key, explainer_data, target_language="es-ES"):
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
         monkeypatch.setattr(main, "format_explainer_content", _fake_format)
@@ -252,7 +268,15 @@ def test_process_project_pdf_does_not_require_legacy_theme_fields(monkeypatch):
         monkeypatch.setattr(main, "upload_file_with_retry", lambda *a, **k: SimpleNamespace(uri="u://x", mime_type="application/pdf"))
         monkeypatch.setattr(main, "run_page_classifier", lambda *a, **k: (frozenset({1, 2, 3, 4, 5}), _usage(), {}))
 
-        def _segmentador_without_legacy_fields(api_key, file_uri, description, model, mime_type, source_kind):
+        def _segmentador_without_legacy_fields(
+            api_key,
+            file_uri,
+            description,
+            model,
+            mime_type,
+            source_kind,
+            target_language="es-ES",
+        ):
             segmentador_calls.append(description)
             return (
                 {
@@ -294,7 +318,7 @@ def test_process_project_pdf_does_not_require_legacy_theme_fields(monkeypatch):
         monkeypatch.setattr(main, "run_recorrido", lambda *a, **k: ({"ok": True}, _usage()))
         monkeypatch.setattr(main, "run_resources", lambda *a, **k: ({"ok": True}, _usage()))
 
-        async def _fake_format(api_key, explainer_data):
+        async def _fake_format(api_key, explainer_data, target_language="es-ES"):
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
         monkeypatch.setattr(main, "format_explainer_content", _fake_format)
@@ -412,7 +436,7 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
             ),
         )
 
-        def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type):
+        def _fake_explainer(api_key, file_uri, agent_prompt, model, mime_type, target_language="es-ES"):
             gemini_calls.append({
                 "file_uri": file_uri,
                 "model": model,
@@ -437,7 +461,7 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
         monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
         monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
 
-        async def _fake_format(api_key, explainer_data):
+        async def _fake_format(api_key, explainer_data, target_language="es-ES"):
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
         monkeypatch.setattr(main, "format_explainer_content", _fake_format)
@@ -650,7 +674,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "run_segmentador_or",
-            lambda api_key, source_text, description, source_kind: (
+            lambda api_key, source_text, description, source_kind, **kwargs: (
                 segmentador_or_calls.append(
                     {
                         "api_key": api_key,
@@ -721,7 +745,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "run_recorrido_or",
-            lambda api_key, source_text, agent_prompt: (
+            lambda api_key, source_text, agent_prompt, **kwargs: (
                 recorrido_or_calls.append(
                     {"api_key": api_key, "source_text": source_text, "agent_prompt": agent_prompt}
                 )
@@ -731,7 +755,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "run_resources_or",
-            lambda api_key, source_text, agent_prompt: (
+            lambda api_key, source_text, agent_prompt, **kwargs: (
                 resources_or_calls.append(
                     {"api_key": api_key, "source_text": source_text, "agent_prompt": agent_prompt}
                 )
@@ -741,7 +765,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
 
         formatter_or_calls: list[dict] = []
 
-        async def _fake_format_or(api_key, explainer_data):
+        async def _fake_format_or(api_key, explainer_data, target_language="es-ES"):
             formatter_or_calls.append({"api_key": api_key, "explainer": explainer_data})
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
@@ -978,7 +1002,7 @@ def test_process_project_pdf_deletes_source_object_after_success(monkeypatch):
         monkeypatch.setattr(main, "run_recorrido", lambda *args, **kwargs: ({"ok": True}, _usage()))
         monkeypatch.setattr(main, "run_resources", lambda *args, **kwargs: ({"ok": True}, _usage()))
 
-        async def _fake_format(api_key, explainer_data):
+        async def _fake_format(api_key, explainer_data, target_language="es-ES"):
             return (explainer_data, {"total_tokens": 0, "cost": 0.0, "input_tokens": 0, "output_tokens": 0})
 
         monkeypatch.setattr(main, "format_explainer_content", _fake_format)

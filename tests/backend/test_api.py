@@ -228,12 +228,21 @@ class TestProcessProject:
     def test_defaults_to_gemini_when_body_is_missing(self, auth_client):
         scheduled: dict = {}
 
-        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
+        async def _fake_process(
+            project_id,
+            user_id,
+            explainer_provider="gemini",
+            openrouter_model=None,
+            deepseek_model=None,
+            target_language="es-ES",
+        ):
             scheduled.update({
                 "project_id": project_id,
                 "user_id": user_id,
                 "explainer_provider": explainer_provider,
                 "openrouter_model": openrouter_model,
+                "deepseek_model": deepseek_model,
+                "target_language": target_language,
             })
 
         with patch(
@@ -252,6 +261,8 @@ class TestProcessProject:
         assert r.json()["explainer_model"] == "gemini-3.1-flash-lite-preview"
         assert scheduled["explainer_provider"] == "gemini"
         assert scheduled["openrouter_model"] is None
+        assert scheduled["deepseek_model"] is None
+        assert scheduled["target_language"] == "es-ES"
 
     def test_requires_openrouter_key_when_openrouter_is_selected(self, auth_client):
         with patch(
@@ -274,7 +285,14 @@ class TestProcessProject:
     def test_youtube_with_openrouter_falls_back_to_gemini_automatically(self, auth_client):
         scheduled: dict = {}
 
-        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
+        async def _fake_process(
+            project_id,
+            user_id,
+            explainer_provider="gemini",
+            openrouter_model=None,
+            deepseek_model=None,
+            target_language="es-ES",
+        ):
             scheduled.update({"project_id": project_id, "explainer_provider": explainer_provider})
 
         with patch(
@@ -295,12 +313,21 @@ class TestProcessProject:
     def test_accepts_supported_openrouter_model_selection(self, auth_client):
         scheduled: dict = {}
 
-        async def _fake_process(project_id, user_id, explainer_provider="gemini", openrouter_model=None):
+        async def _fake_process(
+            project_id,
+            user_id,
+            explainer_provider="gemini",
+            openrouter_model=None,
+            deepseek_model=None,
+            target_language="es-ES",
+        ):
             scheduled.update({
                 "project_id": project_id,
                 "user_id": user_id,
                 "explainer_provider": explainer_provider,
                 "openrouter_model": openrouter_model,
+                "deepseek_model": deepseek_model,
+                "target_language": target_language,
             })
 
         with patch(
@@ -323,6 +350,8 @@ class TestProcessProject:
         assert r.json()["explainer_model"] == "xiaomi/mimo-v2.5"
         assert scheduled["explainer_provider"] == "openrouter"
         assert scheduled["openrouter_model"] == "xiaomi/mimo-v2.5"
+        assert scheduled["deepseek_model"] is None
+        assert scheduled["target_language"] == "es-ES"
 
     def test_rejects_unsupported_openrouter_model_selection(self, auth_client):
         with patch(
@@ -340,6 +369,87 @@ class TestProcessProject:
 
         assert r.status_code == 422
 
+    def test_accepts_deepseek_direct_for_web_without_gemini_key(self, auth_client):
+        scheduled: dict = {}
+
+        async def _fake_process(
+            project_id,
+            user_id,
+            explainer_provider="gemini",
+            openrouter_model=None,
+            deepseek_model=None,
+            target_language="es-ES",
+        ):
+            scheduled.update({
+                "project_id": project_id,
+                "user_id": user_id,
+                "explainer_provider": explainer_provider,
+                "openrouter_model": openrouter_model,
+                "deepseek_model": deepseek_model,
+                "target_language": target_language,
+            })
+
+        def _has_key(uid, provider="google_gemini"):
+            return provider in {"deepseek", "tavily"}
+
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-web", "name": "Proyecto", "status": "pending", "source_type": "web"},
+        ):
+            with patch("main.has_user_api_key", side_effect=_has_key):
+                with patch("main._process_project", new=_fake_process):
+                    r = auth_client.post(
+                        "/api/projects/proj-web/process",
+                        headers={"Authorization": "Bearer fake-token"},
+                        json={
+                            "explainer_provider": "deepseek",
+                            "deepseek_model": "deepseek-v4-flash",
+                        },
+                    )
+
+        assert r.status_code == 200
+        assert r.json()["explainer_provider"] == "deepseek"
+        assert r.json()["explainer_model"] == "deepseek-v4-flash"
+        assert scheduled["explainer_provider"] == "deepseek"
+        assert scheduled["openrouter_model"] is None
+        assert scheduled["deepseek_model"] == "deepseek-v4-flash"
+
+    def test_requires_tavily_key_when_deepseek_direct_is_selected(self, auth_client):
+        def _has_key(uid, provider="google_gemini"):
+            return provider == "deepseek"
+
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-web", "name": "Proyecto", "status": "pending", "source_type": "web"},
+        ):
+            with patch("main.has_user_api_key", side_effect=_has_key):
+                r = auth_client.post(
+                    "/api/projects/proj-web/process",
+                    headers={"Authorization": "Bearer fake-token"},
+                    json={"explainer_provider": "deepseek"},
+                )
+
+        assert r.status_code == 400
+        assert "Tavily" in r.json()["detail"]
+
+    def test_requires_mistral_key_when_deepseek_direct_is_selected_for_pdf(self, auth_client):
+        def _has_key(uid, provider="google_gemini"):
+            return provider in {"deepseek", "tavily"}
+
+        with patch(
+            "main.get_project",
+            return_value={"id": "proj-pdf", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
+        ):
+            with patch("main.has_user_api_key", side_effect=_has_key):
+                r = auth_client.post(
+                    "/api/projects/proj-pdf/process",
+                    headers={"Authorization": "Bearer fake-token"},
+                    json={"explainer_provider": "deepseek"},
+                )
+
+        assert r.status_code == 400
+        assert "Mistral" in r.json()["detail"]
+
 
 class TestMistralApiKeys:
     def test_status_exposes_mistral_fields(self, auth_client):
@@ -353,6 +463,10 @@ class TestMistralApiKeys:
                 "openrouter_updated_at": "2026-04-13T10:00:00Z",
                 "has_mistral_key": True,
                 "mistral_updated_at": "2026-04-13T10:00:00Z",
+                "has_deepseek_key": True,
+                "deepseek_updated_at": "2026-04-13T10:00:00Z",
+                "has_tavily_key": True,
+                "tavily_updated_at": "2026-04-13T10:00:00Z",
             },
         ):
             response = auth_client.get(
@@ -363,6 +477,8 @@ class TestMistralApiKeys:
         assert response.status_code == 200
         assert response.json()["has_mistral_key"] is True
         assert response.json()["mistral_updated_at"] == "2026-04-13T10:00:00Z"
+        assert response.json()["has_deepseek_key"] is True
+        assert response.json()["has_tavily_key"] is True
 
     def test_requires_mistral_key_when_openrouter_is_selected_for_pdf(self, auth_client):
         with patch(

@@ -140,7 +140,7 @@
         <div class="warning-icon">⚠️</div>
         <div class="warning-content">
           <p class="warning-title">API Key no configurada</p>
-          <p class="warning-sub">Necesitas configurar tu API key de Gemini para procesar documentos.</p>
+          <p class="warning-sub">Configura Gemini o DeepSeek directo en Ajustes para procesar documentos.</p>
         </div>
         <button class="btn-primary btn-sm" id="btn-configure-api-key">Configurar ahora</button>
       </div>
@@ -250,6 +250,13 @@
                   <span class="provider-card-sub">MiMo V2.5 Pro, MiMo V2.5 o DeepSeek V4 Pro</span>
                 </span>
               </label>
+              <label class="provider-card" id="provider-card-deepseek" for="explainer-provider-deepseek">
+                <input type="radio" name="explainer-provider" id="explainer-provider-deepseek" value="deepseek" />
+                <span class="provider-card-main">
+                  <span class="provider-card-title">DeepSeek directo</span>
+                  <span class="provider-card-sub">DeepSeek V4 Pro o V4 Flash, sin OpenRouter</span>
+                </span>
+              </label>
             </div>
             <div class="openrouter-model-panel hidden" id="openrouter-model-panel">
               <label class="form-label">Modelo OpenRouter</label>
@@ -273,6 +280,25 @@
                   <span class="provider-card-main">
                     <span class="provider-card-title">DeepSeek V4 Pro</span>
                     <span class="provider-card-sub">Razonamiento avanzado. Proveedor: deepseek.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div class="openrouter-model-panel hidden" id="deepseek-model-panel">
+              <label class="form-label">Modelo DeepSeek directo</label>
+              <div class="provider-grid openrouter-model-grid" id="deepseek-model-group">
+                <label class="provider-card" id="deepseek-model-card-pro" for="deepseek-model-pro">
+                  <input type="radio" name="deepseek-model" id="deepseek-model-pro" value="deepseek-v4-pro" checked />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">DeepSeek V4 Pro</span>
+                    <span class="provider-card-sub">Modelo principal para explicaciones largas con razonamiento máximo.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="deepseek-model-card-flash" for="deepseek-model-flash">
+                  <input type="radio" name="deepseek-model" id="deepseek-model-flash" value="deepseek-v4-flash" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">DeepSeek V4 Flash</span>
+                    <span class="provider-card-sub">Más rápido y barato; también se usa en pasos auxiliares.</span>
                   </span>
                 </label>
               </div>
@@ -906,7 +932,7 @@
           <p class="settings-description">
             Si la configuras, podrás elegir modelos OpenRouter para el explainer en cada ejecución.
             En modo OpenRouter, segmentación, recorrido y recursos usarán <strong>DeepSeek V4 Flash</strong> vía OpenRouter,
-            recursos usará búsqueda web, el OCR de PDFs usará <strong>Mistral nativo</strong> y el formateo seguirá usando Gemini.
+            recursos usará búsqueda web, el OCR de PDFs usará <strong>Mistral nativo</strong> y el formateo usará DeepSeek V4 Flash vía OpenRouter.
             Obtén tu API key en <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai</a>.
           </p>
 
@@ -938,20 +964,89 @@
         </div>
 
         <div class="settings-section">
-          <h4 class="settings-section-title">API Key de Mistral <span class="settings-badge-optional">Necesaria para PDF + OpenRouter</span></h4>
+          <h4 class="settings-section-title">API Key de DeepSeek <span class="settings-badge-optional">Opcional</span></h4>
           <p class="settings-description">
-            Si quieres usar <strong>OpenRouter</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
+            Si la configuras, podrás usar <strong>DeepSeek V4 Pro</strong> o <strong>DeepSeek V4 Flash</strong>
+            directamente, sin OpenRouter. Los pasos auxiliares de este modo usan DeepSeek V4 Flash.
+            Obtén tu API key en <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com</a>.
+          </p>
+
+          <div id="deepseek-key-not-set" class="api-key-status hidden">
+            <div class="status-badge status-neutral">No configurada</div>
+            <p class="status-text">DeepSeek directo no estará disponible hasta guardar esta key.</p>
+          </div>
+
+          <div id="deepseek-key-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Configurada</div>
+            <p class="status-text">DeepSeek directo queda disponible para PDF y URL web.</p>
+          </div>
+
+          <form id="form-deepseek-key" class="settings-form">
+            <div class="form-group">
+              <label for="deepseek-key-input" class="form-label">API Key</label>
+              <input type="password" id="deepseek-key-input" class="form-input" placeholder="Tu clave de DeepSeek" autocomplete="off" />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="btn-save-deepseek-key">
+                <span class="btn-text">Guardar API Key</span>
+                <span class="spinner hidden"></span>
+              </button>
+              <button type="button" class="btn-danger" id="btn-delete-deepseek-key">Eliminar</button>
+            </div>
+            <p class="form-error" id="deepseek-key-error"></p>
+            <p class="form-success" id="deepseek-key-success"></p>
+          </form>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-title">API Key de Tavily <span class="settings-badge-optional">Necesaria para DeepSeek directo</span></h4>
+          <p class="settings-description">
+            En modo DeepSeek directo, el mapa de recursos usa <strong>Tavily Search</strong> para verificar recursos,
+            autores, títulos y enlaces. Obtén tu API key en <a href="https://app.tavily.com/" target="_blank" rel="noopener">app.tavily.com</a>.
+          </p>
+
+          <div id="tavily-key-not-set" class="api-key-status hidden">
+            <div class="status-badge status-neutral">No configurada</div>
+            <p class="status-text">DeepSeek directo seguirá bloqueado hasta guardar esta key.</p>
+          </div>
+
+          <div id="tavily-key-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Configurada</div>
+            <p class="status-text">Tavily queda disponible para verificar recursos con DeepSeek.</p>
+          </div>
+
+          <form id="form-tavily-key" class="settings-form">
+            <div class="form-group">
+              <label for="tavily-key-input" class="form-label">API Key</label>
+              <input type="password" id="tavily-key-input" class="form-input" placeholder="tvly-..." autocomplete="off" />
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn-primary" id="btn-save-tavily-key">
+                <span class="btn-text">Guardar API Key</span>
+                <span class="spinner hidden"></span>
+              </button>
+              <button type="button" class="btn-danger" id="btn-delete-tavily-key">Eliminar</button>
+            </div>
+            <p class="form-error" id="tavily-key-error"></p>
+            <p class="form-success" id="tavily-key-success"></p>
+          </form>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-title">API Key de Mistral <span class="settings-badge-optional">Necesaria para PDF + OpenRouter/DeepSeek</span></h4>
+          <p class="settings-description">
+            Si quieres usar <strong>OpenRouter</strong> o <strong>DeepSeek directo</strong> sobre PDFs, el OCR nativo del documento lo hará <strong>Mistral</strong>.
             Obtén tu API key en <a href="https://console.mistral.ai/" target="_blank" rel="noopener">console.mistral.ai</a>.
           </p>
 
           <div id="mistral-key-not-set" class="api-key-status hidden">
             <div class="status-badge status-neutral">No configurada</div>
-            <p class="status-text">Los PDFs con OpenRouter seguirán bloqueados hasta guardar esta key.</p>
+            <p class="status-text">Los PDFs con OpenRouter o DeepSeek directo seguirán bloqueados hasta guardar esta key.</p>
           </div>
 
           <div id="mistral-key-set" class="api-key-status hidden">
             <div class="status-badge status-success">✓ Configurada</div>
-            <p class="status-text">El OCR nativo de Mistral queda disponible para proyectos PDF con OpenRouter.</p>
+            <p class="status-text">El OCR nativo de Mistral queda disponible para proyectos PDF con OpenRouter o DeepSeek.</p>
           </div>
 
           <form id="form-mistral-key" class="settings-form">

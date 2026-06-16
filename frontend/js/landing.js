@@ -17,7 +17,10 @@ export const OPENROUTER_MODEL_MIMO = 'xiaomi/mimo-v2.5';
 export const OPENROUTER_MODEL_DEEPSEEK_V4_PRO = 'deepseek/deepseek-v4-pro';
 export const DEFAULT_TARGET_LANGUAGE = 'es-ES';
 export const SUPPORTED_TARGET_LANGUAGES = ['es-ES', 'en', 'fr', 'de', 'it', 'pt-PT'];
+export const DEEPSEEK_MODEL_V4_PRO = 'deepseek-v4-pro';
+export const DEEPSEEK_MODEL_V4_FLASH = 'deepseek-v4-flash';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
+let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
 
 export function extractYouTubeVideoId(url) {
   const patterns = [
@@ -55,7 +58,8 @@ export function isValidWebUrl(url) {
 
 export function isExplainerProviderSupportedForSource(sourceType, provider) {
   if (provider === 'openrouter' && sourceType === 'youtube') return false;
-  return provider === 'gemini' || provider === 'openrouter';
+  if (provider === 'deepseek' && sourceType === 'youtube') return false;
+  return provider === 'gemini' || provider === 'openrouter' || provider === 'deepseek';
 }
 
 export function isValidOpenRouterModel(model) {
@@ -72,19 +76,34 @@ function openRouterModelLabel(model) {
   return 'Xiaomi MiMo V2.5 Pro';
 }
 
+export function isValidDeepSeekModel(model) {
+  return model === DEEPSEEK_MODEL_V4_PRO || model === DEEPSEEK_MODEL_V4_FLASH;
+}
+
+function deepSeekModelLabel(model) {
+  if (model === DEEPSEEK_MODEL_V4_FLASH) return 'DeepSeek V4 Flash';
+  return 'DeepSeek V4 Pro';
+}
+
 export function validateExplainerProviderSelection({
   sourceType,
   provider,
   hasGeminiKey,
   hasOpenRouterKey,
   hasMistralKey,
+  hasDeepSeekKey = false,
+  hasTavilyKey = false,
 }) {
-  if (!hasGeminiKey) {
+  if (!isExplainerProviderSupportedForSource(sourceType, provider)) {
+    return 'Los vídeos de YouTube solo son compatibles con Gemini.';
+  }
+
+  if (provider === 'gemini' && !hasGeminiKey) {
     return 'Necesitas configurar tu API key de Gemini primero. Ve a Ajustes.';
   }
 
-  if (!isExplainerProviderSupportedForSource(sourceType, provider)) {
-    return 'Los vídeos de YouTube solo son compatibles con Gemini.';
+  if (provider === 'openrouter' && !hasGeminiKey) {
+    return 'Necesitas configurar tu API key de Gemini. OpenRouter la sigue usando para pasos auxiliares de compatibilidad.';
   }
 
   if (provider === 'openrouter' && !hasOpenRouterKey) {
@@ -95,11 +114,23 @@ export function validateExplainerProviderSelection({
     return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con OpenRouter.';
   }
 
+  if (provider === 'deepseek' && !hasDeepSeekKey) {
+    return 'Necesitas configurar tu API key de DeepSeek para usar DeepSeek directo.';
+  }
+
+  if (provider === 'deepseek' && !hasTavilyKey) {
+    return 'Necesitas configurar tu API key de Tavily para que DeepSeek pueda verificar recursos con búsqueda web.';
+  }
+
+  if (provider === 'deepseek' && sourceType === 'pdf' && !hasMistralKey) {
+    return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con DeepSeek.';
+  }
+
   return null;
 }
 
 function buildExplainerProviderHint(sourceType, provider) {
-  if (!isExplainerProviderSupportedForSource(sourceType, 'openrouter')) {
+  if (sourceType === 'youtube') {
     return 'Los vídeos de YouTube usan siempre Gemini.';
   }
 
@@ -107,16 +138,35 @@ function buildExplainerProviderHint(sourceType, provider) {
     const modelLabel = openRouterModelLabel(currentOpenRouterModel);
     if (sourceType === 'pdf') {
       if (state.hasOpenRouterKey && state.hasMistralKey) {
-        return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido y recursos usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web. El OCR de PDFs usará Mistral nativo y el formateo seguirá usando Gemini.`;
+        return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido, recursos y formateo usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web. El OCR de PDFs usará Mistral nativo.`;
       }
       if (!state.hasMistralKey) {
         return `Para PDFs con ${modelLabel} necesitas guardar también tu API key de Mistral para el OCR nativo.`;
       }
     }
     if (state.hasOpenRouterKey) {
-      return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido y recursos usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web. El formateo seguirá usando Gemini.`;
+      return `La explicación usará ${modelLabel} vía OpenRouter. Segmentación, recorrido, recursos y formateo usarán DeepSeek V4 Flash vía OpenRouter; recursos tendrá búsqueda web.`;
     }
-    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio para el formateo y la validación.`;
+    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tu API key de OpenRouter. Gemini sigue siendo obligatorio por compatibilidad del flujo OpenRouter.`;
+  }
+
+  if (provider === 'deepseek') {
+    const modelLabel = deepSeekModelLabel(currentDeepSeekModel);
+    if (sourceType === 'pdf') {
+      if (state.hasDeepSeekKey && state.hasTavilyKey && state.hasMistralKey) {
+        return `La explicación usará ${modelLabel} directamente en DeepSeek con razonamiento máximo. Segmentación, recorrido, recursos y formateo usarán DeepSeek V4 Flash; recursos verificará con Tavily y el OCR de PDFs usará Mistral.`;
+      }
+      if (!state.hasMistralKey) {
+        return `Para PDFs con ${modelLabel} necesitas guardar también tu API key de Mistral para el OCR nativo.`;
+      }
+      if (!state.hasTavilyKey) {
+        return `Para DeepSeek directo necesitas Tavily para las búsquedas de recursos.`;
+      }
+    }
+    if (state.hasDeepSeekKey && state.hasTavilyKey) {
+      return `La explicación usará ${modelLabel} directamente en DeepSeek con razonamiento máximo. Segmentación, recorrido, recursos y formateo usarán DeepSeek V4 Flash; recursos verificará con Tavily.`;
+    }
+    return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tus API keys de DeepSeek y Tavily.`;
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
@@ -135,10 +185,14 @@ export function initLanding() {
   const targetLanguageSelect = $('target-language');
   const providerGemini = $('explainer-provider-gemini');
   const providerOpenRouter = $('explainer-provider-openrouter');
+  const providerDeepSeek = $('explainer-provider-deepseek');
   const modelPro = $('openrouter-model-pro');
   const modelStandard = $('openrouter-model-standard');
   const modelDeepseek = $('openrouter-model-deepseek');
   const modelPanel = $('openrouter-model-panel');
+  const deepseekModelPro = $('deepseek-model-pro');
+  const deepseekModelFlash = $('deepseek-model-flash');
+  const deepseekModelPanel = $('deepseek-model-panel');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
 
@@ -156,24 +210,37 @@ export function initLanding() {
 
   function syncExplainerProviderUI() {
     const openRouterSupported = isExplainerProviderSupportedForSource(currentSourceType, 'openrouter');
+    const deepSeekSupported = isExplainerProviderSupportedForSource(currentSourceType, 'deepseek');
     if (!openRouterSupported && currentExplainerProvider === 'openrouter') {
+      currentExplainerProvider = 'gemini';
+    }
+    if (!deepSeekSupported && currentExplainerProvider === 'deepseek') {
       currentExplainerProvider = 'gemini';
     }
 
     providerGemini.checked = currentExplainerProvider === 'gemini';
     providerOpenRouter.checked = currentExplainerProvider === 'openrouter';
+    providerDeepSeek.checked = currentExplainerProvider === 'deepseek';
     providerOpenRouter.disabled = !openRouterSupported;
+    providerDeepSeek.disabled = !deepSeekSupported;
 
     $('provider-card-gemini').classList.toggle('selected', currentExplainerProvider === 'gemini');
     $('provider-card-openrouter').classList.toggle('selected', currentExplainerProvider === 'openrouter');
+    $('provider-card-deepseek').classList.toggle('selected', currentExplainerProvider === 'deepseek');
     $('provider-card-openrouter').classList.toggle('disabled', !openRouterSupported);
+    $('provider-card-deepseek').classList.toggle('disabled', !deepSeekSupported);
     modelPanel.classList.toggle('hidden', currentExplainerProvider !== 'openrouter' || !openRouterSupported);
+    deepseekModelPanel.classList.toggle('hidden', currentExplainerProvider !== 'deepseek' || !deepSeekSupported);
     modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO;
     modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO;
     modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
     $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
     $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
     $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+    deepseekModelPro.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO;
+    deepseekModelFlash.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH;
+    $('deepseek-model-card-pro').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO);
+    $('deepseek-model-card-flash').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH);
 
     providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
     clearProviderError();
@@ -193,6 +260,12 @@ export function initLanding() {
   function setTargetLanguage(language) {
     currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
     if (targetLanguageSelect) targetLanguageSelect.value = currentTargetLanguage;
+  }
+
+  function setDeepSeekModel(model) {
+    if (!isValidDeepSeekModel(model)) return;
+    currentDeepSeekModel = model;
+    syncExplainerProviderUI();
   }
 
   function switchSourceType(type) {
@@ -235,6 +308,9 @@ export function initLanding() {
   providerOpenRouter.addEventListener('change', () => {
     if (providerOpenRouter.checked) setExplainerProvider('openrouter');
   });
+  providerDeepSeek.addEventListener('change', () => {
+    if (providerDeepSeek.checked) setExplainerProvider('deepseek');
+  });
   modelPro.addEventListener('change', () => {
     if (modelPro.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO);
   });
@@ -248,6 +324,12 @@ export function initLanding() {
     setTargetLanguage(targetLanguageSelect.value || DEFAULT_TARGET_LANGUAGE);
     targetLanguageSelect.addEventListener('change', () => setTargetLanguage(targetLanguageSelect.value));
   }
+  deepseekModelPro.addEventListener('change', () => {
+    if (deepseekModelPro.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_PRO);
+  });
+  deepseekModelFlash.addEventListener('change', () => {
+    if (deepseekModelFlash.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH);
+  });
 
   function checkReady() {
     const hasName = nameInput.value.trim();
@@ -376,6 +458,8 @@ async function handleUpload() {
     hasGeminiKey: state.hasApiKey,
     hasOpenRouterKey: state.hasOpenRouterKey,
     hasMistralKey: state.hasMistralKey,
+    hasDeepSeekKey: state.hasDeepSeekKey,
+    hasTavilyKey: state.hasTavilyKey,
   });
   if (providerValidationError) {
     providerError.textContent = providerValidationError;
@@ -436,6 +520,8 @@ async function handleUpload() {
     setTargetLanguage(DEFAULT_TARGET_LANGUAGE);
     if (currentExplainerProvider === 'openrouter') {
       processPayload.openrouter_model = currentOpenRouterModel;
+    } else if (currentExplainerProvider === 'deepseek') {
+      processPayload.deepseek_model = currentDeepSeekModel;
     }
 
     await api(`/api/projects/${project.id}/process`, {

@@ -48,6 +48,8 @@ from backend.supabase_data import (
     PROVIDER_GEMINI,
     PROVIDER_OPENROUTER,
     PROVIDER_MISTRAL,
+    PROVIDER_DEEPSEEK,
+    PROVIDER_TAVILY,
     SOURCE_OBJECT_STATUS_STORED,
 )
 from backend.crypto import mask_api_key
@@ -63,8 +65,8 @@ from backend.gemini_model_routing import (
 )
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
-from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador, run_segmentador_or
-from backend.agents.page_classifier import run_page_classifier, run_page_classifier_or
+from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador, run_segmentador_ds, run_segmentador_or
+from backend.agents.page_classifier import run_page_classifier, run_page_classifier_ds, run_page_classifier_or
 from backend.segmentation_page_coverage import (
     MAX_PAGE_COVERAGE_ATTEMPTS,
     SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
@@ -84,22 +86,33 @@ from backend.agents.explainer_openrouter import (
     OPENROUTER_PDF_PRIMING_MODEL,
     OPENROUTER_PDF_PRIMING_FALLBACK_MODEL,
 )
+from backend.agents.explainer_deepseek import (
+    run_explainer_ds_validated as run_explainer_ds,
+    run_subpart_explainer_ds_validated as run_subpart_explainer_ds,
+)
 from backend.agents.completeness_validator import (
     COMPLETENESS_VALIDATOR_MODEL,
+    DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL,
     OPENROUTER_COMPLETENESS_VALIDATOR_MODEL,
     ExplainerScopeItem,
     ExplainerSourceEvidence,
     ExplainerValidationContext,
     ExplainerValidationError,
 )
-from backend.agents.recorrido import run_recorrido, run_recorrido_or
-from backend.agents.resources import run_resources, run_resources_or
+from backend.agents.recorrido import run_recorrido, run_recorrido_ds, run_recorrido_or
+from backend.agents.resources import run_resources, run_resources_ds, run_resources_or
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
-from backend.agents.formatter import format_explainer_content, format_explainer_content_or
+from backend.agents.formatter import format_explainer_content, format_explainer_content_ds, format_explainer_content_or
 from backend.agents.language_policy import normalize_target_language
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
+from backend.deepseek_model_routing import (
+    DEEPSEEK_EXPLAINER_MODELS,
+    DEEPSEEK_MODEL_AUXILIARY,
+    DEEPSEEK_MODEL_V4_FLASH,
+    DEEPSEEK_MODEL_V4_PRO,
+)
 from backend.mistral_ocr_client import (
     MISTRAL_OCR_ENGINE,
     MISTRAL_OCR_MODEL,
@@ -135,11 +148,13 @@ logger = get_logger("main")
 # Max concurrent parts in the agent phase (prep + explainer/recorrido/resources); formatters run outside this limit.
 MAX_CONCURRENT_PARTS = 5
 
-ExplainerProvider = Literal["gemini", "openrouter"]
+ExplainerProvider = Literal["gemini", "openrouter", "deepseek"]
 OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5", "deepseek/deepseek-v4-pro"]
+DeepSeekExplainerModel = Literal["deepseek-v4-pro", "deepseek-v4-flash"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
 EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
+EXPLAINER_PROVIDER_DEEPSEEK: ExplainerProvider = "deepseek"
 OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
     {
         "xiaomi/mimo-v2.5-pro",
@@ -162,11 +177,13 @@ class ProcessProjectRequest(BaseModel):
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI
     openrouter_model: OpenRouterExplainerModel | None = None
     target_language: str = "es-ES"
+    deepseek_model: DeepSeekExplainerModel | None = None
 
 
 def _resolve_explainer_model(
     explainer_provider: ExplainerProvider,
     openrouter_model: OpenRouterExplainerModel | str | None = None,
+    deepseek_model: DeepSeekExplainerModel | str | None = None,
 ) -> str:
     if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
         if openrouter_model:
@@ -175,6 +192,13 @@ def _resolve_explainer_model(
                 raise ValueError(f"Modelo OpenRouter no soportado: {model}")
             return model
         return OPENROUTER_EXPLAINER_MODEL
+    if explainer_provider == EXPLAINER_PROVIDER_DEEPSEEK:
+        if deepseek_model:
+            model = str(deepseek_model).strip()
+            if model not in DEEPSEEK_EXPLAINER_MODELS:
+                raise ValueError(f"Modelo DeepSeek no soportado: {model}")
+            return model
+        return DEEPSEEK_MODEL_V4_PRO
     return MODEL_AGENTS
 
 
@@ -279,6 +303,22 @@ def _validate_mistral_api_key(api_key: str) -> str:
     return key
 
 
+def _validate_deepseek_api_key(api_key: str) -> str:
+    """Validate and normalize DeepSeek API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if len(key) < 20 or len(key) > 300 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=400, detail="API key de DeepSeek inválida")
+    return key
+
+
+def _validate_tavily_api_key(api_key: str) -> str:
+    """Validate and normalize Tavily API key. Raises HTTPException on invalid input."""
+    key = (api_key or "").strip()
+    if not key.startswith("tvly-") or len(key) < 20 or len(key) > 300 or any(ch.isspace() for ch in key):
+        raise HTTPException(status_code=400, detail="API key de Tavily inválida (debe empezar por tvly-)")
+    return key
+
+
 # ---- Gemini key endpoints ----
 
 @app.post("/api/settings/api-key")
@@ -360,6 +400,62 @@ async def api_delete_mistral_key(
     """Delete user's Mistral API key."""
     delete_user_api_key(user_id, provider=PROVIDER_MISTRAL)
     logger.info("[API Key] User %s... deleted Mistral key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- DeepSeek key endpoints ----
+
+@app.post("/api/settings/api-key/deepseek")
+@api_key_rate_limit
+async def api_set_deepseek_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    api_key: str = Form(...),
+):
+    """Store user's DeepSeek API key (BYOK)."""
+    api_key = _validate_deepseek_api_key(api_key)
+    set_user_api_key(user_id, api_key, provider=PROVIDER_DEEPSEEK)
+    logger.info("[API Key] User %s... configured DeepSeek key: %s", user_id[:8], mask_api_key(api_key))
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key/deepseek")
+@api_key_rate_limit
+async def api_delete_deepseek_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Delete user's DeepSeek API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_DEEPSEEK)
+    logger.info("[API Key] User %s... deleted DeepSeek key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- Tavily key endpoints ----
+
+@app.post("/api/settings/api-key/tavily")
+@api_key_rate_limit
+async def api_set_tavily_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    api_key: str = Form(...),
+):
+    """Store user's Tavily API key (BYOK)."""
+    api_key = _validate_tavily_api_key(api_key)
+    set_user_api_key(user_id, api_key, provider=PROVIDER_TAVILY)
+    logger.info("[API Key] User %s... configured Tavily key: %s", user_id[:8], mask_api_key(api_key))
+    return {"ok": True}
+
+
+@app.delete("/api/settings/api-key/tavily")
+@api_key_rate_limit
+async def api_delete_tavily_key(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Delete user's Tavily API key."""
+    delete_user_api_key(user_id, provider=PROVIDER_TAVILY)
+    logger.info("[API Key] User %s... deleted Tavily key", user_id[:8])
     return {"ok": True}
 
 
@@ -1748,6 +1844,8 @@ async def _format_and_finalize_part(
     use_openrouter: bool = False,
     openrouter_api_key: str = "",
     target_language: str = "es-ES",
+    use_deepseek: bool = False,
+    deepseek_api_key: str = "",
 ) -> None:
     """Background task: format explainer content then persist and notify.
 
@@ -1760,7 +1858,11 @@ async def _format_and_finalize_part(
     try:
         is_markdown_format = isinstance(explainer_data, dict) and explainer_data.get("_format") == "markdown"
         if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict) and not is_markdown_format:
-            if use_openrouter:
+            if use_deepseek:
+                formatted, fmt_usage = await format_explainer_content_ds(
+                    deepseek_api_key, explainer_data, target_language
+                )
+            elif use_openrouter:
                 formatted, fmt_usage = await format_explainer_content_or(
                     openrouter_api_key, explainer_data, target_language
                 )
@@ -1795,6 +1897,7 @@ async def _process_project(
     user_id: str,
     explainer_provider: ExplainerProvider = EXPLAINER_PROVIDER_GEMINI,
     openrouter_model: OpenRouterExplainerModel | str | None = None,
+    deepseek_model: DeepSeekExplainerModel | str | None = None,
     target_language: str = "es-ES",
 ) -> None:
     process_start_time = time.time()
@@ -1818,18 +1921,44 @@ async def _process_project(
     use_openrouter_explainer = explainer_provider == EXPLAINER_PROVIDER_OPENROUTER
     target_language_obj = normalize_target_language(target_language)
     target_language_code = target_language_obj.code
+    use_deepseek_explainer = explainer_provider == EXPLAINER_PROVIDER_DEEPSEEK
+    use_text_provider_explainer = use_openrouter_explainer or use_deepseek_explainer
     try:
-        explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
+        explainer_model = _resolve_explainer_model(
+            explainer_provider,
+            openrouter_model,
+            deepseek_model,
+        )
     except ValueError as exc:
         await send_event(project_id, {"type": "error", "message": str(exc)})
         update_project(project_id, user_id, {"status": "error", "error_message": str(exc)})
         return
-    classifier_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_CLASSIFIER
-    segmentation_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_SEGMENTADOR
-    auxiliary_agents_model = OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_AGENTS
+    classifier_model = (
+        OPENROUTER_MODEL_AUXILIARY
+        if use_openrouter_explainer
+        else DEEPSEEK_MODEL_AUXILIARY
+        if use_deepseek_explainer
+        else MODEL_CLASSIFIER
+    )
+    segmentation_model = (
+        OPENROUTER_MODEL_AUXILIARY
+        if use_openrouter_explainer
+        else DEEPSEEK_MODEL_AUXILIARY
+        if use_deepseek_explainer
+        else MODEL_SEGMENTADOR
+    )
+    auxiliary_agents_model = (
+        OPENROUTER_MODEL_AUXILIARY
+        if use_openrouter_explainer
+        else DEEPSEEK_MODEL_AUXILIARY
+        if use_deepseek_explainer
+        else MODEL_AGENTS
+    )
     validator_model = (
         OPENROUTER_COMPLETENESS_VALIDATOR_MODEL
         if use_openrouter_explainer
+        else DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL
+        if use_deepseek_explainer
         else COMPLETENESS_VALIDATOR_MODEL
     )
 
@@ -1859,27 +1988,33 @@ async def _process_project(
             }
         )
 
-        if use_openrouter_explainer and source_type == "youtube":
+        if use_text_provider_explainer and source_type == "youtube":
             logger.info(
-                "[Process] YouTube no soportado en OpenRouter, usando Gemini automáticamente",
+                "[Process] YouTube no soportado en provider directo, usando Gemini automáticamente",
                 extra={"project_id": project_id, "source_type": source_type},
             )
             use_openrouter_explainer = False
+            use_deepseek_explainer = False
+            use_text_provider_explainer = False
+            explainer_provider = EXPLAINER_PROVIDER_GEMINI
             explainer_model = MODEL_AGENTS
             classifier_model = MODEL_CLASSIFIER
             segmentation_model = MODEL_SEGMENTADOR
             auxiliary_agents_model = MODEL_AGENTS
             validator_model = COMPLETENESS_VALIDATOR_MODEL
 
-        # Get user's API keys (BYOK) from Supabase
-        api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI)
-        if not api_key:
+        # Get user's API keys (BYOK) from Supabase.
+        api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI) or ""
+        requires_gemini_key = not use_deepseek_explainer
+        if requires_gemini_key and not api_key:
             logger.error(f"[Process] API key Gemini no configurada para user: {user_id[:8]}...")
             await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada. Configúrala en Ajustes."})
             update_project(project_id, user_id, {"status": "error", "error_message": "API key no configurada"})
             return
 
         openrouter_api_key = ""
+        deepseek_api_key = ""
+        tavily_api_key = ""
         mistral_api_key = ""
         if use_openrouter_explainer:
             openrouter_api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER) or ""
@@ -1912,11 +2047,64 @@ async def _process_project(
                 )
                 update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
                 return
+        elif use_deepseek_explainer:
+            deepseek_api_key = get_user_api_key(user_id, provider=PROVIDER_DEEPSEEK) or ""
+            if not deepseek_api_key:
+                logger.error(f"[Process] API key DeepSeek no configurada para user: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de DeepSeek configurada. "
+                            "Guárdala en Ajustes para usar DeepSeek directo en este flujo."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key DeepSeek no configurada"})
+                return
+            tavily_api_key = get_user_api_key(user_id, provider=PROVIDER_TAVILY) or ""
+            if not tavily_api_key:
+                logger.error(f"[Process] API key Tavily no configurada para DeepSeek: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de Tavily configurada. "
+                            "Guárdala en Ajustes para que DeepSeek pueda verificar recursos con búsquedas web."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key Tavily no configurada"})
+                return
+            mistral_api_key = get_user_api_key(user_id, provider=PROVIDER_MISTRAL) or ""
+            if source_type == "pdf" and not mistral_api_key:
+                logger.error(f"[Process] API key Mistral no configurada para PDF con DeepSeek: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de Mistral configurada. "
+                            "Guárdala en Ajustes para usar OCR nativo en PDFs con DeepSeek."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
+                return
 
-        logger.info(f"[Process] Usando API key: {mask_api_key(api_key)}")
+        active_key_for_log = (
+            openrouter_api_key
+            if use_openrouter_explainer
+            else deepseek_api_key
+            if use_deepseek_explainer
+            else api_key
+        )
+        logger.info(f"[Process] Usando API key principal: {mask_api_key(active_key_for_log)}")
 
         from google import genai
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key) if api_key else None
         logger.info(
             "[Process] Enrutamiento de modelos: classifier=%s, segmentador=%s, agents=%s, validator=%s, explainer_provider=%s, explainer_model=%s",
             classifier_model,
@@ -1933,7 +2121,11 @@ async def _process_project(
             "agents_model": auxiliary_agents_model,
             "validator_model": validator_model,
             "formatter_model": (
-                OPENROUTER_MODEL_AUXILIARY if use_openrouter_explainer else MODEL_AGENTS
+                OPENROUTER_MODEL_AUXILIARY
+                if use_openrouter_explainer
+                else DEEPSEEK_MODEL_AUXILIARY
+                if use_deepseek_explainer
+                else MODEL_AGENTS
             ),
             "explainer_provider": explainer_provider,
             "explainer_model": explainer_model,
@@ -1947,6 +2139,9 @@ async def _process_project(
         if use_openrouter_explainer:
             cumulative_usage["openrouter_pdf_parser_engine"] = OPENROUTER_PDF_PARSER_ENGINE
             cumulative_usage["openrouter_pdf_priming_model"] = OPENROUTER_PDF_PRIMING_MODEL
+        if use_deepseek_explainer:
+            cumulative_usage["deepseek_search_provider"] = "tavily"
+            cumulative_usage["deepseek_pdf_parser_engine"] = MISTRAL_OCR_ENGINE
         await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
 
         usage_lock = asyncio.Lock()
@@ -2035,7 +2230,7 @@ async def _process_project(
                 extracted_content, extraction_usage = await asyncio.to_thread(
                     extract_web_content,
                     source_url,
-                    api_key,
+                    api_key if not use_deepseek_explainer else None,
                     MODEL_AGENTS,
                 )
                 source_text = extracted_content.text
@@ -2095,12 +2290,14 @@ async def _process_project(
             web_temp_path = await asyncio.to_thread(write_text_document_temp, web_document)
             temp_paths.append(web_temp_path)
 
-            if use_openrouter_explainer:
-                file_uri = f"openrouter-text://{project_id}/full-source"
+            if use_text_provider_explainer:
+                file_uri = f"{explainer_provider}-text://{project_id}/full-source"
                 source_mime_type = "text/plain"
                 upload_duration = 0.0
             else:
                 upload_start = time.time()
+                if client is None:
+                    raise RuntimeError("Cliente Gemini no inicializado para subir la fuente web.")
                 uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, web_temp_path, max_retries=5))
                 upload_duration = (time.time() - upload_start) * 1000
                 file_uri = uploaded_file.uri
@@ -2114,12 +2311,12 @@ async def _process_project(
                     "upload_duration_ms": int(upload_duration),
                     "block_count": len(web_blocks),
                     "resolved_url": resolved_source_url,
-                    "openrouter_inline_source": use_openrouter_explainer,
+                    "text_provider_inline_source": use_text_provider_explainer,
                 }
             )
 
             project_update: dict[str, Any] = {"status": "segmenting"}
-            if not use_openrouter_explainer:
+            if not use_text_provider_explainer:
                 project_update["file_uri"] = file_uri
             update_project(project_id, user_id, project_update)
             await send_event(project_id, {"type": "segmenting"})
@@ -2143,14 +2340,15 @@ async def _process_project(
             # Page count is read from the original PDF (same for both flows).
             pdf_total_pages = len(PdfReader(pdf_temp_path).pages)
 
-            if use_openrouter_explainer:
-                # OpenRouter flow: Mistral extracts text via PDF structure, so no
+            if use_text_provider_explainer:
+                # Direct text-provider flows: Mistral extracts text via PDF structure, so no
                 # visual page-number watermarks are needed. Use the original PDF directly.
                 logger.info(
-                    "[Process] Preparando OCR canónico de Mistral al inicio del flujo OpenRouter",
+                    "[Process] Preparando OCR canónico de Mistral al inicio del flujo textual",
                     extra={
                         "pdf_total_pages": pdf_total_pages,
                         "mistral_ocr_engine": MISTRAL_OCR_ENGINE,
+                        "explainer_provider": explainer_provider,
                     },
                 )
                 mistral_pdf_context = await asyncio.to_thread(
@@ -2167,12 +2365,13 @@ async def _process_project(
                     page_numbers=tuple(range(1, pdf_total_pages + 1)),
                 )
                 logger.info(
-                    "[Process] OCR canónico de Mistral preparado para OpenRouter",
+                    "[Process] OCR canónico de Mistral preparado para provider textual",
                     extra={
                         "file_uri": file_uri,
                         "cache_hit": mistral_pdf_context.cache_entry.cache_hit,
                         "cached_pages_count": len(mistral_pdf_context.cache_entry.cached_page_numbers),
                         "source_chars": len(openrouter_full_source_text),
+                        "explainer_provider": explainer_provider,
                     },
                 )
             else:
@@ -2184,6 +2383,8 @@ async def _process_project(
                 logger.info(f"[Process] PDF numerado creado: {numbered_pdf_path}")
                 temp_paths.append(numbered_pdf_path)
                 upload_start = time.time()
+                if client is None:
+                    raise RuntimeError("Cliente Gemini no inicializado para subir el PDF numerado.")
                 uploaded_file = await asyncio.to_thread(lambda: upload_file_with_retry(client, numbered_pdf_path, max_retries=5))
                 upload_duration = (time.time() - upload_start) * 1000
 
@@ -2214,6 +2415,17 @@ async def _process_project(
                         openrouter_full_source_text,
                         pdf_total_pages,
                     )
+                elif use_deepseek_explainer:
+                    if not mistral_pdf_context or not openrouter_full_source_text:
+                        raise PdfOcrError(
+                            "OCR Mistral no disponible para el clasificador DeepSeek."
+                        )
+                    content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
+                        run_page_classifier_ds,
+                        deepseek_api_key,
+                        openrouter_full_source_text,
+                        pdf_total_pages,
+                    )
                 else:
                     content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
                         run_page_classifier,
@@ -2241,7 +2453,7 @@ async def _process_project(
                     },
                 )
             except Exception as clf_err:
-                if use_openrouter_explainer:
+                if use_text_provider_explainer:
                     raise
                 content_page_set = frozenset(range(1, pdf_total_pages + 1))
                 logger.warning(
@@ -2251,7 +2463,7 @@ async def _process_project(
                 )
 
             if (
-                not use_openrouter_explainer
+                not use_text_provider_explainer
                 and mistral_api_key
                 and content_page_set
                 and source_type == "pdf"
@@ -2301,11 +2513,11 @@ async def _process_project(
                 base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
                 seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
-            if use_openrouter_explainer:
+            if use_text_provider_explainer:
                 if is_pdf_seg:
                     if not openrouter_full_source_text:
                         raise PdfOcrError(
-                            "OCR Mistral no disponible para el segmentador OpenRouter."
+                            "OCR Mistral no disponible para el segmentador textual."
                         )
                 else:
                     if not openrouter_full_source_text:
@@ -2313,14 +2525,24 @@ async def _process_project(
                             "El documento web está vacío y no puede ser segmentado."
                         )
                 segmentador_source_text = openrouter_full_source_text
-                segmentation, usage_meta = await asyncio.to_thread(
-                    run_segmentador_or,
-                    openrouter_api_key,
-                    segmentador_source_text,
-                    seg_description,
-                    source_kind,
-                    target_language=target_language_code,
-                )
+                if use_openrouter_explainer:
+                    segmentation, usage_meta = await asyncio.to_thread(
+                        run_segmentador_or,
+                        openrouter_api_key,
+                        segmentador_source_text,
+                        seg_description,
+                        source_kind,
+                        target_language=target_language_code,
+                    )
+                else:
+                    segmentation, usage_meta = await asyncio.to_thread(
+                        run_segmentador_ds,
+                        deepseek_api_key,
+                        segmentador_source_text,
+                        seg_description,
+                        source_kind,
+                        target_language=target_language_code,
+                    )
             else:
                 segmentation, usage_meta = await asyncio.to_thread(
                     run_segmentador,
@@ -2577,9 +2799,9 @@ async def _process_project(
                 if is_pdf_source:
                     pdf_scope_mode: Literal["subpdf_buffered", "full_document"] = "full_document"
 
-                    if not use_openrouter_explainer and numbered_pdf_path:
+                    if not use_text_provider_explainer and numbered_pdf_path:
                         # Gemini flow: extract a sub-PDF for this part and upload it.
-                        # OpenRouter flow skips this — it works entirely from OCR text.
+                        # Text-provider flows skip this — they work entirely from OCR text.
                         pagina_inicio = parte.get("pagina_inicio")
                         pagina_fin = parte.get("pagina_fin")
                         subpdf_buffered_ok = False
@@ -2671,10 +2893,10 @@ async def _process_project(
                             )
                         ]
 
-                    if use_openrouter_explainer:
+                    if use_text_provider_explainer:
                         if mistral_pdf_context is None:
                             raise PdfOcrError(
-                                "OCR Mistral no disponible para agentes OpenRouter de PDF."
+                                "OCR Mistral no disponible para agentes textuales de PDF."
                             )
                         openrouter_part_pages = _select_openrouter_pdf_pages(
                             content_page_set,
@@ -2707,12 +2929,14 @@ async def _process_project(
                     local_temp_paths.append(segment_temp_path)
                     openrouter_part_source_text = part_document
 
-                    if use_openrouter_explainer:
+                    if use_text_provider_explainer:
                         seg_upload_duration = 0.0
-                        agent_file_uri = f"openrouter-text://{project_id}/part/{part_id}"
+                        agent_file_uri = f"{explainer_provider}-text://{project_id}/part/{part_id}"
                         agent_mime_type = "text/plain"
                     else:
                         seg_upload_start = time.time()
+                        if client is None:
+                            raise RuntimeError("Cliente Gemini no inicializado para subir el segmento textual.")
                         segment_uploaded = await asyncio.to_thread(
                             lambda p=segment_temp_path: upload_file_with_retry(client, p, max_retries=5)
                         )
@@ -2727,7 +2951,7 @@ async def _process_project(
                             "seg_upload_duration_ms": int(seg_upload_duration),
                             "bloque_inicio": bloque_inicio,
                             "bloque_fin": bloque_fin,
-                            "openrouter_inline_source": use_openrouter_explainer,
+                            "text_provider_inline_source": use_text_provider_explainer,
                         }
                     )
 
@@ -2813,21 +3037,28 @@ async def _process_project(
                 )
 
                 # Fail fast before building any coroutines if OR source text is missing
-                if use_openrouter_explainer and not openrouter_part_source_text:
+                if use_text_provider_explainer and not openrouter_part_source_text:
                     raise RuntimeError(
-                        "No hay texto fuente inline para los agentes OpenRouter de esta parte."
+                        "No hay texto fuente inline para los agentes textuales de esta parte."
                     )
 
                 # Execute all subpart explainers + recorrido + resources in parallel
                 agents_start = time.time()
-                use_or_canonical = use_openrouter_explainer and is_pdf_source and mistral_pdf_context is not None
-                use_or_direct = use_openrouter_explainer and not use_or_canonical and segment_temp_path is not None
-                use_or = use_or_canonical or use_or_direct
+                use_text_canonical = use_text_provider_explainer and is_pdf_source and mistral_pdf_context is not None
+                use_text_direct = use_text_provider_explainer and not use_text_canonical and segment_temp_path is not None
+                use_text_provider_part = use_text_canonical or use_text_direct
+                text_provider_api_key = openrouter_api_key if use_openrouter_explainer else deepseek_api_key
+                text_provider_explainer_fn = run_explainer_or if use_openrouter_explainer else run_explainer_ds
+                text_provider_subpart_fn = (
+                    run_subpart_explainer_or
+                    if use_openrouter_explainer
+                    else run_subpart_explainer_ds
+                )
                 if is_pdf_source:
                     enriched_validation_contexts: list[ExplainerValidationContext] = []
                     for validation_context in subpart_validation_contexts:
                         source_evidence: ExplainerSourceEvidence | None = None
-                        if use_or_canonical and mistral_pdf_context is not None:
+                        if use_text_canonical and mistral_pdf_context is not None:
                             source_evidence = _build_mistral_ocr_validation_evidence(
                                 cache_entry=mistral_pdf_context.cache_entry,
                                 content_page_set=content_page_set,
@@ -2845,23 +3076,22 @@ async def _process_project(
                     subpart_validation_contexts = enriched_validation_contexts
 
                 if use_subpart_explainer:
-                    explainer_fn_or_sp = run_subpart_explainer_or
                     explainer_fn_sp = run_subpart_explainer
 
                     def _make_subpart_task(idx: int):
                         sp_prompt = subpart_prompts[idx]
                         validation_context = subpart_validation_contexts[idx]
-                        if use_or:
-                            if use_or_canonical:
+                        if use_text_provider_part:
+                            if use_text_canonical:
                                 return asyncio.to_thread(
                                     _call_agent_with_optional_validation_context,
-                                    explainer_fn_or_sp,
+                                    text_provider_subpart_fn,
                                     mistral_pdf_context.source_pdf_path,
                                     sp_prompt,
                                     explainer_model,
                                     "application/pdf",
-                                    openrouter_api_key,
-                                    openrouter_api_key,
+                                    text_provider_api_key,
+                                    text_provider_api_key,
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
                                     validation_context=validation_context,
@@ -2869,13 +3099,13 @@ async def _process_project(
                                 )
                             return asyncio.to_thread(
                                 _call_agent_with_optional_validation_context,
-                                explainer_fn_or_sp,
+                                text_provider_subpart_fn,
                                 segment_temp_path,
                                 sp_prompt,
                                 explainer_model,
                                 agent_mime_type,
-                                openrouter_api_key,
-                                openrouter_api_key,
+                                text_provider_api_key,
+                                text_provider_api_key,
                                 validation_context=validation_context,
                                 target_language=target_language_code,
                             )
@@ -2891,29 +3121,28 @@ async def _process_project(
                             target_language=target_language_code,
                         )
 
-                    if use_or_canonical:
+                    if use_text_canonical:
                         if len(openrouter_page_scopes) != len(subpart_prompts):
                             raise RuntimeError(
-                                "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                                "Las páginas del provider textual no coinciden con el número de subprompts generados."
                             )
                     parallel_explainer = [_make_subpart_task(i) for i in range(num_subparts)]
-                elif use_or:
-                    explainer_fn_or = run_explainer_or
-                    if use_or_canonical:
+                elif use_text_provider_part:
+                    if use_text_canonical:
                         if len(openrouter_page_scopes) != len(subpart_prompts):
                             raise RuntimeError(
-                                "Las páginas OpenRouter no coinciden con el número de subprompts generados."
+                                "Las páginas del provider textual no coinciden con el número de subprompts generados."
                             )
                         parallel_explainer = [
                             asyncio.to_thread(
                                 _call_agent_with_optional_validation_context,
-                                explainer_fn_or,
+                                text_provider_explainer_fn,
                                 mistral_pdf_context.source_pdf_path,
                                 sp_prompt,
                                 explainer_model,
                                 "application/pdf",
-                                openrouter_api_key,
-                                openrouter_api_key,
+                                text_provider_api_key,
+                                text_provider_api_key,
                                 mistral_pdf_context.cache_entry,
                                 page_scope,
                                 validation_context=subpart_validation_contexts[idx],
@@ -2925,13 +3154,13 @@ async def _process_project(
                         parallel_explainer = [
                             asyncio.to_thread(
                                 _call_agent_with_optional_validation_context,
-                                explainer_fn_or,
+                                text_provider_explainer_fn,
                                 segment_temp_path,
                                 sp_prompt,
                                 explainer_model,
                                 agent_mime_type,
-                                openrouter_api_key,
-                                openrouter_api_key,
+                                text_provider_api_key,
+                                text_provider_api_key,
                                 validation_context=subpart_validation_contexts[idx],
                                 target_language=target_language_code,
                             )
@@ -2967,6 +3196,20 @@ async def _process_project(
                         openrouter_part_source_text,
                         agent_prompt,
                         target_language=target_language_code,
+                    )
+                elif use_deepseek_explainer:
+                    recorrido_task = asyncio.to_thread(
+                        run_recorrido_ds,
+                        deepseek_api_key,
+                        openrouter_part_source_text,
+                        agent_prompt,
+                    )
+                    resources_task = asyncio.to_thread(
+                        run_resources_ds,
+                        deepseek_api_key,
+                        tavily_api_key,
+                        openrouter_part_source_text,
+                        agent_prompt,
                     )
                 else:
                     recorrido_task = asyncio.to_thread(
@@ -3112,6 +3355,8 @@ async def _process_project(
                     use_openrouter=use_openrouter_explainer,
                     openrouter_api_key=openrouter_api_key,
                     target_language=target_language_code,
+                    use_deepseek=use_deepseek_explainer,
+                    deepseek_api_key=deepseek_api_key,
                 )
             )
             return formatter_task, local_segment_pdf_paths, local_temp_paths
@@ -3351,6 +3596,7 @@ async def api_reformat_project(
 
     project_usage = project.get("usage") or {}
     use_openrouter = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_OPENROUTER
+    use_deepseek = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_DEEPSEEK
 
     if use_openrouter:
         api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
@@ -3359,6 +3605,16 @@ async def api_reformat_project(
                 status_code=400,
                 detail=(
                     "No hay API key de OpenRouter configurada. "
+                    "Guárdala en Ajustes para reformatear este proyecto."
+                ),
+            )
+    elif use_deepseek:
+        api_key = get_user_api_key(user_id, provider=PROVIDER_DEEPSEEK)
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No hay API key de DeepSeek configurada. "
                     "Guárdala en Ajustes para reformatear este proyecto."
                 ),
             )
@@ -3381,7 +3637,9 @@ async def api_reformat_project(
             and isinstance(explainer, dict)
             and "error" not in explainer
         ):
-            if use_openrouter:
+            if use_deepseek:
+                formatted, fmt_usage = await format_explainer_content_ds(api_key, explainer, reformat_target_language)
+            elif use_openrouter:
                 formatted, fmt_usage = await format_explainer_content_or(api_key, explainer, reformat_target_language)
             else:
                 formatted, fmt_usage = await format_explainer_content(api_key, explainer, reformat_target_language)
@@ -3476,12 +3734,20 @@ async def api_process_project(
     """Start processing a project using the user's own API key (BYOK)."""
     explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
     openrouter_model = payload.openrouter_model if payload else None
+    deepseek_model = payload.deepseek_model if payload else None
     try:
         target_language_obj = normalize_target_language(payload.target_language if payload else None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     target_language_code = target_language_obj.code
-    explainer_model = _resolve_explainer_model(explainer_provider, openrouter_model)
+    try:
+        explainer_model = _resolve_explainer_model(
+            explainer_provider,
+            openrouter_model,
+            deepseek_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
         extra={
@@ -3521,11 +3787,16 @@ async def api_process_project(
         )
         raise HTTPException(status_code=400, detail=MISSING_PDF_SOURCE_ERROR_MESSAGE)
 
-    if not has_user_api_key(user_id, provider=PROVIDER_GEMINI):
+    source_type = project.get("source_type", "pdf")
+    requires_gemini_key = (
+        explainer_provider != EXPLAINER_PROVIDER_DEEPSEEK
+        or source_type == "youtube"
+    )
+    if requires_gemini_key and not has_user_api_key(user_id, provider=PROVIDER_GEMINI):
         logger.warning(f"[API] Usuario sin API key configurada: {user_id[:8]}...")
         raise HTTPException(status_code=400, detail="No hay API key de Gemini configurada. Configúrala en Ajustes.")
 
-    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER and project.get("source_type") != "youtube":
+    if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER and source_type != "youtube":
         # YouTube always falls back to Gemini automatically — skip OpenRouter key checks for that source type
         if not has_user_api_key(user_id, provider=PROVIDER_OPENROUTER):
             logger.warning(f"[API] Usuario sin API key OpenRouter configurada: {user_id[:8]}...")
@@ -3533,11 +3804,31 @@ async def api_process_project(
                 status_code=400,
                 detail="No hay API key de OpenRouter configurada. Guárdala en Ajustes para usar OpenRouter en este flujo.",
             )
-        if project.get("source_type") == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
+        if source_type == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
             logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con OpenRouter: {user_id[:8]}...")
             raise HTTPException(
                 status_code=400,
                 detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con OpenRouter.",
+            )
+    elif explainer_provider == EXPLAINER_PROVIDER_DEEPSEEK and source_type != "youtube":
+        # YouTube always falls back to Gemini automatically — skip DeepSeek key checks for that source type.
+        if not has_user_api_key(user_id, provider=PROVIDER_DEEPSEEK):
+            logger.warning(f"[API] Usuario sin API key DeepSeek configurada: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de DeepSeek configurada. Guárdala en Ajustes para usar DeepSeek directo.",
+            )
+        if not has_user_api_key(user_id, provider=PROVIDER_TAVILY):
+            logger.warning(f"[API] Usuario sin API key Tavily configurada: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Tavily configurada. Guárdala en Ajustes para verificar recursos con DeepSeek.",
+            )
+        if source_type == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
+            logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con DeepSeek: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con DeepSeek.",
             )
 
     logger.info(
@@ -3545,7 +3836,7 @@ async def api_process_project(
         extra={
             "project_id": project_id,
             "project_name": project.get("name", "unnamed"),
-            "source_type": project.get("source_type", "pdf"),
+            "source_type": source_type,
             "segmentation_model": MODEL_SEGMENTADOR,
             "agents_model": MODEL_AGENTS,
             "explainer_provider": explainer_provider,
@@ -3553,7 +3844,15 @@ async def api_process_project(
             "target_language": target_language_code,
         }
     )
-    background_tasks.add_task(_process_project, project_id, user_id, explainer_provider, openrouter_model, target_language_code)
+    background_tasks.add_task(
+        _process_project,
+        project_id,
+        user_id,
+        explainer_provider,
+        openrouter_model,
+        deepseek_model,
+        target_language_code,
+    )
     return {
         "ok": True,
         "status": "started",

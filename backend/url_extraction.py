@@ -180,7 +180,7 @@ def normalize_public_web_url(url: str) -> str:
     return urlunparse(normalized)
 
 
-def extract_web_content(url: str, api_key: str, model: str) -> tuple[ExtractedWebContent, Any | None]:
+def extract_web_content(url: str, api_key: str | None, model: str) -> tuple[ExtractedWebContent, Any | None]:
     """Extract the readable text from a public web URL."""
     normalized_url = normalize_public_web_url(url)
     fetched: FetchedWebPage | None = None
@@ -247,15 +247,16 @@ def extract_web_content(url: str, api_key: str, model: str) -> tuple[ExtractedWe
                 None,
             )
 
-    gemini_result, usage_meta = _extract_with_gemini_url_context(
-        api_key=api_key,
-        model=model,
-        url=(fetched.resolved_url if fetched else normalized_url),
-        fallback_title=fallback_title,
-        content_type=content_type,
-    )
-    if gemini_result:
-        return gemini_result, usage_meta
+    if api_key and api_key.strip():
+        gemini_result, usage_meta = _extract_with_gemini_url_context(
+            api_key=api_key,
+            model=model,
+            url=(fetched.resolved_url if fetched else normalized_url),
+            fallback_title=fallback_title,
+            content_type=content_type,
+        )
+        if gemini_result:
+            return gemini_result, usage_meta
 
     raise WebExtractionError(
         "No se pudo extraer texto utilizable de esa URL pública. "

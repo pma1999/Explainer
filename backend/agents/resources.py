@@ -8,6 +8,8 @@ from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML, build_language_policy_xml
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -15,11 +17,14 @@ from backend.openrouter_model_routing import (
     max_reasoning_preferences,
     openrouter_web_search_tool_auto,
 )
+from backend.tavily_client import tavily_search_tool_result
 
 from google import genai
 from google.genai import types
 
 logger = get_logger("backend.agents.resources")
+
+DEEPSEEK_RESOURCES_MAX_TOOL_ROUNDS = 8
 
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
@@ -221,6 +226,49 @@ Devuelve exclusivamente un objeto JSON raíz con esta estructura:
 No devuelvas un array raíz ni texto fuera del JSON.
 </openrouter_json_contract>"""
 
+DEEPSEEK_CONTRACT_SUFFIX = """
+
+<deepseek_tool_contract>
+Cuando estas instrucciones mencionen Google Search o búsquedas web, usa la herramienta
+`tavily_search` disponible en esta llamada. Úsala para verificar recursos, títulos,
+autoría, vigencia y enlaces cuando sea necesario para evitar confabulaciones.
+
+La herramienta devuelve resultados web normalizados desde Tavily. Formula consultas
+concretas y bibliográficamente útiles. No inventes datos si la búsqueda no confirma
+un recurso con confianza suficiente.
+</deepseek_tool_contract>
+
+<deepseek_source_contract>
+La fuente se entrega como texto inline completo ya delimitado para esta parte.
+No recortes el contenido por longitud de contexto.
+</deepseek_source_contract>
+
+<deepseek_json_contract>
+Devuelve exclusivamente un objeto JSON raíz con esta estructura:
+{
+  "titulo_mapa": "string",
+  "vision_general": "string",
+  "ejes_tematicos": [
+    {
+      "nombre_eje": "string",
+      "recursos": [
+        {
+          "formato": "libro_texto_articulo | documental_pelicula_serie | sitio_web_recurso_digital | podcast_audio | curso_conferencia_material_educativo",
+          "titulo": "string",
+          "autor_creador": "string",
+          "tipo_y_datos": "string",
+          "idioma": "string",
+          "conexion_con_texto": "string",
+          "nivel_y_accesibilidad": "string",
+          "nota": "string"
+        }
+      ]
+    }
+  ],
+  "nota_de_integridad": "string"
+}
+No devuelvas un array raíz ni texto fuera del JSON.
+</deepseek_json_contract>"""
 
 
 def build_resources_system_instruction(target_language: str = "es-ES") -> str:
@@ -235,12 +283,70 @@ def build_resources_system_instruction(target_language: str = "es-ES") -> str:
 def build_resources_openrouter_system_instruction(target_language: str = "es-ES") -> str:
     return build_resources_system_instruction(target_language) + OPENROUTER_CONTRACT_SUFFIX
 
+
+def build_resources_deepseek_system_instruction(target_language: str = "es-ES") -> str:
+    return build_resources_system_instruction(target_language) + DEEPSEEK_CONTRACT_SUFFIX
+
+
 OPENROUTER_SYSTEM_INSTRUCTION = build_resources_openrouter_system_instruction("es-ES")
+DEEPSEEK_SYSTEM_INSTRUCTION = build_resources_deepseek_system_instruction("es-ES")
 
 OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene las claves raíz `titulo_mapa`, `vision_general`, `ejes_tematicos` y `nota_de_integridad`.
 `ejes_tematicos` es un array de objetos con `nombre_eje` y `recursos`.
 Cada recurso tiene `formato`, `titulo`, `autor_creador`, `tipo_y_datos`, `idioma`, `conexion_con_texto`, `nivel_y_accesibilidad` y `nota`.
 La raíz debe ser un objeto JSON, nunca un array."""
+
+
+def deepseek_tavily_search_tool() -> dict[str, Any]:
+    """OpenAI-compatible function tool schema for Tavily Search."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "tavily_search",
+            "description": (
+                "Busca en la web con Tavily para verificar recursos, títulos, autores, "
+                "fechas, enlaces y vigencia bibliográfica."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Consulta web concreta y verificable.",
+                    },
+                    "search_depth": {
+                        "type": "string",
+                        "enum": ["basic", "advanced"],
+                        "description": "Profundidad de búsqueda. Usa advanced para verificación bibliográfica.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Número máximo de resultados, entre 1 y 10.",
+                    },
+                    "include_answer": {
+                        "type": "boolean",
+                        "description": "Si Tavily debe incluir una respuesta sintética.",
+                    },
+                    "include_domains": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Dominios permitidos opcionales.",
+                    },
+                    "exclude_domains": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Dominios excluidos opcionales.",
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["day", "week", "month", "year"],
+                        "description": "Filtro temporal opcional.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    }
 
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
@@ -489,7 +595,10 @@ def run_resources_or(
                     "Busca y recomienda los mejores recursos disponibles en cualquier idioma (libros, artículos, "
                     "documentales, podcasts, sitios web, cursos) para profundizar en los temas "
                     "de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
-                    "verificables con alta confianza."
+                    "verificables con alta confianza. En modo DeepSeek directo puedes realizar "
+                    f"hasta {DEEPSEEK_RESOURCES_MAX_TOOL_ROUNDS} rondas de búsqueda web; úsalas "
+                    "cuando aporten verificación real y cierra con el JSON final cuando tengas "
+                    "evidencia suficiente."
                 ),
             }
         ],
@@ -514,6 +623,91 @@ def run_resources_or(
     )
     logger.info(
         "Resources OpenRouter completado: %d ejes, %d recursos en %dms",
+        len(content.get("ejes_tematicos", [])),
+        total_recursos,
+        total_duration,
+        extra={
+            "num_ejes": len(content.get("ejes_tematicos", [])),
+            "total_recursos": total_recursos,
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "server_tool_use": getattr(usage, "server_tool_use", {}),
+            "model": model,
+        },
+    )
+    return content, usage
+
+
+def run_resources_ds(
+    api_key: str,
+    tavily_api_key: str,
+    source_text: str,
+    identificacion: str,
+    model: str = DEEPSEEK_MODEL_AUXILIARY,
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], Any]:
+    """Run the Resources agent via direct DeepSeek with Tavily web search."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente resources DeepSeek (Tavily Search)",
+        extra={
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "uses_tavily_search": True,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = call_deepseek_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>\n\n"
+                    "Busca y recomienda los mejores recursos disponibles (libros, artículos, "
+                    "documentales, podcasts, sitios web, cursos) para profundizar en los temas "
+                    "de esta sección. Organiza por ejes temáticos. Solo incluye recursos "
+                    "verificables con alta confianza. En modo DeepSeek directo puedes realizar "
+                    f"hasta {DEEPSEEK_RESOURCES_MAX_TOOL_ROUNDS} rondas de búsqueda web; úsalas "
+                    "cuando aporten verificación real y cierra con el JSON final cuando tengas "
+                    "evidencia suficiente."
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=build_resources_deepseek_system_instruction(target_language),
+        api_key=api_key,
+        response_format="json_object",
+        tools=[deepseek_tavily_search_tool()],
+        tool_handlers={
+            "tavily_search": lambda arguments: tavily_search_tool_result(
+                tavily_api_key,
+                arguments,
+            )
+        },
+        reasoning_effort=max_reasoning_effort(),
+        max_tool_rounds=DEEPSEEK_RESOURCES_MAX_TOOL_ROUNDS,
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise DeepSeekError("Resources DeepSeek no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    total_recursos = sum(
+        len(eje.get("recursos", []))
+        for eje in content.get("ejes_tematicos", [])
+        if isinstance(eje, dict)
+    )
+    logger.info(
+        "Resources DeepSeek completado: %d ejes, %d recursos en %dms",
         len(content.get("ejes_tematicos", [])),
         total_recursos,
         total_duration,

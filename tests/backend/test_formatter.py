@@ -303,7 +303,7 @@ class TestFormatExplainerContent:
         data = _make_explainer_data(n_sections=2, n_subsections=3, with_conexiones=True)
         call_count = 0
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             nonlocal call_count
             call_count += 1
             return text + " [FMT]", None  # (text, usage_meta)
@@ -331,7 +331,7 @@ class TestFormatExplainerContent:
         """format_explainer_content returns a usage_summary dict with cost fields."""
         data = _make_explainer_data(n_sections=1, n_subsections=1, with_conexiones=False)
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -350,7 +350,7 @@ class TestFormatExplainerContent:
         data = _make_explainer_data()
         original = copy.deepcopy(data)
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -371,7 +371,7 @@ class TestFormatExplainerContent:
         data = _make_explainer_data()
         original_intro = data["introduccion"]
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -389,7 +389,7 @@ class TestFormatExplainerContent:
 
         call_count = 0
 
-        async def flaky_format(client, text, context=""):
+        async def flaky_format(client, text, context="", **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:  # Fail first call (introduccion)
@@ -408,7 +408,7 @@ class TestFormatExplainerContent:
     @pytest.mark.asyncio
     async def test_empty_explainer_dict_returns_empty_copy(self):
         """An empty dict returns an empty dict without errors."""
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -429,7 +429,7 @@ class TestFormatExplainerContent:
             "conexiones_contextuales": None,
         }
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -445,7 +445,7 @@ class TestFormatExplainerContent:
         """The returned dict has exactly the same keys and nesting as the input."""
         data = _make_explainer_data(n_sections=3, n_subsections=4)
 
-        async def fake_format(client, text, context=""):
+        async def fake_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fake_format):
@@ -472,7 +472,7 @@ class TestFormatExplainerContent:
             gather_call_arities.append(len(coros))
             return await original_gather(*coros, **kwargs)
 
-        async def fast_format(client, text, context=""):
+        async def fast_format(client, text, context="", **kwargs):
             return text + " [FMT]", None
 
         with patch.object(_formatter_module, "_format_text", side_effect=fast_format):
@@ -492,7 +492,7 @@ class TestFormatExplainerContent:
         data = _make_explainer_data(n_sections=1, n_subsections=1, with_conexiones=False)
         original = copy.deepcopy(data)
 
-        async def identity_format(client, text, context=""):
+        async def identity_format(client, text, context="", **kwargs):
             return text, None  # no change
 
         with patch.object(_formatter_module, "_format_text", side_effect=identity_format):
@@ -539,7 +539,7 @@ class TestFormatExplainerContent:
 
         call_num = 0
 
-        async def fake_format_with_usage(client, text, context=""):
+        async def fake_format_with_usage(client, text, context="", **kwargs):
             nonlocal call_num
             call_num += 1
             # Return distinct token counts per call so we can verify aggregation

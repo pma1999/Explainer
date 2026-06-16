@@ -8,6 +8,8 @@ import {
   API_KEY_CACHE_KEY_PREFIX,
   OPENROUTER_KEY_CACHE_KEY_PREFIX,
   MISTRAL_KEY_CACHE_KEY_PREFIX,
+  DEEPSEEK_KEY_CACHE_KEY_PREFIX,
+  TAVILY_KEY_CACHE_KEY_PREFIX,
   API_KEY_CACHE_TTL_MS,
 } from './state.js';
 import { api } from './api.js';
@@ -161,6 +163,54 @@ export function setCachedMistralKeyStatus(userId, hasKey) {
   if (!userId) return;
   try {
     localStorage.setItem(MISTRAL_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
+      hasKey: Boolean(hasKey),
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+
+export function getCachedDeepSeekKeyStatus(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(DEEPSEEK_KEY_CACHE_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const age = Date.now() - (parsed.updatedAt ? new Date(parsed.updatedAt).getTime() : 0);
+    if (age > API_KEY_CACHE_TTL_MS) return null;
+    return parsed.hasKey === true;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setCachedDeepSeekKeyStatus(userId, hasKey) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(DEEPSEEK_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
+      hasKey: Boolean(hasKey),
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+
+export function getCachedTavilyKeyStatus(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(TAVILY_KEY_CACHE_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const age = Date.now() - (parsed.updatedAt ? new Date(parsed.updatedAt).getTime() : 0);
+    if (age > API_KEY_CACHE_TTL_MS) return null;
+    return parsed.hasKey === true;
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setCachedTavilyKeyStatus(userId, hasKey) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(TAVILY_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
       hasKey: Boolean(hasKey),
       updatedAt: new Date().toISOString(),
     }));

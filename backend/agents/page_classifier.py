@@ -8,6 +8,8 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_CLASSIFIER, TEMPERATURE_PAGE_CLASSIFIER
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -403,6 +405,61 @@ def run_page_classifier_or(
     duration_ms = int((time.time() - start_time) * 1000)
     logger.info(
         "Clasificador OpenRouter completado: %d/%d páginas de contenido en %dms",
+        len(content_pages),
+        total_pages,
+        duration_ms,
+        extra={
+            "content_pages_count": len(content_pages),
+            "total_pages": total_pages,
+            "duration_ms": duration_ms,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "model": model,
+        },
+    )
+    return content_pages, usage, content
+
+
+def run_page_classifier_ds(
+    api_key: str,
+    source_text: str,
+    total_pages: int,
+    model: str = DEEPSEEK_MODEL_AUXILIARY,
+) -> tuple[frozenset[int], Any, dict[str, Any]]:
+    """Classify PDF pages via direct DeepSeek using precomputed OCR text."""
+    start_time = time.time()
+    logger.info(
+        "Iniciando clasificador de páginas DeepSeek",
+        extra={"total_pages": total_pages, "model": model, "source_chars": len(source_text)},
+    )
+
+    content, usage = call_deepseek_chat(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Clasifica las páginas de este documento en contenido sustantivo "
+                    "y páginas accesorias, siguiendo las instrucciones del sistema.\n\n"
+                    "<documento_ocr>\n"
+                    f"{source_text}\n"
+                    "</documento_ocr>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        api_key=api_key,
+        response_format="json_object",
+        reasoning_effort=max_reasoning_effort(),
+        temperature=TEMPERATURE_PAGE_CLASSIFIER,
+        json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,
+    )
+    if not isinstance(content, dict):
+        raise DeepSeekError("El clasificador DeepSeek no devolvió un objeto JSON.")
+
+    content_pages = _parse_classifier_result(content, total_pages)
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Clasificador DeepSeek completado: %d/%d páginas de contenido en %dms",
         len(content_pages),
         total_pages,
         duration_ms,

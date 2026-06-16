@@ -74,6 +74,20 @@ PRICING = {
         "output_small": 1.50,
         "output_large": 1.50,
     },
+    "deepseek-v4-flash": {
+        # DeepSeek direct fallback pricing (USD per 1M tokens).
+        "input_small": 0.14,
+        "input_large": 0.14,
+        "output_small": 0.28,
+        "output_large": 0.28,
+    },
+    "deepseek-v4-pro": {
+        # DeepSeek direct fallback pricing (USD per 1M tokens).
+        "input_small": 1.74,
+        "input_large": 1.74,
+        "output_small": 3.48,
+        "output_large": 3.48,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,
