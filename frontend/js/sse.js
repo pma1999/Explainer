@@ -30,6 +30,32 @@ import {
   syncProcessingUIWithState,
 } from './projectView.js';
 
+async function applyFreshProjectSnapshot(projectId) {
+  const fresh = await api(`/api/projects/${projectId}`);
+  if (!state.currentProject || state.currentProjectId !== projectId) return null;
+  state.currentProject = fresh;
+  try {
+    const local = (await loadBackupAsync(state.user?.id)).projects;
+    const refreshed = mergeProjects([fresh], local);
+    await syncProjectsToBackup(refreshed, state.user?.id);
+  } catch (_) { /* ignore backup sync errors */ }
+  hideProcessingIndicator();
+  renderProjectView(fresh);
+  renderSidebarNav(fresh);
+  updateUsageUI(fresh.usage);
+  if (state.currentPartId) {
+    const contenido = fresh.partes_contenido?.[String(state.currentPartId)];
+    if (contenido) {
+      show($('part-content'));
+      hide($('main-welcome'));
+      renderTab('explicacion', contenido);
+      renderTab('recorrido', contenido);
+      renderTab('recursos', contenido);
+    }
+  }
+  return fresh;
+}
+
 export function stopPolling() {
   if (state.pollProjectsInterval) {
     clearInterval(state.pollProjectsInterval);
@@ -193,11 +219,15 @@ export function startSSE(projectId, opts = {}) {
         }
 
         case 'part_completed': {
-          const key = String(payload.part_id);
-          if (project.partes_contenido && project.partes_contenido[key]) {
-            project.partes_contenido[key].status = 'completed';
+          try {
+            await applyFreshProjectSnapshot(projectId);
+          } catch (_) {
+            const key = String(payload.part_id);
+            if (project.partes_contenido && project.partes_contenido[key]) {
+              project.partes_contenido[key].status = 'completed';
+            }
+            renderSidebarNav(state.currentProject);
           }
-          renderSidebarNav(state.currentProject);
           completeProcPartCard(payload.part_id);
           if (state.currentPartId === payload.part_id) {
             selectPart(payload.part_id);
@@ -206,7 +236,11 @@ export function startSSE(projectId, opts = {}) {
         }
 
         case 'completed':
-          project.status = 'completed';
+          try {
+            await applyFreshProjectSnapshot(projectId);
+          } catch (_) {
+            project.status = 'completed';
+          }
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-completed">Completado</span>`;
           if ($('proc-phase-orb')) $('proc-phase-orb').className = 'proc-phase-orb orb-done';
           if ($('proc-phase-label')) $('proc-phase-label').textContent = 'Análisis completo';
@@ -221,7 +255,11 @@ export function startSSE(projectId, opts = {}) {
           break;
 
         case 'error':
-          project.status = 'error';
+          try {
+            await applyFreshProjectSnapshot(projectId);
+          } catch (_) {
+            project.status = 'error';
+          }
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-error">Error</span>`;
           toast('Error: ' + (payload.message || 'Error desconocido'), 'error');
           evtSource.close();

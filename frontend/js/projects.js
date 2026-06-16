@@ -438,7 +438,11 @@ export async function restoreProjectView(projectId, partId, activeTab) {
     : resolvedTab === 'recursos'
       ? 'resources'
       : 'explainer';
-  const cachedHasTabContent = !!(cachedContenido && cachedContenido[tabAgentKey]);
+  const cachedHasTabContent = !!(
+    cachedContenido
+    && cachedContenido.status === 'completed'
+    && cachedContenido[tabAgentKey]
+  );
 
   if (partId && cached && cachedHasSection && cachedNotProcessing && cachedHasTabContent) {
     state.currentProject = cached;

@@ -8,7 +8,7 @@ from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTA
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML, build_language_policy_xml
-from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat, call_deepseek_chat_full
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
@@ -1257,6 +1257,26 @@ def run_segmentador_or(
     return content, usage
 
 
+def _build_segmentador_ds_user_message(
+    source_text: str,
+    description: str,
+    json_contract: str,
+) -> str:
+    effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
+    return (
+        "<fuente_completa>\n"
+        f"{source_text}\n"
+        "</fuente_completa>\n\n"
+        "<instrucciones_usuario>\n"
+        f"{effective_description}\n"
+        "</instrucciones_usuario>\n\n"
+        "<formato_json_obligatorio>\n"
+        "Devuelve exactamente el objeto JSON descrito aquí. La raíz debe ser un objeto, nunca un array:\n"
+        f"{json_contract}\n"
+        "</formato_json_obligatorio>"
+    )
+
+
 def run_segmentador_ds(
     api_key: str,
     source_text: str,
@@ -1264,9 +1284,23 @@ def run_segmentador_ds(
     source_kind: str = "pdf",
     model: str = DEEPSEEK_MODEL_AUXILIARY,
     target_language: str = "es-ES",
-) -> tuple[dict[str, Any], Any]:
-    """Run the Segmentador agent via direct DeepSeek on inline OCR/text."""
+    *,
+    conversation: list[dict[str, Any]] | None = None,
+    correction: str | None = None,
+) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
+    """Run/continue the Segmentador DeepSeek conversation on inline OCR/text.
+
+    Returns ``(content, usage, conversation)``. For a retry (page-coverage correction),
+    pass the ``conversation`` returned by the previous call plus the ``correction`` text:
+    the system prompt and the first user message (with the full source) stay byte-identical
+    and only a short correction turn is appended, so DeepSeek's prefix cache reuses the
+    expensive source instead of re-reading it.
+    """
     start_time = time.time()
+    json_contract = _openrouter_segmentador_json_contract(source_kind)
+    system_prompt = _openrouter_segmentador_system_instruction(source_kind, target_language)
+    is_retry = conversation is not None
+
     logger.info(
         "Iniciando agente segmentador DeepSeek",
         extra={
@@ -1275,39 +1309,39 @@ def run_segmentador_ds(
             "source_kind": source_kind,
             "source_chars": len(source_text),
             "model": model,
+            "is_retry": is_retry,
         },
     )
 
-    effective_description = description.strip() if description.strip() else DEFAULT_DESCRIPTION
-    json_contract = _openrouter_segmentador_json_contract(source_kind)
-    content, usage = call_deepseek_chat(
-        messages=[
+    if not is_retry:
+        messages: list[dict[str, Any]] = [
             {
                 "role": "user",
-                "content": (
-                    "<fuente_completa>\n"
-                    f"{source_text}\n"
-                    "</fuente_completa>\n\n"
-                    "<instrucciones_usuario>\n"
-                    f"{effective_description}\n"
-                    "</instrucciones_usuario>\n\n"
-                    "<formato_json_obligatorio>\n"
-                    "Devuelve exactamente el objeto JSON descrito aquí. La raíz debe ser un objeto, nunca un array:\n"
-                    f"{json_contract}\n"
-                    "</formato_json_obligatorio>"
-                ),
+                "content": _build_segmentador_ds_user_message(source_text, description, json_contract),
             }
-        ],
+        ]
+    else:
+        messages = list(conversation or [])
+        correction_text = (correction or "").strip() or (
+            "La segmentación anterior no es válida. Regenera el objeto JSON completo corrigiéndola."
+        )
+        messages.append({"role": "user", "content": correction_text})
+
+    result = call_deepseek_chat_full(
+        messages=messages,
         model=model,
-        system_prompt=_openrouter_segmentador_system_instruction(source_kind, target_language),
+        system_prompt=system_prompt,
         api_key=api_key,
         response_format="json_object",
         reasoning_effort=max_reasoning_effort(),
         temperature=TEMPERATURE_SEGMENTADOR,
         json_retry_instruction=json_contract,
     )
+    content = result.content
     if not isinstance(content, dict):
         raise DeepSeekError("El segmentador DeepSeek no devolvió un objeto JSON.")
+    # Replay the exact raw assistant turn verbatim so a follow-up retry hits the cache prefix.
+    messages.append({"role": "assistant", "content": result.assistant_message.content})
 
     total_duration = int((time.time() - start_time) * 1000)
     logger.info(
@@ -1317,9 +1351,10 @@ def run_segmentador_ds(
         extra={
             "num_partes": len(content.get("partes", [])),
             "total_duration_ms": total_duration,
-            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
-            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "prompt_tokens": getattr(result.usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(result.usage, "candidates_token_count", 0),
             "model": model,
+            "is_retry": is_retry,
         },
     )
-    return content, usage
+    return content, result.usage, messages

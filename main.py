@@ -122,7 +122,6 @@ from backend.pdf_ocr_cache import (
     PdfOcrCacheEntry,
     PdfOcrError,
     render_pdf_pages_with_xml_tags,
-    render_pdf_page_subset_to_validation_text,
 )
 from backend.pdf_utils import add_page_numbers, extract_page_range
 from backend.url_extraction import (
@@ -1107,12 +1106,22 @@ def _build_mistral_ocr_validation_evidence(
     cache_entry: PdfOcrCacheEntry,
     content_page_set: frozenset[int],
     context: ExplainerValidationContext,
+    explainer_pages: tuple[int, ...] | list[int] = (),
 ) -> ExplainerSourceEvidence | None:
-    pages = _select_validation_ocr_pages(content_page_set, context.current)
+    # El validador debe ver EXACTAMENTE las mismas páginas (incluido el buffer) que
+    # recibió el explainer; así no puede marcar como fuera de alcance contenido que el
+    # explainer tenía legítimamente en su fuente. Solo si no hay ventana del explainer
+    # (p. ej. documentos sin clasificación de páginas) se cae al rango núcleo de la unidad.
+    if explainer_pages:
+        pages = tuple(sorted({int(page) for page in explainer_pages}))
+    else:
+        pages = _select_validation_ocr_pages(content_page_set, context.current)
     if not pages:
         return None
     try:
-        source_text = render_pdf_page_subset_to_validation_text(
+        # Mismo render con etiquetas <pagina_N> que usa el explainer, para que el bloque
+        # OCR del validador sea byte-equivalente al de la generación que evalúa.
+        source_text = render_pdf_pages_with_xml_tags(
             cache_entry=cache_entry,
             page_numbers=pages,
         )
@@ -1125,10 +1134,13 @@ def _build_mistral_ocr_validation_evidence(
         return None
     return ExplainerSourceEvidence(
         kind="ocr_text",
-        label="OCR Mistral reutilizado del explainer OpenRouter",
+        label="OCR Mistral: mismas páginas exactas que recibió el explainer",
         text=source_text,
         pages=pages,
-        note="Paginas nucleo exactas de la unidad validada; no se relanza OCR.",
+        note=(
+            "Ventana de páginas idéntica a la del explainer (incluye buffer si lo hubo); "
+            "delimitada por etiquetas <pagina_N>. No se relanza OCR."
+        ),
     )
 
 
@@ -2497,10 +2509,15 @@ async def _process_project(
             else ""
         )
         MAX_COMBINED_ATTEMPTS = MAX_PAGE_COVERAGE_ATTEMPTS
+        base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
+        # DeepSeek-only: retries continue the SAME conversation (system + source resent once,
+        # then cached) instead of rebuilding the prompt. OR/Gemini keep the seg_description rebuild.
+        seg_ds_conversation: list[dict] | None = None
 
         for seg_attempt in range(MAX_COMBINED_ATTEMPTS):
+            correction_suffix: str | None = None
             if seg_attempt == 0:
-                seg_description = content_pages_prefix + (project["description"].strip() or DEFAULT_DESCRIPTION)
+                seg_description = content_pages_prefix + base_desc
             else:
                 assert segmentation is not None
                 assert page_report is not None and not page_report.is_valid
@@ -2510,7 +2527,6 @@ async def _process_project(
                     report=page_report,
                     content_page_set=content_page_set,
                 )
-                base_desc = project["description"].strip() or DEFAULT_DESCRIPTION
                 seg_description = content_pages_prefix + base_desc + "\n\n" + correction_suffix
 
             if use_text_provider_explainer:
@@ -2534,14 +2550,26 @@ async def _process_project(
                         source_kind,
                         target_language=target_language_code,
                     )
-                else:
-                    segmentation, usage_meta = await asyncio.to_thread(
+                elif seg_attempt == 0:
+                    segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
                         run_segmentador_ds,
                         deepseek_api_key,
                         segmentador_source_text,
-                        seg_description,
+                        content_pages_prefix + base_desc,
                         source_kind,
                         target_language=target_language_code,
+                    )
+                else:
+                    # Retry: continúa la conversación; no se reenvía la fuente (cache hit).
+                    segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
+                        run_segmentador_ds,
+                        deepseek_api_key,
+                        segmentador_source_text,
+                        base_desc,
+                        source_kind,
+                        target_language=target_language_code,
+                        conversation=seg_ds_conversation,
+                        correction=correction_suffix,
                     )
             else:
                 segmentation, usage_meta = await asyncio.to_thread(
@@ -3056,13 +3084,20 @@ async def _process_project(
                 )
                 if is_pdf_source:
                     enriched_validation_contexts: list[ExplainerValidationContext] = []
-                    for validation_context in subpart_validation_contexts:
+                    for idx, validation_context in enumerate(subpart_validation_contexts):
+                        # Páginas reales que recibió el explainer de esta unidad (con buffer).
+                        explainer_pages = (
+                            tuple(openrouter_page_scopes[idx])
+                            if idx < len(openrouter_page_scopes)
+                            else ()
+                        )
                         source_evidence: ExplainerSourceEvidence | None = None
                         if use_text_canonical and mistral_pdf_context is not None:
                             source_evidence = _build_mistral_ocr_validation_evidence(
                                 cache_entry=mistral_pdf_context.cache_entry,
                                 content_page_set=content_page_set,
                                 context=validation_context,
+                                explainer_pages=explainer_pages,
                             )
                         if source_evidence is None:
                             source_evidence = _build_gemini_file_validation_evidence(
@@ -3203,6 +3238,7 @@ async def _process_project(
                         deepseek_api_key,
                         openrouter_part_source_text,
                         agent_prompt,
+                        target_language=target_language_code,
                     )
                     resources_task = asyncio.to_thread(
                         run_resources_ds,
@@ -3210,6 +3246,7 @@ async def _process_project(
                         tavily_api_key,
                         openrouter_part_source_text,
                         agent_prompt,
+                        target_language=target_language_code,
                     )
                 else:
                     recorrido_task = asyncio.to_thread(
@@ -3960,6 +3997,22 @@ async def api_project_events(
         generate(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# config.js se regenera en cada arranque (start.bat / build) desde EXPLAINER_SUPABASE_*.
+# Debe servirse SIN caché: si el navegador reutiliza una copia vieja (p. ej. de un arranque
+# previo sin config), el frontend ve SUPABASE_URL/ANON_KEY vacíos y muestra
+# "Supabase no configurado". no-store fuerza recarga fresca siempre.
+@app.get("/config.js")
+async def frontend_config_js():
+    config_path = os.path.join("frontend", "config.js")
+    if not os.path.isfile(config_path):
+        raise HTTPException(status_code=404, detail="config.js no generado")
+    return FileResponse(
+        config_path,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-store, max-age=0"},
     )
 
 

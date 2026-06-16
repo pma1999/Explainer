@@ -1005,7 +1005,12 @@ export function renderTab(tabName, contenido) {
     return;
   }
 
-  if (contenido.status === 'processing') {
+  const awaitingPipeline = contenido.status === 'processing'
+    && !contenido.formatter_version
+    && !contenido.explainer
+    && !contenido.recorrido
+    && !contenido.resources;
+  if (awaitingPipeline) {
     show(loading);
     contentEl.innerHTML = '';
     if (tabName === 'explicacion') clearSubsectionNavigation();

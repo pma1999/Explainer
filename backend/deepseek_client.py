@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -17,6 +18,17 @@ from backend.deepseek_model_routing import (
 from backend.logging_config import get_logger
 
 logger = get_logger("backend.deepseek_client")
+# Logger dedicado para payloads completos (prompts + respuestas). Sus mensajes solo
+# muestran un resumen en consola; el contenido íntegro va al archivo (CompleteJSONFormatter).
+payload_logger = get_logger("backend.deepseek_client.payload")
+
+
+def _payload_logging_enabled() -> bool:
+    raw = os.environ.get("EXPLAINER_LOG_PAYLOADS")
+    if raw is None:
+        # Activo por defecto fuera de producción.
+        return os.environ.get("ENVIRONMENT") != "production"
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 DEEPSEEK_CHAT_COMPLETIONS_URL = "https://api.deepseek.com/chat/completions"
 _NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
@@ -39,6 +51,8 @@ class DeepSeekUsage:
         thoughts_tokens: int = 0,
         total_tokens: int | None = None,
         server_tool_use: dict[str, Any] | None = None,
+        cache_hit_tokens: int = 0,
+        cache_miss_tokens: int = 0,
     ):
         self.prompt_token_count = prompt_tokens
         self.candidates_token_count = completion_tokens
@@ -51,6 +65,9 @@ class DeepSeekUsage:
         )
         self.cost_usd = None
         self.server_tool_use = dict(server_tool_use or {})
+        # Context-cache accounting (DeepSeek disk cache): hits = prefijo reutilizado.
+        self.prompt_cache_hit_tokens = cache_hit_tokens
+        self.prompt_cache_miss_tokens = cache_miss_tokens
 
 
 class DeepSeekError(Exception):
@@ -221,6 +238,8 @@ def _parse_usage(usage_raw: Any) -> DeepSeekUsage:
         completion_tokens=_parse_number(usage_raw.get("completion_tokens", 0)),
         thoughts_tokens=reasoning_tokens,
         total_tokens=_parse_number(usage_raw.get("total_tokens", 0)) or None,
+        cache_hit_tokens=_parse_number(usage_raw.get("prompt_cache_hit_tokens", 0)),
+        cache_miss_tokens=_parse_number(usage_raw.get("prompt_cache_miss_tokens", 0)),
     )
 
 
@@ -244,6 +263,8 @@ def _add_usage(left: DeepSeekUsage, right: DeepSeekUsage) -> DeepSeekUsage:
         thoughts_tokens=left.thoughts_token_count + right.thoughts_token_count,
         total_tokens=left.total_token_count + right.total_token_count,
         server_tool_use=_merge_server_tool_use(left.server_tool_use, right.server_tool_use),
+        cache_hit_tokens=left.prompt_cache_hit_tokens + right.prompt_cache_hit_tokens,
+        cache_miss_tokens=left.prompt_cache_miss_tokens + right.prompt_cache_miss_tokens,
     )
 
 
@@ -539,10 +560,29 @@ def call_deepseek_chat_full(
     aggregate_usage = DeepSeekUsage(0, 0)
     json_retry_count = 0
     tool_round_count = 0
+    round_index = 0
+    log_payloads = _payload_logging_enabled()
     effective_reasoning_effort = reasoning_effort
     force_final_without_tools = False
 
     while True:
+        round_index += 1
+        if log_payloads:
+            # Request íntegro de esta ronda (system + toda la conversación) → solo al archivo.
+            payload_logger.debug(
+                "[DeepSeek] REQUEST modelo=%s ronda=%s mensajes=%s",
+                model,
+                round_index,
+                len(conversation_messages),
+                extra={
+                    "deepseek_model": model,
+                    "round": round_index,
+                    "response_format": response_format,
+                    "reasoning_effort": effective_reasoning_effort,
+                    "tools_enabled": bool(tools) and not force_final_without_tools,
+                    "request_messages": conversation_messages,
+                },
+            )
         message, usage, finish_reason, effective_reasoning_effort = _post_chat_completion(
             messages=conversation_messages,
             model=model,
@@ -556,6 +596,28 @@ def call_deepseek_chat_full(
         aggregate_usage = _add_usage(aggregate_usage, usage)
         content_text = _extract_message_content(message)
         tool_calls = _extract_tool_calls(message)
+        if log_payloads:
+            # Respuesta cruda de esta ronda + contabilidad de caché → solo al archivo.
+            payload_logger.debug(
+                "[DeepSeek] RESPONSE modelo=%s ronda=%s finish=%s cache_hit=%s cache_miss=%s",
+                model,
+                round_index,
+                finish_reason,
+                usage.prompt_cache_hit_tokens,
+                usage.prompt_cache_miss_tokens,
+                extra={
+                    "deepseek_model": model,
+                    "round": round_index,
+                    "finish_reason": finish_reason,
+                    "prompt_tokens": usage.prompt_token_count,
+                    "completion_tokens": usage.candidates_token_count,
+                    "thoughts_tokens": usage.thoughts_token_count,
+                    "prompt_cache_hit_tokens": usage.prompt_cache_hit_tokens,
+                    "prompt_cache_miss_tokens": usage.prompt_cache_miss_tokens,
+                    "response_content": content_text,
+                    "response_tool_calls": tool_calls,
+                },
+            )
 
         if tool_calls:
             if force_final_without_tools:
@@ -675,6 +737,8 @@ def call_deepseek_chat_full(
                 "prompt_tokens": aggregate_usage.prompt_token_count,
                 "completion_tokens": aggregate_usage.candidates_token_count,
                 "thoughts_tokens": aggregate_usage.thoughts_token_count,
+                "prompt_cache_hit_tokens": aggregate_usage.prompt_cache_hit_tokens,
+                "prompt_cache_miss_tokens": aggregate_usage.prompt_cache_miss_tokens,
                 "tool_rounds": tool_round_count,
             },
         )

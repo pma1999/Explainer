@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 
@@ -95,22 +96,24 @@ def test_run_segmentador_ds_uses_deepseek_direct(monkeypatch):
 
     captured: dict = {}
 
-    def _fake_call_deepseek_chat(**kwargs):
+    def _fake_call_deepseek_chat_full(**kwargs):
         captured.update(kwargs)
-        return (
-            {
-                "analisis_texto": "Documento OCR",
-                "decision_num_partes": 1,
-                "decision_justificacion": "Una unidad",
-                "partes": [],
-                "consideraciones_estudiante": "Orden natural",
-            },
-            _usage(),
+        content = {
+            "analisis_texto": "Documento OCR",
+            "decision_num_partes": 1,
+            "decision_justificacion": "Una unidad",
+            "partes": [],
+            "consideraciones_estudiante": "Orden natural",
+        }
+        return SimpleNamespace(
+            content=content,
+            usage=_usage(),
+            assistant_message=SimpleNamespace(content=json.dumps(content), tool_calls=None),
         )
 
-    monkeypatch.setattr(segmentador, "call_deepseek_chat", _fake_call_deepseek_chat)
+    monkeypatch.setattr(segmentador, "call_deepseek_chat_full", _fake_call_deepseek_chat_full)
 
-    result, usage = segmentador.run_segmentador_ds(
+    result, usage, conversation = segmentador.run_segmentador_ds(
         api_key="sk-ds-test",
         source_text="<pagina_1>\nContenido base\n</pagina_1>",
         description="Procesar todo",
@@ -124,6 +127,10 @@ def test_run_segmentador_ds_uses_deepseek_direct(monkeypatch):
     assert captured["response_format"] == "json_object"
     assert '"partes"' in captured["json_retry_instruction"]
     assert "<pagina_N>" in captured["system_prompt"]
+    # Conversation seed: user turn with the source, then the raw assistant turn for replay.
+    assert conversation[0]["role"] == "user"
+    assert "<pagina_1>" in conversation[0]["content"]
+    assert conversation[-1]["role"] == "assistant"
 
 
 def test_run_page_classifier_ds_returns_content_pages(monkeypatch):

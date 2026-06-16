@@ -66,6 +66,67 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data, ensure_ascii=False, default=str)
 
 
+# Atributos estándar de LogRecord: todo lo demás en record.__dict__ es un campo `extra`.
+_STANDARD_LOGRECORD_ATTRS = frozenset(
+    {
+        "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
+        "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
+        "created", "msecs", "relativeCreated", "thread", "threadName",
+        "processName", "process", "taskName", "message", "asctime",
+    }
+)
+
+
+class CompleteJSONFormatter(logging.Formatter):
+    """Formateador para el log de ARCHIVO: vuelca TODO el LogRecord sin descartar nada.
+
+    A diferencia de JSONFormatter/ColoredFormatter (que solo conservan unos pocos campos
+    `extra` hardcodeados), este formateador serializa el mensaje, el contexto de traceo,
+    la excepción/traceback completos y TODOS los campos `extra` pasados a cada log.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        data: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "func": record.funcName,
+            "line": record.lineno,
+            "process": record.process,
+            "thread": record.threadName,
+        }
+
+        context: dict[str, Any] = {}
+        if project_id := project_id_var.get():
+            context["project_id"] = project_id
+        if user_id := user_id_var.get():
+            context["user_id"] = user_id[:8] + "..." if len(user_id) > 8 else user_id
+        if (part_id := part_id_var.get()) is not None:
+            context["part_id"] = part_id
+        if agent_name := agent_name_var.get():
+            context["agent"] = agent_name
+        if context:
+            data["context"] = context
+
+        # TODOS los campos extra (incluido `metadata`): nada se pierde.
+        extras = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in _STANDARD_LOGRECORD_ATTRS and not key.startswith("_")
+        }
+        if extras:
+            data["extra"] = extras
+
+        if record.exc_info:
+            data["exception"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            data["stack"] = self.formatStack(record.stack_info)
+
+        return json.dumps(data, ensure_ascii=False, default=str)
+
+
 class ColoredFormatter(logging.Formatter):
     """Formateador con colores para desarrollo local."""
 
@@ -113,41 +174,95 @@ class ColoredFormatter(logging.Formatter):
         return f"{timestamp} | {level} | {record.name}{context} | {record.getMessage()}{meta}"
 
 
+# Ruta del log de archivo de la sesión actual (se rellena en setup_logging).
+_FILE_LOG_PATH: str | None = None
+
+
+def get_file_log_path() -> str | None:
+    """Ruta absoluta del archivo de log completo de esta ejecución, si está activo."""
+    return _FILE_LOG_PATH
+
+
+def _truthy_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_complete_file_handler() -> logging.Handler | None:
+    """Crea un handler de archivo a DEBUG que vuelca TODOS los campos de cada log.
+
+    Activo por defecto fuera de producción; controlable con EXPLAINER_FILE_LOG=0/1 y
+    EXPLAINER_LOG_DIR. El nombre incluye PID y timestamp para no pisar ejecuciones previas.
+    """
+    global _FILE_LOG_PATH
+    log_dir = os.environ.get("EXPLAINER_LOG_DIR", "").strip() or os.path.join(os.getcwd(), "logs")
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(log_dir, f"explainer_{stamp}_pid{os.getpid()}.log")
+        # delay=True: no abre el archivo hasta el primer log, evita duplicados en reload.
+        file_handler = logging.FileHandler(path, mode="a", encoding="utf-8", delay=True)
+        file_handler.setFormatter(CompleteJSONFormatter())
+        file_handler.setLevel(logging.DEBUG)
+        _FILE_LOG_PATH = path
+        return file_handler
+    except OSError:
+        _FILE_LOG_PATH = None
+        return None
+
+
+class _MaxLevelFilter(logging.Filter):
+    """Permite pasar solo registros por debajo de un nivel dado (para la consola)."""
+
+    def __init__(self, max_level: int) -> None:
+        super().__init__()
+        self._max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno < self._max_level
+
+
 def setup_logging() -> None:
     """Configura el logging global para la aplicación."""
     # Detectar si estamos en producción (Koyeb)
     is_production = os.environ.get("ENVIRONMENT") == "production"
 
-    # Configurar el handler
+    # Configurar el handler de consola
     handler = logging.StreamHandler(sys.stdout)
 
     if is_production:
         # En producción usar JSON
         handler.setFormatter(JSONFormatter())
-        level = logging.INFO
+        console_level = logging.INFO
     else:
         # En desarrollo usar formato legible con colores
         handler.setFormatter(ColoredFormatter())
-        level = logging.DEBUG
+        console_level = logging.DEBUG
+    handler.setLevel(console_level)
+
+    # El root debe estar al nivel más bajo que cualquier handler quiera capturar.
+    enable_file_log = _truthy_env("EXPLAINER_FILE_LOG", default=not is_production)
+    file_handler = _build_complete_file_handler() if enable_file_log else None
+    root_level = logging.DEBUG if file_handler is not None else console_level
 
     # Configurar el logger raíz
     root_logger = logging.getLogger()
-    root_logger.setLevel(level)
+    root_logger.setLevel(root_level)
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
+    if file_handler is not None:
+        root_logger.addHandler(file_handler)
 
-    # Silenciar loggers muy verbosos de terceros
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("google").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("hpack").setLevel(logging.WARNING)           # HTTP/2 header codec
-    logging.getLogger("h2").setLevel(logging.WARNING)              # HTTP/2 protocol
-    logging.getLogger("h11").setLevel(logging.WARNING)             # HTTP/1.1 protocol
-    logging.getLogger("watchfiles").setLevel(logging.WARNING)      # uvicorn reload watcher
-    logging.getLogger("multipart").setLevel(logging.WARNING)       # file upload parser
-    logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    # Loggers de terceros muy verbosos (frames HTTP/2, parser de uploads, etc.). Su DEBUG
+    # es ruido de bajo nivel sin valor para depurar el pipeline y enterraría el log útil,
+    # así que se quedan en WARNING en AMBOS destinos. Todo nuestro backend.* va a DEBUG al
+    # archivo. httpx se deja en INFO para conservar la línea de cada request HTTP.
+    for name in ("urllib3", "google", "httpcore", "hpack", "h2", "h11",
+                 "watchfiles", "multipart", "charset_normalizer", "asyncio"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.INFO)
 
     # Logger propio
     logger = logging.getLogger("backend.logging_config")
@@ -155,6 +270,9 @@ def setup_logging() -> None:
         logger.info("Logging configurado en modo PRODUCCIÓN (JSON)")
     else:
         logger.debug("Logging configurado en modo DESARROLLO (colores)")
+    if _FILE_LOG_PATH:
+        # Mensaje visible en consola con la ruta del log completo.
+        logger.warning("Log completo de esta ejecución: %s", _FILE_LOG_PATH)
 
 
 def set_context(

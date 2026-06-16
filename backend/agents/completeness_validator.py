@@ -317,6 +317,12 @@ def _format_source_evidence(
             lines.extend(
                 [
                     "",
+                    "El OCR permitido viene delimitado por etiquetas <pagina_N>...</pagina_N>; N es el "
+                    "numero de pagina absoluto. Estas son EXACTAMENTE las mismas paginas que recibio el "
+                    "explainer al generar la explicacion (incluido el buffer de contexto). Por tanto, si "
+                    "un tema, encabezado, ejemplo o dato aparece en cualquiera de estas paginas, esta "
+                    "dentro de la fuente permitida y NO debes marcarlo como invasion ni como fabricado.",
+                    "",
                     "TEXTO OCR PERMITIDO:",
                     text,
                     "FIN DEL TEXTO OCR PERMITIDO.",
@@ -654,12 +660,20 @@ def format_explainer_retry_context(
     validation_report: ExplainerValidationReport,
     *,
     validation_context: ExplainerValidationContext | None = None,
+    include_previous_result: bool = True,
 ) -> str:
-    """Format the previous invalid output and the precise retry contract."""
-    try:
-        serialized = json.dumps(previous_result, ensure_ascii=False, indent=2)
-    except Exception:
-        serialized = str(previous_result)
+    """Format the previous invalid output and the precise retry contract.
+
+    When ``include_previous_result`` is False the previous JSON is NOT re-serialized
+    into the message: this is used by conversation-based retries where the previous
+    output already lives in the prior ``assistant`` turn, so re-embedding it would
+    waste tokens and break prefix-cache continuity.
+    """
+    if include_previous_result:
+        try:
+            serialized = json.dumps(previous_result, ensure_ascii=False, indent=2)
+        except Exception:
+            serialized = str(previous_result)
 
     failure_labels: list[str] = []
     if not validation_report.is_complete:
@@ -690,16 +704,15 @@ def format_explainer_retry_context(
         lines.append(
             "Para corregir alcance: retira solo el desarrollo sustantivo fuera de alcance, conserva el contenido valido del alcance permitido y usa los vecinos solo como puente breve si es imprescindible."
         )
-    lines.extend(
-        [
-            "",
-            format_validation_context(validation_context),
-            "",
-            "Explicacion anterior:",
-            serialized,
-            "</explicacion_anterior_no_valida>",
-        ]
-    )
+    lines.extend(["", format_validation_context(validation_context)])
+    if include_previous_result:
+        lines.extend(["", "Explicacion anterior:", serialized])
+    else:
+        lines.append(
+            "\nTu mensaje anterior en esta conversacion contiene la explicacion a corregir; "
+            "regenérala completa desde cero (no la parchees)."
+        )
+    lines.append("</explicacion_anterior_no_valida>")
     return "\n".join(lines)
 
 

@@ -360,21 +360,35 @@ Tu respuesta visible al usuario es la EJECUCIÓN redactada del plan, no la repre
 
 <context>
 
-{{TEXTO_PRINCIPAL}}
-[Contenido base completo del que procede el fragmento objetivo. Si existe `<part_to_develop_now>` o una instrucción del usuario que indique desarrollar solo una parte, este texto principal NO debe desarrollarse íntegro: actúa solo como contexto para aclarar el fragmento objetivo seleccionado.]
+Recibirás la entrada con esta estructura EXACTA de etiquetas:
 
-{{TEXTOS_COMPLEMENTARIOS}} (opcional)
-[Leyes, sentencias, artículos, doctrina o material de apoyo. Su función es exclusivamente enriquecer la explicación del fragmento objetivo allí donde aporten valor aclaratorio. No son contenido a desarrollar por sí mismos.]
+<fuente_permitida>
+[Contenido base permitido (lo que el resto de esta instrucción llama «texto principal»). Cuando
+procede de un PDF, llega como texto OCR con CADA PÁGINA envuelta en etiquetas
+`<pagina_N>...</pagina_N>`, donde N es el número de página ABSOLUTO y autoritativo del documento. Si
+en su lugar recibes el PDF adjunto, aplica el mismo criterio de páginas indicado en la identificación.]
+</fuente_permitida>
 
-{{TABLA_DE_CONTENIDOS}} (opcional)
-[Muestra la posición del fragmento objetivo dentro de un temario más amplio. Utilizada únicamente para la sección final de Conexiones Contextuales.]
+<identificacion>
+[Contrato de alcance que define tu FRAGMENTO OBJETIVO: rango de páginas núcleo asignado, anclas
+literales de inicio/fin, fronteras negativas (contenido de partes/subpartes vecinas que NO debes
+desarrollar), contexto de la parte, tabla de contenidos del temario e identificación legible del
+segmentador. Aquí pueden aparecer también materiales complementarios de apoyo (leyes, citas, etc.),
+cuya función es solo enriquecer la explicación del fragmento objetivo.]
+</identificacion>
 
-{{INSTRUCCIÓN_DEL_USUARIO}} (opcional)
-[Si existe una instrucción explícita del usuario o el contenido aparece marcado con `<part_to_develop_now>`, esa instrucción tiene PRIORIDAD ABSOLUTA sobre cualquier otra directriz de cobertura. En ese caso:
-- El fragmento indicado por el usuario (o el contenido dentro de `<part_to_develop_now>`) se convierte en el FRAGMENTO OBJETIVO.
-- Desarrolla y explica TODO el fragmento objetivo, microelemento por microelemento, sin dejar ninguno sin explicación detallada.
-- El resto del material se considera SOLO CONTEXTO ACLARATORIO: úsalo únicamente para clarificar el fragmento, sin desarrollar contenido fuera de él.
-- Si NO hay instrucción de subconjunto, entonces el FRAGMENTO OBJETIVO será la totalidad de `{{TEXTO_PRINCIPAL}}`.]
+Reglas de alcance sobre esta entrada:
+- Tu FRAGMENTO OBJETIVO es EXCLUSIVAMENTE el delimitado por el rango de páginas núcleo y las anclas del
+  bloque `<identificacion>`. Desarróllalo entero, microelemento por microelemento, sin omitir ninguno.
+- `<fuente_permitida>` puede incluir páginas adicionales de contexto (buffer o vecinas) más allá del
+  rango núcleo. Esas páginas son SOLO CONTEXTO ACLARATORIO: úsalas para entender y precisar el fragmento
+  objetivo, nunca como contenido a desarrollar por sí mismo.
+- Si un tema, encabezado, dato o ejemplo aparece DENTRO del rango de páginas/anclas asignado, pertenece a
+  tu fragmento objetivo y DEBES desarrollarlo, aunque su tema se parezca al título de una parte vecina.
+- Fidelidad absoluta: no inventes ni completes con conocimiento externo nada que no esté presente en
+  `<fuente_permitida>`.
+- La tabla de contenidos incluida en `<identificacion>` se usa únicamente para la sección final de
+  Conexiones Contextuales.
 
 </context>
 
@@ -845,18 +859,35 @@ SUBPART_SYSTEM_INSTRUCTION = """<system_instruction>
 
 <context>
 
-{{TEXTO_PRINCIPAL}}
-[Contenido base completo del que procede el fragmento objetivo. Si existe `<part_to_develop_now>` o una instrucción del usuario que indique desarrollar solo una parte, este texto principal NO debe desarrollarse íntegro: actúa solo como contexto para aclarar el fragmento objetivo seleccionado.]
+Recibirás la entrada con esta estructura EXACTA de etiquetas:
 
-{{TEXTOS_COMPLEMENTARIOS}} (opcional)
-[Leyes, sentencias, artículos, doctrina o material de apoyo. Su función es exclusivamente enriquecer la explicación del fragmento objetivo allí donde aporten valor aclaratorio. No son contenido a desarrollar por sí mismos.]
+<fuente_permitida>
+[Contenido base permitido (lo que el resto de esta instrucción llama «texto principal»). Cuando
+procede de un PDF, llega como texto OCR con CADA PÁGINA envuelta en etiquetas
+`<pagina_N>...</pagina_N>`, donde N es el número de página ABSOLUTO y autoritativo del documento. Si
+en su lugar recibes el PDF adjunto, aplica el mismo criterio de páginas indicado en la identificación.]
+</fuente_permitida>
 
-{{INSTRUCCIÓN_DEL_USUARIO}} (opcional)
-[Si existe una instrucción explícita del usuario o el contenido aparece marcado con `<part_to_develop_now>`, esa instrucción tiene PRIORIDAD ABSOLUTA sobre cualquier otra directriz de cobertura. En ese caso:
-- El fragmento indicado por el usuario (o el contenido dentro de `<part_to_develop_now>`) se convierte en el FRAGMENTO OBJETIVO.
-- Desarrolla y explica TODO el fragmento objetivo, microelemento por microelemento, sin dejar ninguno sin explicación detallada.
-- El resto del material se considera SOLO CONTEXTO ACLARATORIO: úsalo únicamente para clarificar el fragmento, sin desarrollar contenido fuera de él.
-- Si NO hay instrucción de subconjunto, entonces el FRAGMENTO OBJETIVO será la totalidad de `{{TEXTO_PRINCIPAL}}`.]
+<identificacion>
+[Contrato de alcance de TU SUBPARTE: rango de páginas núcleo asignado, anclas literales de inicio/fin,
+fronteras negativas (subpartes vecinas que NO debes desarrollar), contexto de la subparte dentro de su
+parte, tabla de contenidos del temario e identificación legible del segmentador. Aquí pueden aparecer
+también materiales complementarios de apoyo, cuya función es solo enriquecer la explicación.]
+</identificacion>
+
+Reglas de alcance sobre esta entrada:
+- Tu FRAGMENTO OBJETIVO es EXCLUSIVAMENTE la subparte delimitada por el rango de páginas núcleo y las
+  anclas del bloque `<identificacion>`. Desarróllalo entero, microelemento por microelemento.
+- `<fuente_permitida>` puede incluir páginas adicionales de contexto (buffer o subpartes vecinas) más
+  allá del rango núcleo. Esas páginas son SOLO CONTEXTO ACLARATORIO: úsalas para entender y precisar tu
+  subparte, nunca como contenido a desarrollar por sí mismo.
+- Si un tema, encabezado, dato o ejemplo aparece DENTRO del rango de páginas/anclas asignado a tu
+  subparte, pertenece a tu fragmento objetivo y DEBES desarrollarlo, aunque se parezca al título de una
+  subparte vecina.
+- Fidelidad absoluta: no inventes ni completes con conocimiento externo nada que no esté presente en
+  `<fuente_permitida>`.
+- La tabla de contenidos incluida en `<identificacion>` solo sirve para situar tu subparte dentro del
+  temario; no la desarrolles ni añadas secciones globales del documento.
 
 </context>
 

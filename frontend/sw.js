@@ -4,17 +4,17 @@
    Estrategias de caché:
    - Same-origin (por defecto): Network-first + actualizar caché (prioriza versión nueva)
    - Modo offline voluntario (mensaje SET_PREFER_OFFLINE): Cache-first same-origin
-   - Google Fonts: Stale-while-revalidate
-   - CDN jsdelivr: Network-first con caché como fallback
+   - Cross-origin (CDN jsdelivr, Google Fonts): PASS-THROUGH (el navegador los carga
+     nativamente). El SW NO puede re-pedirlos con fetch() porque un fetch() del worker
+     se rige por la CSP `connect-src` (no por script-src/style-src/font-src), y esos
+     CDN solo están permitidos en script-src/style-src/font-src → se bloquearían.
    - Llamadas /api/*: Pass-through (sin caché — la app usa IndexedDB)
    ============================================================
    Para forzar actualización: cambia CACHE_VERSION
    ============================================================ */
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const STATIC_CACHE = `explainer-static-${CACHE_VERSION}`;
-const FONTS_CACHE = `explainer-fonts-${CACHE_VERSION}`;
-const CDN_CACHE = `explainer-cdn-${CACHE_VERSION}`;
 
 /** Set via postMessage from the app when the user enables "modo offline / ahorrar datos". */
 let preferOfflineMode = false;
@@ -67,7 +67,7 @@ self.addEventListener('install', (event) => {
 
 // ─── Activate ───────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  const currentCaches = [STATIC_CACHE, FONTS_CACHE, CDN_CACHE];
+  const currentCaches = [STATIC_CACHE];
   event.waitUntil(
     caches.keys().then((cacheNames) =>
       Promise.all(
@@ -99,29 +99,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 4. Google Fonts — stale-while-revalidate
-  if (
-    url.hostname === 'fonts.googleapis.com' ||
-    url.hostname === 'fonts.gstatic.com'
-  ) {
-    event.respondWith(staleWhileRevalidate(request, FONTS_CACHE));
+  // 4. Cross-origin (CDN jsdelivr, Google Fonts, etc.) — PASS-THROUGH.
+  // No interceptar: el navegador los carga nativamente bajo script-src/style-src/font-src.
+  // Si el SW los re-pidiera con fetch(), esa petición se regiría por connect-src y la CSP
+  // las bloquearía (connect-src no incluye esos CDN), rompiendo supabase-js, marked y mermaid.
+  if (url.origin !== self.location.origin) {
     return;
   }
 
-  // 5. Supabase CDN (supabase-js) — network-first with cache fallback
-  if (url.hostname === 'cdn.jsdelivr.net') {
-    event.respondWith(networkFirstWithCache(request, CDN_CACHE));
-    return;
-  }
-
-  // 6. Same-origin static assets — network-first (default) or cache-first (prefer offline)
-  if (url.origin === self.location.origin) {
-    if (preferOfflineMode) {
-      event.respondWith(cacheFirst(request));
-    } else {
-      event.respondWith(networkFirstWithCache(request, STATIC_CACHE));
-    }
-    return;
+  // 5. Same-origin static assets — network-first (default) or cache-first (prefer offline)
+  if (preferOfflineMode) {
+    event.respondWith(cacheFirst(request));
+  } else {
+    event.respondWith(networkFirstWithCache(request, STATIC_CACHE));
   }
 });
 
@@ -143,22 +133,6 @@ async function cacheFirst(request) {
     return cached;
   }
   return fetchAndCache(request, STATIC_CACHE);
-}
-
-/**
- * Stale-while-revalidate: serve from cache immediately, refresh in background.
- */
-async function staleWhileRevalidate(request, cacheName) {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-  // Always trigger a background update
-  const networkFetch = fetch(request)
-    .then((response) => {
-      if (response.ok) cache.put(request, response.clone());
-      return response;
-    })
-    .catch(() => null);
-  return cached || networkFetch;
 }
 
 /**
