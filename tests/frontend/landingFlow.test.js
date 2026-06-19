@@ -120,6 +120,23 @@ describe('landing.js project creation flow', () => {
     window.pushRoute = vi.fn();
   });
 
+  it('registra los event listeners solo una vez aunque initLanding se llame varias veces (idempotencia)', async () => {
+    const { initLanding } = await import('../../frontend/js/landing.js');
+
+    // Simulate the router calling initLanding on each landing navigation
+    initLanding();
+    initLanding();
+    initLanding();
+
+    const fileInput = document.getElementById('file-input');
+    const clickSpy = vi.spyOn(fileInput, 'click').mockImplementation(() => {});
+
+    document.getElementById('upload-zone').click();
+
+    // Despite three initLanding() calls, the click listener must fire exactly once
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('starts processing with the selected target language and resets the selector', async () => {
     api
       .mockResolvedValueOnce({

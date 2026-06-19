@@ -21,6 +21,7 @@ export const DEEPSEEK_MODEL_V4_PRO = 'deepseek-v4-pro';
 export const DEEPSEEK_MODEL_V4_FLASH = 'deepseek-v4-flash';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
+let _landingListenersAttached = false;
 
 export function extractYouTubeVideoId(url) {
   const patterns = [
@@ -300,109 +301,113 @@ export function initLanding() {
     validateForm();
   }
 
-  tabPdf.addEventListener('click', () => switchSourceType('pdf'));
-  tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
-  tabWeb.addEventListener('click', () => switchSourceType('web'));
-  providerGemini.addEventListener('change', () => {
-    if (providerGemini.checked) setExplainerProvider('gemini');
-  });
-  providerOpenRouter.addEventListener('change', () => {
-    if (providerOpenRouter.checked) setExplainerProvider('openrouter');
-  });
-  providerDeepSeek.addEventListener('change', () => {
-    if (providerDeepSeek.checked) setExplainerProvider('deepseek');
-  });
-  modelPro.addEventListener('change', () => {
-    if (modelPro.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO);
-  });
-  modelStandard.addEventListener('change', () => {
-    if (modelStandard.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO);
-  });
-  modelDeepseek.addEventListener('change', () => {
-    if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
-  });
-  if (targetLanguageSelect) {
-    setTargetLanguage(targetLanguageSelect.value || DEFAULT_TARGET_LANGUAGE);
-    targetLanguageSelect.addEventListener('change', () => setTargetLanguage(targetLanguageSelect.value));
-  }
-  deepseekModelPro.addEventListener('change', () => {
-    if (deepseekModelPro.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_PRO);
-  });
-  deepseekModelFlash.addEventListener('change', () => {
-    if (deepseekModelFlash.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH);
-  });
+  if (!_landingListenersAttached) {
+    _landingListenersAttached = true;
 
-  function checkReady() {
-    const hasName = nameInput.value.trim();
-    if (currentSourceType === 'pdf') {
-      const ready = selectedFile && hasName;
-      btnUpload.disabled = !ready;
-    } else if (currentSourceType === 'youtube') {
+    tabPdf.addEventListener('click', () => switchSourceType('pdf'));
+    tabYoutube.addEventListener('click', () => switchSourceType('youtube'));
+    tabWeb.addEventListener('click', () => switchSourceType('web'));
+    providerGemini.addEventListener('change', () => {
+      if (providerGemini.checked) setExplainerProvider('gemini');
+    });
+    providerOpenRouter.addEventListener('change', () => {
+      if (providerOpenRouter.checked) setExplainerProvider('openrouter');
+    });
+    providerDeepSeek.addEventListener('change', () => {
+      if (providerDeepSeek.checked) setExplainerProvider('deepseek');
+    });
+    modelPro.addEventListener('change', () => {
+      if (modelPro.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO);
+    });
+    modelStandard.addEventListener('change', () => {
+      if (modelStandard.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO);
+    });
+    modelDeepseek.addEventListener('change', () => {
+      if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+    });
+    if (targetLanguageSelect) {
+      setTargetLanguage(targetLanguageSelect.value || DEFAULT_TARGET_LANGUAGE);
+      targetLanguageSelect.addEventListener('change', () => setTargetLanguage(targetLanguageSelect.value));
+    }
+    deepseekModelPro.addEventListener('change', () => {
+      if (deepseekModelPro.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_PRO);
+    });
+    deepseekModelFlash.addEventListener('change', () => {
+      if (deepseekModelFlash.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH);
+    });
+
+    function checkReady() {
+      const hasName = nameInput.value.trim();
+      if (currentSourceType === 'pdf') {
+        const ready = selectedFile && hasName;
+        btnUpload.disabled = !ready;
+      } else if (currentSourceType === 'youtube') {
+        const url = youtubeUrlInput.value.trim();
+        const ready = isValidYouTubeUrl(url) && hasName;
+        btnUpload.disabled = !ready;
+      } else {
+        const url = webUrlInput.value.trim();
+        const ready = isValidWebUrl(url) && hasName;
+        btnUpload.disabled = !ready;
+      }
+    }
+
+    zone.addEventListener('click', () => fileInput.click());
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      const f = e.dataTransfer.files[0];
+      if (f && f.type === 'application/pdf') setFile(f);
+      else toast('Por favor, sube un archivo PDF.', 'error');
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    $('btn-remove-file').addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearFile();
+    });
+
+    youtubeUrlInput.addEventListener('input', () => {
       const url = youtubeUrlInput.value.trim();
-      const ready = isValidYouTubeUrl(url) && hasName;
-      btnUpload.disabled = !ready;
-    } else {
+      const urlError = $('youtube-url-error');
+
+      if (url && !isValidYouTubeUrl(url)) {
+        urlError.textContent = 'URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID';
+        show(urlError);
+      } else {
+        urlError.textContent = '';
+        hide(urlError);
+      }
+      checkReady();
+    });
+
+    webUrlInput.addEventListener('input', () => {
       const url = webUrlInput.value.trim();
-      const ready = isValidWebUrl(url) && hasName;
-      btnUpload.disabled = !ready;
-    }
+      const urlError = $('web-url-error');
+
+      if (url && !isValidWebUrl(url)) {
+        urlError.textContent = 'URL web inválida. Usa una URL pública completa con http:// o https://';
+        show(urlError);
+      } else {
+        urlError.textContent = '';
+        hide(urlError);
+      }
+      checkReady();
+    });
+
+    nameInput.addEventListener('input', checkReady);
+    descInput.addEventListener('input', checkReady);
+
+    btnUpload.addEventListener('click', handleUpload);
+    $('btn-go-projects').addEventListener('click', () => {
+      if (window.pushRoute) window.pushRoute({ view: 'projects' });
+    });
   }
-
-  zone.addEventListener('click', () => fileInput.click());
-  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f && f.type === 'application/pdf') setFile(f);
-    else toast('Por favor, sube un archivo PDF.', 'error');
-  });
-
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) setFile(fileInput.files[0]);
-  });
-
-  $('btn-remove-file').addEventListener('click', (e) => {
-    e.stopPropagation();
-    clearFile();
-  });
-
-  youtubeUrlInput.addEventListener('input', () => {
-    const url = youtubeUrlInput.value.trim();
-    const urlError = $('youtube-url-error');
-
-    if (url && !isValidYouTubeUrl(url)) {
-      urlError.textContent = 'URL de YouTube inválida. Usa formato: https://www.youtube.com/watch?v=VIDEO_ID';
-      show(urlError);
-    } else {
-      urlError.textContent = '';
-      hide(urlError);
-    }
-    checkReady();
-  });
-
-  webUrlInput.addEventListener('input', () => {
-    const url = webUrlInput.value.trim();
-    const urlError = $('web-url-error');
-
-    if (url && !isValidWebUrl(url)) {
-      urlError.textContent = 'URL web inválida. Usa una URL pública completa con http:// o https://';
-      show(urlError);
-    } else {
-      urlError.textContent = '';
-      hide(urlError);
-    }
-    checkReady();
-  });
-
-  nameInput.addEventListener('input', checkReady);
-  descInput.addEventListener('input', checkReady);
-
-  btnUpload.addEventListener('click', handleUpload);
-  $('btn-go-projects').addEventListener('click', () => {
-    if (window.pushRoute) window.pushRoute({ view: 'projects' });
-  });
 
   syncExplainerProviderUI();
 }
