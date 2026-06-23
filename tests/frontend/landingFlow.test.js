@@ -74,8 +74,9 @@ function renderLandingDom() {
         <p class="input-error hidden" id="openrouter-custom-model-error">Selecciona o escribe un modelo</p>
       </div>
       <div class="form-group">
-        <label for="openrouter-provider-input">Proveedor preferido (opcional)</label>
-        <input type="text" class="form-input" id="openrouter-provider-input" />
+        <label for="openrouter-provider-combobox">Proveedor preferido (opcional)</label>
+        <div id="openrouter-provider-combobox"></div>
+        <p class="input-error hidden" id="openrouter-provider-fetch-error"></p>
       </div>
       <label class="checkbox-label">
         <input type="checkbox" id="openrouter-provider-only" />
@@ -329,11 +330,12 @@ describe('landing.js project creation flow', () => {
 
       // Set the model programmatically (simulates combobox selection)
       setCustomOpenRouterModel('qwen/qwen3.6-plus');
+      await flushAsyncWork();
 
-      // Set provider input
-      const providerInput = document.getElementById('openrouter-provider-input');
-      providerInput.value = 'deepseek';
-      providerInput.dispatchEvent(new Event('input', { bubbles: true }));
+      // Set provider via combobox input
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      providerComboboxInput.value = 'deepseek';
+      providerComboboxInput.dispatchEvent(new Event('input', { bubbles: true }));
 
       // Check the "only this" checkbox
       const onlyCheckbox = document.getElementById('openrouter-provider-only');
@@ -386,6 +388,7 @@ describe('landing.js project creation flow', () => {
       document.getElementById('btn-upload').click();
       await flushAsyncWork();
 
+      expect(api).toHaveBeenCalledTimes(2);
       expect(api).toHaveBeenNthCalledWith(
         2,
         '/api/projects/project-1/process',

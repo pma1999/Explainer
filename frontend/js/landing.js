@@ -25,8 +25,10 @@ let currentOpenRouterMode = 'preset'; // 'preset' | 'custom'
 let currentCustomOpenRouterModel = null; // string | null
 let currentOpenRouterProvider = ''; // string
 let currentOpenRouterProviderOnly = false; // bool
-let _openrouterCombobox = null; // combobox instance
+let _openrouterCombobox = null; // model combobox instance
+let _openrouterProviderCombobox = null; // provider combobox instance
 let _orModelsCache = null; // cached model list
+let _orEndpointsCache = {}; // modelId -> [provider slugs]
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
 let _landingListenersAttached = false;
 
@@ -217,16 +219,27 @@ export function initLanding() {
   const modelPanel = $('openrouter-model-panel');
   const openRouterCustomRadio = $('openrouter-model-custom');
   const openRouterCustomPanel = $('openrouter-custom-panel');
-  const openRouterProviderInput = $('openrouter-provider-input');
+  const openRouterProviderCombobox = $('openrouter-provider-combobox');
   const openRouterProviderOnlyCheckbox = $('openrouter-provider-only');
   const openRouterCustomLoading = $('openrouter-custom-loading');
   const openRouterCustomFetchError = $('openrouter-custom-fetch-error');
   const openRouterCustomModelError = $('openrouter-custom-model-error');
+  const openRouterProviderFetchError = $('openrouter-provider-fetch-error');
   const deepseekModelPro = $('deepseek-model-pro');
   const deepseekModelFlash = $('deepseek-model-flash');
   const deepseekModelPanel = $('deepseek-model-panel');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
+
+  // Initialize provider combobox (empty; populated when model is selected)
+  _openrouterProviderCombobox = createCombobox(openRouterProviderCombobox, {
+    placeholder: 'Selecciona un modelo primero…',
+    items: [],
+    onSelect() {
+      hide(openRouterProviderFetchError);
+    },
+    emptyText: 'No hay proveedores disponibles',
+  });
 
   const tabPdf = $('tab-pdf');
   const tabYoutube = $('tab-youtube');
@@ -318,6 +331,13 @@ export function initLanding() {
           onSelect(value) {
             currentCustomOpenRouterModel = value;
             hide(openRouterCustomModelError);
+            // Reset and auto-populate provider combobox for this model
+            if (_openrouterProviderCombobox) {
+              _openrouterProviderCombobox.setValue('');
+              _openrouterProviderCombobox.setItems([]);
+            }
+            hide(openRouterProviderFetchError);
+            fetchEndpointsForModel(value);
           },
           getItemLabel(item) {
             return item.label + ' ' + (item.sublabel || '');
@@ -334,6 +354,12 @@ export function initLanding() {
       _openrouterCombobox.destroy();
       _openrouterCombobox = null;
     }
+    // Reset provider combobox when switching away from custom
+    if (_openrouterProviderCombobox) {
+      _openrouterProviderCombobox.setValue('');
+      _openrouterProviderCombobox.setItems([]);
+    }
+    hide(openRouterProviderFetchError);
     syncExplainerProviderUI();
   }
 
@@ -357,6 +383,42 @@ export function initLanding() {
     } finally {
       hide(openRouterCustomLoading);
     }
+  }
+
+  /** Format provider slug into a human-readable label. */
+  function formatProviderLabel(slug) {
+    return slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
+  }
+
+  /**
+   * Fetch available providers for a model and populate the provider combobox.
+   * Falls back gracefully — user can always type a provider manually.
+   */
+  async function fetchEndpointsForModel(modelId) {
+    if (!modelId || !_openrouterProviderCombobox) return;
+    if (_orEndpointsCache[modelId]) {
+      _openrouterProviderCombobox.setItems(formatProviderItems(_orEndpointsCache[modelId]));
+      return;
+    }
+    try {
+      const data = await api(`/api/openrouter/models/endpoints?model=${encodeURIComponent(modelId)}`);
+      const providers = data.providers || [];
+      _orEndpointsCache[modelId] = providers;
+      _openrouterProviderCombobox.setItems(formatProviderItems(providers));
+    } catch (err) {
+      // Non-blocking: user can still type a provider manually
+      show(openRouterProviderFetchError);
+      openRouterProviderFetchError.textContent = 'No se pudieron cargar los proveedores disponibles. Escríbelo manualmente.';
+    }
+  }
+
+  function formatProviderItems(providers) {
+    return providers.map((p) => ({
+      value: p,
+      label: formatProviderLabel(p),
+      sublabel: p,
+      meta: p,
+    }));
   }
 
   function switchSourceType(type) {
@@ -426,9 +488,6 @@ export function initLanding() {
     });
     openRouterCustomRadio.addEventListener('change', () => {
       if (openRouterCustomRadio.checked) setOpenRouterModel('__custom__');
-    });
-    openRouterProviderInput.addEventListener('input', (e) => {
-      currentOpenRouterProvider = e.target.value;
     });
     openRouterProviderOnlyCheckbox.addEventListener('change', (e) => {
       currentOpenRouterProviderOnly = e.target.checked;
@@ -631,8 +690,11 @@ async function handleUpload() {
     if (currentExplainerProvider === 'openrouter') {
       if (currentOpenRouterMode === 'custom') {
         processPayload.openrouter_model = currentCustomOpenRouterModel;
-        if (currentOpenRouterProvider) {
-          processPayload.openrouter_provider = currentOpenRouterProvider;
+        const providerVal = _openrouterProviderCombobox
+          ? _openrouterProviderCombobox.getValue().trim()
+          : '';
+        if (providerVal) {
+          processPayload.openrouter_provider = providerVal;
           processPayload.openrouter_provider_only = currentOpenRouterProviderOnly;
         }
       } else {
@@ -641,8 +703,12 @@ async function handleUpload() {
       // Reset custom state after upload
       currentOpenRouterMode = 'preset';
       currentCustomOpenRouterModel = null;
-      currentOpenRouterProvider = '';
       currentOpenRouterProviderOnly = false;
+      if (_openrouterProviderCombobox) {
+        _openrouterProviderCombobox.setValue('');
+        _openrouterProviderCombobox.setItems([]);
+      }
+      hide($('openrouter-provider-fetch-error'));
     } else if (currentExplainerProvider === 'deepseek') {
       processPayload.deepseek_model = currentDeepSeekModel;
     }

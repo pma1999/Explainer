@@ -298,12 +298,12 @@
                   <p class="input-error hidden" id="openrouter-custom-model-error">Selecciona o escribe un modelo</p>
                 </div>
 
-                <!-- Provider control -->
+                <!-- Provider control — combobox with auto-populated endpoints -->
                 <div class="form-group" style="margin-top:10px;">
-                  <label class="form-label" for="openrouter-provider-input">Proveedor preferido (opcional)</label>
-                  <input type="text" class="form-input" id="openrouter-provider-input"
-                         placeholder="p. ej. deepseek, together, novita" autocomplete="off">
-                  <p class="input-hint">Déjalo vacío para usar el balanceo por defecto de OpenRouter</p>
+                  <label class="form-label" for="openrouter-provider-combobox">Proveedor preferido (opcional)</label>
+                  <div id="openrouter-provider-combobox"></div>
+                  <p class="input-hint" id="openrouter-provider-hint">Selecciona un modelo para ver sus proveedores, o escríbelo manualmente</p>
+                  <p class="input-error hidden" id="openrouter-provider-fetch-error" style="margin-top:6px;"></p>
                 </div>
 
                 <!-- Only-this toggle -->
