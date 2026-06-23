@@ -5,6 +5,7 @@
 import { state } from './state.js';
 import { $, show, hide, formatBytes, toast } from './dom.js';
 import { api } from './api.js';
+import { createCombobox } from './components/openrouter-combobox.js';
 import { invalidateProjectsCache, loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
 import { updateApiKeyUI, showSettings } from './auth.js';
 
@@ -20,6 +21,12 @@ export const SUPPORTED_TARGET_LANGUAGES = ['es-ES', 'en', 'fr', 'de', 'it', 'pt-
 export const DEEPSEEK_MODEL_V4_PRO = 'deepseek-v4-pro';
 export const DEEPSEEK_MODEL_V4_FLASH = 'deepseek-v4-flash';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
+let currentOpenRouterMode = 'preset'; // 'preset' | 'custom'
+let currentCustomOpenRouterModel = null; // string | null
+let currentOpenRouterProvider = ''; // string
+let currentOpenRouterProviderOnly = false; // bool
+let _openrouterCombobox = null; // combobox instance
+let _orModelsCache = null; // cached model list
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
 let _landingListenersAttached = false;
 
@@ -65,6 +72,14 @@ export function isExplainerProviderSupportedForSource(sourceType, provider) {
 
 export function isValidOpenRouterModel(model) {
   return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
+}
+
+export function isPresetOpenRouterModel(model) {
+  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
+}
+
+export function setCustomOpenRouterModel(value) {
+  currentCustomOpenRouterModel = value;
 }
 
 export function isValidTargetLanguage(language) {
@@ -142,6 +157,9 @@ function buildExplainerProviderHint(sourceType, provider) {
   }
 
   if (provider === 'openrouter') {
+    if (currentOpenRouterMode === 'custom') {
+      return 'Modelo personalizado activo. Elige un modelo de OpenRouter.';
+    }
     const modelLabel = openRouterModelLabel(currentOpenRouterModel);
     if (sourceType === 'pdf') {
       if (state.hasOpenRouterKey && state.hasMistralKey) {
@@ -197,6 +215,13 @@ export function initLanding() {
   const modelStandard = $('openrouter-model-standard');
   const modelDeepseek = $('openrouter-model-deepseek');
   const modelPanel = $('openrouter-model-panel');
+  const openRouterCustomRadio = $('openrouter-model-custom');
+  const openRouterCustomPanel = $('openrouter-custom-panel');
+  const openRouterProviderInput = $('openrouter-provider-input');
+  const openRouterProviderOnlyCheckbox = $('openrouter-provider-only');
+  const openRouterCustomLoading = $('openrouter-custom-loading');
+  const openRouterCustomFetchError = $('openrouter-custom-fetch-error');
+  const openRouterCustomModelError = $('openrouter-custom-model-error');
   const deepseekModelPro = $('deepseek-model-pro');
   const deepseekModelFlash = $('deepseek-model-flash');
   const deepseekModelPanel = $('deepseek-model-panel');
@@ -238,12 +263,25 @@ export function initLanding() {
     $('provider-card-deepseek').classList.toggle('disabled', !deepSeekSupported);
     modelPanel.classList.toggle('hidden', currentExplainerProvider !== 'openrouter' || !openRouterSupported);
     deepseekModelPanel.classList.toggle('hidden', currentExplainerProvider !== 'deepseek' || !deepSeekSupported);
-    modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO;
-    modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO;
-    modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
-    $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
-    $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
-    $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+    modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO && currentOpenRouterMode === 'preset';
+    modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO && currentOpenRouterMode === 'preset';
+    modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO && currentOpenRouterMode === 'preset';
+    openRouterCustomRadio.checked = currentOpenRouterMode === 'custom';
+    if (currentOpenRouterMode === 'custom') {
+      openRouterCustomPanel.classList.remove('hidden');
+      $('openrouter-model-card-pro').classList.remove('selected');
+      $('openrouter-model-card-standard').classList.remove('selected');
+      $('openrouter-model-card-deepseek').classList.remove('selected');
+      $('openrouter-model-card-custom').classList.add('selected');
+    } else {
+      openRouterCustomPanel.classList.add('hidden');
+      hide(openRouterCustomModelError);
+      hide(openRouterCustomFetchError);
+      $('openrouter-model-card-custom').classList.remove('selected');
+      $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
+      $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
+      $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+    }
     deepseekModelPro.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO;
     deepseekModelFlash.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH;
     $('deepseek-model-card-pro').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO);
@@ -259,8 +297,43 @@ export function initLanding() {
   }
 
   function setOpenRouterModel(model) {
+    if (model === '__custom__') {
+      currentOpenRouterMode = 'custom';
+      currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO; // keep a valid fallback
+      syncExplainerProviderUI();
+      // Lazily load models and init combobox
+      loadOpenRouterModels().then((models) => {
+        if (_openrouterCombobox) {
+          _openrouterCombobox.destroy();
+          _openrouterCombobox = null;
+        }
+        const mountEl = $('openrouter-custom-model-combobox');
+        _openrouterCombobox = createCombobox(mountEl, {
+          placeholder: 'Busca un modelo de OpenRouter…',
+          items: models.map((m) => ({
+            value: m.id || m.value || m,
+            label: m.name || m.label || m,
+            sublabel: m.id || m.value || '',
+          })),
+          onSelect(value) {
+            currentCustomOpenRouterModel = value;
+            hide(openRouterCustomModelError);
+          },
+          getItemLabel(item) {
+            return item.label + ' ' + (item.sublabel || '');
+          },
+          emptyText: 'No se encontraron modelos',
+        });
+      });
+      return;
+    }
     if (!isValidOpenRouterModel(model)) return;
+    currentOpenRouterMode = 'preset';
     currentOpenRouterModel = model;
+    if (_openrouterCombobox) {
+      _openrouterCombobox.destroy();
+      _openrouterCombobox = null;
+    }
     syncExplainerProviderUI();
   }
 
@@ -268,6 +341,22 @@ export function initLanding() {
     if (!isValidDeepSeekModel(model)) return;
     currentDeepSeekModel = model;
     syncExplainerProviderUI();
+  }
+
+  async function loadOpenRouterModels() {
+    if (_orModelsCache) return _orModelsCache;
+    show(openRouterCustomLoading);
+    try {
+      const data = await api('/api/openrouter/models');
+      _orModelsCache = data.models || [];
+      return _orModelsCache;
+    } catch (err) {
+      show(openRouterCustomFetchError);
+      openRouterCustomFetchError.textContent = 'No se pudieron cargar los modelos. Escribe el ID manualmente.';
+      return [];
+    } finally {
+      hide(openRouterCustomLoading);
+    }
   }
 
   function switchSourceType(type) {
@@ -334,6 +423,15 @@ export function initLanding() {
     });
     deepseekModelFlash.addEventListener('change', () => {
       if (deepseekModelFlash.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH);
+    });
+    openRouterCustomRadio.addEventListener('change', () => {
+      if (openRouterCustomRadio.checked) setOpenRouterModel('__custom__');
+    });
+    openRouterProviderInput.addEventListener('input', (e) => {
+      currentOpenRouterProvider = e.target.value;
+    });
+    openRouterProviderOnlyCheckbox.addEventListener('change', (e) => {
+      currentOpenRouterProviderOnly = e.target.checked;
     });
 
     function checkReady() {
@@ -474,6 +572,12 @@ async function handleUpload() {
     return;
   }
 
+  // Custom model validation: block submit before creating project
+  if (currentExplainerProvider === 'openrouter' && currentOpenRouterMode === 'custom' && !currentCustomOpenRouterModel) {
+    show($('openrouter-custom-model-error'));
+    return;
+  }
+
   const btn = $('btn-upload');
   btn.disabled = true;
 
@@ -525,7 +629,20 @@ async function handleUpload() {
     const processPayload = { explainer_provider: currentExplainerProvider, target_language: currentTargetLanguage };
     setTargetLanguage(DEFAULT_TARGET_LANGUAGE);
     if (currentExplainerProvider === 'openrouter') {
-      processPayload.openrouter_model = currentOpenRouterModel;
+      if (currentOpenRouterMode === 'custom') {
+        processPayload.openrouter_model = currentCustomOpenRouterModel;
+        if (currentOpenRouterProvider) {
+          processPayload.openrouter_provider = currentOpenRouterProvider;
+          processPayload.openrouter_provider_only = currentOpenRouterProviderOnly;
+        }
+      } else {
+        processPayload.openrouter_model = currentOpenRouterModel;
+      }
+      // Reset custom state after upload
+      currentOpenRouterMode = 'preset';
+      currentCustomOpenRouterModel = null;
+      currentOpenRouterProvider = '';
+      currentOpenRouterProviderOnly = false;
     } else if (currentExplainerProvider === 'deepseek') {
       processPayload.deepseek_model = currentDeepSeekModel;
     }

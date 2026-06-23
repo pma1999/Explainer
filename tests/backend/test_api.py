@@ -235,6 +235,7 @@ class TestProcessProject:
             openrouter_model=None,
             deepseek_model=None,
             target_language="es-ES",
+            openrouter_provider_routing=None,
         ):
             scheduled.update({
                 "project_id": project_id,
@@ -292,6 +293,7 @@ class TestProcessProject:
             openrouter_model=None,
             deepseek_model=None,
             target_language="es-ES",
+            openrouter_provider_routing=None,
         ):
             scheduled.update({"project_id": project_id, "explainer_provider": explainer_provider})
 
@@ -320,6 +322,7 @@ class TestProcessProject:
             openrouter_model=None,
             deepseek_model=None,
             target_language="es-ES",
+            openrouter_provider_routing=None,
         ):
             scheduled.update({
                 "project_id": project_id,
@@ -353,7 +356,7 @@ class TestProcessProject:
         assert scheduled["deepseek_model"] is None
         assert scheduled["target_language"] == "es-ES"
 
-    def test_rejects_unsupported_openrouter_model_selection(self, auth_client):
+    def test_rejects_malformed_openrouter_model(self, auth_client):
         with patch(
             "main.get_project",
             return_value={"id": "proj-1", "name": "Proyecto", "status": "pending", "source_type": "pdf"},
@@ -363,11 +366,12 @@ class TestProcessProject:
                 headers={"Authorization": "Bearer fake-token"},
                 json={
                     "explainer_provider": "openrouter",
-                    "openrouter_model": "qwen/qwen3.6-plus",
+                    "openrouter_model": "malformed-no-slash",
                 },
             )
 
-        assert r.status_code == 422
+        assert r.status_code == 400
+        assert "Modelo OpenRouter inválido" in r.json()["detail"]
 
     def test_accepts_deepseek_direct_for_web_without_gemini_key(self, auth_client):
         scheduled: dict = {}
@@ -379,6 +383,7 @@ class TestProcessProject:
             openrouter_model=None,
             deepseek_model=None,
             target_language="es-ES",
+            openrouter_provider_routing=None,
         ):
             scheduled.update({
                 "project_id": project_id,

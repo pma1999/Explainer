@@ -2,17 +2,21 @@
 
 import asyncio
 import concurrent.futures
+import functools
 import inspect
 import json
 import math
 import os
+import re
 import time
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, AsyncGenerator, Literal
 from urllib.parse import urlparse
 
+import requests
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -148,7 +152,7 @@ logger = get_logger("main")
 MAX_CONCURRENT_PARTS = 5
 
 ExplainerProvider = Literal["gemini", "openrouter", "deepseek"]
-OpenRouterExplainerModel = Literal["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5", "deepseek/deepseek-v4-pro"]
+OpenRouterExplainerModel = str
 DeepSeekExplainerModel = Literal["deepseek-v4-pro", "deepseek-v4-flash"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
@@ -177,6 +181,8 @@ class ProcessProjectRequest(BaseModel):
     openrouter_model: OpenRouterExplainerModel | None = None
     target_language: str = "es-ES"
     deepseek_model: DeepSeekExplainerModel | None = None
+    openrouter_provider: str | None = None
+    openrouter_provider_only: bool = False
 
 
 def _resolve_explainer_model(
@@ -185,12 +191,18 @@ def _resolve_explainer_model(
     deepseek_model: DeepSeekExplainerModel | str | None = None,
 ) -> str:
     if explainer_provider == EXPLAINER_PROVIDER_OPENROUTER:
-        if openrouter_model:
-            model = str(openrouter_model).strip()
-            if model not in OPENROUTER_EXPLAINER_MODELS:
-                raise ValueError(f"Modelo OpenRouter no soportado: {model}")
-            return model
-        return OPENROUTER_EXPLAINER_MODEL
+        if openrouter_model is None:
+            return OPENROUTER_EXPLAINER_MODEL
+        if not isinstance(openrouter_model, str):
+            raise ValueError("Se requiere un modelo OpenRouter")
+        model = openrouter_model.strip()
+        if not model:
+            raise ValueError("Se requiere un modelo OpenRouter")
+        if not re.fullmatch(r"[\w.-]+/[\w.:-]+", model):
+            raise ValueError(f"Modelo OpenRouter inválido: '{model}'. Debe tener formato 'org/modelo'")
+        if len(model) > 128:
+            raise ValueError(f"Modelo OpenRouter demasiado largo: {len(model)} caracteres")
+        return model
     if explainer_provider == EXPLAINER_PROVIDER_DEEPSEEK:
         if deepseek_model:
             model = str(deepseek_model).strip()
@@ -199,6 +211,22 @@ def _resolve_explainer_model(
             return model
         return DEEPSEEK_MODEL_V4_PRO
     return MODEL_AGENTS
+
+
+def _build_openrouter_provider_routing(provider: str | None, only: bool) -> dict | None:
+    if not provider or not isinstance(provider, str):
+        return None
+    slug = provider.strip().lower()
+    if not slug:
+        return None
+    if not re.fullmatch(r"[\w.-]+", slug):
+        return None
+    if len(slug) > 64:
+        return None
+    routing: dict = {"order": [slug]}
+    if only:
+        routing["allow_fallbacks"] = False
+    return routing
 
 
 def _reconcile_stored_pdf_sources_on_startup() -> None:
@@ -468,7 +496,6 @@ async def api_api_key_status(user_id: Annotated[str, Depends(get_current_user_id
 
 def _extract_youtube_video_id(url: str) -> str | None:
     """Extract YouTube video ID from various URL formats."""
-    import re
 
     patterns = [
         r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})',
@@ -1911,6 +1938,7 @@ async def _process_project(
     openrouter_model: OpenRouterExplainerModel | str | None = None,
     deepseek_model: DeepSeekExplainerModel | str | None = None,
     target_language: str = "es-ES",
+    openrouter_provider_routing: dict | None = None,
 ) -> None:
     process_start_time = time.time()
     project: dict[str, Any] | None = None
@@ -3076,9 +3104,12 @@ async def _process_project(
                 use_text_direct = use_text_provider_explainer and not use_text_canonical and segment_temp_path is not None
                 use_text_provider_part = use_text_canonical or use_text_direct
                 text_provider_api_key = openrouter_api_key if use_openrouter_explainer else deepseek_api_key
-                text_provider_explainer_fn = run_explainer_or if use_openrouter_explainer else run_explainer_ds
+                text_provider_explainer_fn = (
+                    functools.partial(run_explainer_or, provider_routing=openrouter_provider_routing)
+                    if use_openrouter_explainer else run_explainer_ds
+                )
                 text_provider_subpart_fn = (
-                    run_subpart_explainer_or
+                    functools.partial(run_subpart_explainer_or, provider_routing=openrouter_provider_routing)
                     if use_openrouter_explainer
                     else run_subpart_explainer_ds
                 )
@@ -3772,6 +3803,8 @@ async def api_process_project(
     explainer_provider = payload.explainer_provider if payload else EXPLAINER_PROVIDER_GEMINI
     openrouter_model = payload.openrouter_model if payload else None
     deepseek_model = payload.deepseek_model if payload else None
+    openrouter_provider = payload.openrouter_provider if payload else None
+    openrouter_provider_only = payload.openrouter_provider_only if payload else False
     try:
         target_language_obj = normalize_target_language(payload.target_language if payload else None)
     except ValueError as exc:
@@ -3881,6 +3914,9 @@ async def api_process_project(
             "target_language": target_language_code,
         }
     )
+    openrouter_provider_routing = _build_openrouter_provider_routing(
+        openrouter_provider, openrouter_provider_only
+    )
     background_tasks.add_task(
         _process_project,
         project_id,
@@ -3889,6 +3925,7 @@ async def api_process_project(
         openrouter_model,
         deepseek_model,
         target_language_code,
+        openrouter_provider_routing,
     )
     return {
         "ok": True,
@@ -4014,6 +4051,163 @@ async def frontend_config_js():
         media_type="text/javascript",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+# ---- OpenRouter live models proxy (TTL cache + graceful degradation) ----
+
+_cache: dict = {}
+_cache_lock = threading.Lock()
+CACHE_TTL = 3600  # 1 hour
+
+
+def _cache_get(key: tuple) -> tuple[Any, bool]:
+    """Return (value, stale=False) from cache, or (None, False) on miss."""
+    with _cache_lock:
+        if key in _cache:
+            value, ts = _cache[key]
+            if time.monotonic() - ts < CACHE_TTL:
+                return value, False
+    return None, False
+
+
+def _cache_set(key: tuple, value: Any) -> None:
+    with _cache_lock:
+        _cache[key] = (value, time.monotonic())
+
+
+def _cache_get_stale(key: tuple) -> tuple[Any, bool]:
+    """Return cached value even if expired (for degradation)."""
+    with _cache_lock:
+        if key in _cache:
+            return _cache[key][0], True
+    return None, False
+
+
+async def _fetch_openrouter_models() -> tuple[list[dict], bool]:
+    """Returns (normalized_models_list, stale_bool) or raises."""
+    # 1. Try cache first (non-stale)
+    cached, _ = _cache_get(("models",))
+    if cached is not None:
+        return cached, False
+
+    # 2. Fetch from OpenRouter
+    try:
+        resp = await asyncio.to_thread(
+            lambda: requests.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"User-Agent": "Explainer/1.0"},
+                timeout=15,
+            )
+        )
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            normalized = [
+                {
+                    "id": m["id"],
+                    "name": m.get("name", m["id"]),
+                    "context_length": m.get("context_length", 0),
+                    "prompt_price": float(m.get("pricing", {}).get("prompt", 0)),
+                    "completion_price": float(m.get("pricing", {}).get("completion", 0)),
+                }
+                for m in data
+                if m.get("id")
+            ]
+            _cache_set(("models",), normalized)
+            return normalized, False
+    except Exception:
+        pass
+
+    # 3. Degradation: serve stale cache
+    stale, _ = _cache_get_stale(("models",))
+    if stale is not None:
+        return stale, True
+
+    # 4. Nothing works
+    raise HTTPException(
+        status_code=503,
+        detail="No se pudo obtener la lista de modelos de OpenRouter. Inténtalo de nuevo en un momento.",
+    )
+
+
+async def _fetch_openrouter_endpoints(model: str) -> tuple[list[str], bool]:
+    """Returns (providers_list, stale_bool) or raises."""
+    # 1. Try cache first (non-stale)
+    cached, _ = _cache_get(("endpoints", model))
+    if cached is not None:
+        return cached, False
+
+    # 2. Fetch from OpenRouter
+    try:
+        resp = await asyncio.to_thread(
+            lambda: requests.get(
+                f"https://openrouter.ai/api/v1/models/{model}/endpoints",
+                headers={"User-Agent": "Explainer/1.0"},
+                timeout=15,
+            )
+        )
+        if resp.status_code == 200:
+            payload = resp.json()
+            endpoints = payload.get("data", {}).get("endpoints", [])
+            providers = [
+                ep.get("id") or ep.get("slug") or ep.get("name") or ""
+                for ep in endpoints
+                if isinstance(ep, dict)
+                and (ep.get("id") or ep.get("slug") or ep.get("name"))
+            ]
+            _cache_set(("endpoints", model), providers)
+            return providers, False
+    except Exception:
+        pass
+
+    # 3. Degradation: serve stale cache
+    stale, _ = _cache_get_stale(("endpoints", model))
+    if stale is not None:
+        return stale, True
+
+    # 4. Nothing works
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"No se pudieron obtener los endpoints de OpenRouter "
+            f"para el modelo '{model}'. Inténtalo de nuevo en un momento."
+        ),
+    )
+
+
+def _validate_model_id(model: str) -> str:
+    """Validate model id format. Returns cleaned model id or raises 400."""
+    model = model.strip()
+    if not re.match(r"^[\w.-]+/[\w.:-]+$", model):
+        raise HTTPException(
+            status_code=400,
+            detail=f"ID de modelo inválido: '{model}'. Debe tener formato 'author/slug'.",
+        )
+    return model
+
+
+@app.get("/api/openrouter/models")
+async def get_openrouter_models(user_id: str = Depends(get_current_user_id)):
+    """Return cached or live list of OpenRouter models."""
+    models, stale = await _fetch_openrouter_models()
+    return {
+        "models": models,
+        "stale": stale,
+        "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+@app.get("/api/openrouter/models/endpoints")
+async def get_openrouter_endpoints(
+    model: str = Query(..., description="Model ID in 'author/slug' format"),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Return cached or live list of providers/endpoints for a model."""
+    validated_model = _validate_model_id(model)
+    providers, stale = await _fetch_openrouter_endpoints(validated_model)
+    return {
+        "providers": providers,
+        "stale": stale,
+    }
 
 
 if os.environ.get("ENVIRONMENT") != "production":

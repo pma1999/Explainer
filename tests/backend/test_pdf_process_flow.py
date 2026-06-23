@@ -711,6 +711,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
             cache_entry=None,
             page_numbers=(),
             validation_context=None,
+            **kwargs,
         ):
             openrouter_calls.append({
                 "source_path": source_path,

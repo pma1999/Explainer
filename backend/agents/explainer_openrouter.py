@@ -539,8 +539,12 @@ def _call_openrouter_json_with_pdf_fallback(
     api_key: str,
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
-    provider = _OPENROUTER_PROVIDER_OVERRIDES.get(model)
+    if provider_routing is not None:
+        provider = provider_routing
+    else:
+        provider = _OPENROUTER_PROVIDER_OVERRIDES.get(model)
     try:
         if mime_type == "application/pdf" and pdf_cache_entry is not None:
             requested_pages = page_numbers or pdf_cache_entry.cached_page_numbers
@@ -650,6 +654,8 @@ def run_explainer_or(
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer completo vía OpenRouter. Retorna (structured_result, usage)."""
     start = time.time()
@@ -679,6 +685,7 @@ def run_explainer_or(
             api_key=api_key,
             pdf_cache_entry=pdf_cache_entry,
             page_numbers=page_numbers,
+            provider_routing=provider_routing,
         ),
         validate_payload=_validate_full_explainer_payload,
         operation_label="Explainer OpenRouter",
@@ -716,6 +723,8 @@ def run_subpart_explainer_or(
     pdf_cache_entry: "PdfOcrCacheEntry | None" = None,
     page_numbers: tuple[int, ...] | None = None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Explainer de subparte vía OpenRouter — retorna solo `desarrollo` estructurado."""
     start = time.time()
@@ -745,6 +754,7 @@ def run_subpart_explainer_or(
             api_key=api_key,
             pdf_cache_entry=pdf_cache_entry,
             page_numbers=page_numbers,
+            provider_routing=provider_routing,
         ),
         validate_payload=_validate_subpart_explainer_payload,
         operation_label="Explainer subparte OpenRouter",
@@ -790,6 +800,8 @@ def _run_explainer_or_for_retry(
     page_numbers: tuple[int, ...] | None,
     validation_context: ExplainerValidationContext | None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Reintento de run_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
@@ -825,6 +837,7 @@ def _run_explainer_or_for_retry(
         api_key=api_key,
         pdf_cache_entry=pdf_cache_entry,
         page_numbers=page_numbers,
+        provider_routing=provider_routing,
     )
     result = _validate_full_explainer_payload(raw)
     logger.info(
@@ -846,6 +859,8 @@ def _run_subpart_explainer_or_for_retry(
     page_numbers: tuple[int, ...] | None,
     validation_context: ExplainerValidationContext | None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage]:
     """Reintento de run_subpart_explainer_or con contexto de validación de la salida anterior."""
     logger.info(
@@ -881,6 +896,7 @@ def _run_subpart_explainer_or_for_retry(
         api_key=api_key,
         pdf_cache_entry=pdf_cache_entry,
         page_numbers=page_numbers,
+        provider_routing=provider_routing,
     )
     result = _validate_subpart_explainer_payload(raw)
     logger.info(
@@ -907,6 +923,8 @@ def run_explainer_or_validated(
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_explainer_or con validación de completitud y reintento automático.
 
@@ -920,7 +938,8 @@ def run_explainer_or_validated(
     """
     return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_explainer_or(
-            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language
+            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language,
+            provider_routing=provider_routing,
         ),
         retry_call=lambda prev, report: _run_explainer_or_for_retry(
             source_path,
@@ -934,6 +953,7 @@ def run_explainer_or_validated(
             page_numbers,
             validation_context,
             target_language,
+            provider_routing=provider_routing,
         ),
         openrouter_api_key=validator_api_key or api_key,
         label=f"Explainer OpenRouter [{model}]",
@@ -952,6 +972,8 @@ def run_subpart_explainer_or_validated(
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
     target_language: str = "es-ES",
+    *,
+    provider_routing: dict | None = None,
 ) -> tuple[dict[str, Any], OpenRouterUsage, list[Any]]:
     """run_subpart_explainer_or con validación de completitud y reintento automático.
 
@@ -965,7 +987,8 @@ def run_subpart_explainer_or_validated(
     """
     return run_with_openrouter_explainer_validation(
         initial_call=lambda: run_subpart_explainer_or(
-            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language
+            source_path, identificacion, model, mime_type, api_key, pdf_cache_entry, page_numbers, target_language,
+            provider_routing=provider_routing,
         ),
         retry_call=lambda prev, report: _run_subpart_explainer_or_for_retry(
             source_path,
@@ -979,6 +1002,7 @@ def run_subpart_explainer_or_validated(
             page_numbers,
             validation_context,
             target_language,
+            provider_routing=provider_routing,
         ),
         openrouter_api_key=validator_api_key or api_key,
         label=f"Subpart Explainer OpenRouter [{model}]",

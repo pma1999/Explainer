@@ -10,6 +10,7 @@ import {
   isExplainerProviderSupportedForSource,
   isValidDeepSeekModel,
   isValidOpenRouterModel,
+  isPresetOpenRouterModel,
   DEEPSEEK_MODEL_V4_FLASH,
   DEEPSEEK_MODEL_V4_PRO,
   OPENROUTER_MODEL_MIMO,
@@ -112,6 +113,23 @@ describe('landing.js', () => {
     it('rejects unsupported OpenRouter model ids', () => {
       expect(isValidOpenRouterModel('qwen/qwen3.6-plus')).toBe(false);
       expect(isValidOpenRouterModel('')).toBe(false);
+    });
+  });
+
+  describe('isPresetOpenRouterModel', () => {
+    it('returns true for all three preset model ids', () => {
+      expect(isPresetOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
+      expect(isPresetOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
+      expect(isPresetOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO)).toBe(true);
+    });
+
+    it('returns false for the custom sentinel value', () => {
+      expect(isPresetOpenRouterModel('__custom__')).toBe(false);
+    });
+
+    it('returns false for arbitrary strings', () => {
+      expect(isPresetOpenRouterModel('qwen/qwen3.6-plus')).toBe(false);
+      expect(isPresetOpenRouterModel('')).toBe(false);
     });
   });
 

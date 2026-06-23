@@ -282,6 +282,44 @@
                     <span class="provider-card-sub">Razonamiento avanzado. Proveedor: deepseek.</span>
                   </span>
                 </label>
+                <label class="provider-card" id="openrouter-model-card-custom">
+                  <input type="radio" name="openrouter-model" id="openrouter-model-custom" value="__custom__" autocomplete="off">
+                  <div class="provider-card-content">
+                    <span class="provider-card-title">Personalizado</span>
+                    <span class="provider-card-desc">Elige cualquier modelo de OpenRouter</span>
+                  </div>
+                </label>
+              </div>
+              <div class="hidden" id="openrouter-custom-panel" style="margin-top:12px;">
+                <!-- Model combobox -->
+                <div class="form-group">
+                  <label class="form-label" for="openrouter-custom-model-combobox">Modelo</label>
+                  <div id="openrouter-custom-model-combobox"></div>
+                  <p class="input-error hidden" id="openrouter-custom-model-error">Selecciona o escribe un modelo</p>
+                </div>
+
+                <!-- Provider control -->
+                <div class="form-group" style="margin-top:10px;">
+                  <label class="form-label" for="openrouter-provider-input">Proveedor preferido (opcional)</label>
+                  <input type="text" class="form-input" id="openrouter-provider-input"
+                         placeholder="p. ej. deepseek, together, novita" autocomplete="off">
+                  <p class="input-hint">Déjalo vacío para usar el balanceo por defecto de OpenRouter</p>
+                </div>
+
+                <!-- Only-this toggle -->
+                <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;">
+                  <input type="checkbox" id="openrouter-provider-only" style="accent-color:var(--amber);">
+                  <span style="font-family:var(--font-ui);font-size:13px;color:var(--text-secondary);">
+                    Usar solo este proveedor (sin alternativas)
+                  </span>
+                </label>
+
+                <!-- Loading -->
+                <p class="input-hint hidden" id="openrouter-custom-loading" style="margin-top:8px;">
+                  Cargando modelos…
+                </p>
+                <!-- Error display -->
+                <p class="input-error hidden" id="openrouter-custom-fetch-error" style="margin-top:8px;"></p>
               </div>
             </div>
             <div class="openrouter-model-panel hidden" id="deepseek-model-panel">
