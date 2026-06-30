@@ -23,12 +23,14 @@ export const DEEPSEEK_MODEL_V4_FLASH = 'deepseek-v4-flash';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 let currentOpenRouterMode = 'preset'; // 'preset' | 'custom'
 let currentCustomOpenRouterModel = null; // string | null
-let currentOpenRouterProvider = ''; // string
+let currentCustomOpenRouterModelMeta = null; // chosen model object (aggregate metadata) | null
+let currentOpenRouterProvider = ''; // endpoint tag or manual typed text (canonical routing key)
+let currentOpenRouterProviderEndpoint = null; // endpoint row matched by tag, or null for manual text
 let currentOpenRouterProviderOnly = false; // bool
 let _openrouterCombobox = null; // model combobox instance
 let _openrouterProviderCombobox = null; // provider combobox instance
 let _orModelsCache = null; // cached model list
-let _orEndpointsCache = {}; // modelId -> [provider slugs]
+let _orEndpointsCache = {}; // modelId -> [endpoint row objects]
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
 let _landingListenersAttached = false;
 
@@ -126,6 +128,81 @@ export function formatModelPrice(perTokenUsd) {
 export function formatContextLength(n) {
   if (!n) return '';
   return `${Math.round(n / 1000)}K ctx`;
+}
+
+/**
+ * Format an endpoint max-token limit as a 'NNK <suffix>' badge.
+ * Returns '' for absent/non-finite/non-positive values so the UI never
+ * shows a misleading zero-token limit.
+ * @param {number|undefined} n
+ * @param {string} suffix - e.g. 'max out' or 'max in'
+ * @returns {string}
+ */
+function formatMaxTokens(n, suffix) {
+  if (!n || typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return '';
+  return `${Math.round(n / 1000)}K ${suffix}`;
+}
+
+/**
+ * Build the endpoint input/output price segment ('$/1M in · $/1M out').
+ * Returns '' when the endpoint row lacks both a positive prompt and
+ * completion price, so absent pricing is never labelled as exact.
+ * @param {{prompt_price?:number, completion_price?:number}} endpoint
+ * @returns {string}
+ */
+function formatEndpointPriceSegment(endpoint) {
+  const inPrice = endpoint && endpoint.prompt_price;
+  const outPrice = endpoint && endpoint.completion_price;
+  const hasIn = typeof inPrice === 'number' && Number.isFinite(inPrice) && inPrice > 0;
+  const hasOut = typeof outPrice === 'number' && Number.isFinite(outPrice) && outPrice > 0;
+  if (!hasIn && !hasOut) return '';
+  return `${formatModelPrice(inPrice ?? 0)} in · ${formatModelPrice(outPrice ?? 0)} out`;
+}
+
+/**
+ * Format a single endpoint row into the combobox `meta` slot string:
+ * context, max completion tokens, max prompt tokens, and endpoint prices,
+ * joining only the segments that are present.
+ * @param {object} endpoint
+ * @returns {string}
+ */
+export function formatEndpointMeta(endpoint) {
+  if (!endpoint) return '';
+  const parts = [];
+  const ctx = formatContextLength(endpoint.context_length);
+  if (ctx) parts.push(ctx);
+  const maxOut = formatMaxTokens(endpoint.max_completion_tokens, 'max out');
+  if (maxOut) parts.push(maxOut);
+  const maxIn = formatMaxTokens(endpoint.max_prompt_tokens, 'max in');
+  if (maxIn) parts.push(maxIn);
+  const price = formatEndpointPriceSegment(endpoint);
+  if (price) parts.push(price);
+  return parts.join(' · ');
+}
+
+/**
+ * Build the exact-mode summary chip texts for a selected endpoint row.
+ * Returns only the chips whose underlying value is present; pricing is
+ * omitted entirely when the endpoint lacks both a positive prompt and
+ * completion price, so absent pricing never appears as an exact chip.
+ * @param {object} endpoint
+ * @returns {string[]}
+ */
+export function buildEndpointSummaryChips(endpoint) {
+  if (!endpoint) return [];
+  const chips = [];
+  const name = endpoint.provider_name || endpoint.tag;
+  if (name) chips.push(name);
+  if (endpoint.tag) chips.push(endpoint.tag);
+  const ctx = formatContextLength(endpoint.context_length);
+  if (ctx) chips.push(ctx);
+  const maxOut = formatMaxTokens(endpoint.max_completion_tokens, 'max out');
+  if (maxOut) chips.push(maxOut);
+  const maxIn = formatMaxTokens(endpoint.max_prompt_tokens, 'max in');
+  if (maxIn) chips.push(maxIn);
+  const price = formatEndpointPriceSegment(endpoint);
+  if (price) chips.push(price);
+  return chips;
 }
 
 export function isValidDeepSeekModel(model) {
@@ -316,6 +393,63 @@ function buildExplainerProviderHint(sourceType, provider) {
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
 }
 
+/**
+ * Render the custom-mode model summary into #openrouter-custom-model-summary.
+ * Shows `Proveedor exacto` + endpoint-specific data when an endpoint row is
+ * matched by tag; otherwise `Modelo (agregado)` + model-list aggregate data.
+ * No-op when no custom model meta is set (summary stays hidden).
+ */
+function renderCustomModelSummary() {
+  const el = $('openrouter-custom-model-summary');
+  if (!el) return;
+  const modelMeta = currentCustomOpenRouterModelMeta;
+  if (!modelMeta) {
+    hide(el);
+    return;
+  }
+  el.innerHTML = '';
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'model-summary-name';
+  nameSpan.textContent = modelMeta.name || modelMeta.label || currentCustomOpenRouterModel || '';
+  el.appendChild(nameSpan);
+
+  const labelChip = document.createElement('span');
+  labelChip.className = 'model-summary-chip model-summary-chip--label';
+  const endpoint = currentOpenRouterProviderEndpoint;
+  if (endpoint) {
+    labelChip.textContent = 'Proveedor exacto';
+    el.appendChild(labelChip);
+    for (const text of buildEndpointSummaryChips(endpoint)) {
+      const chip = document.createElement('span');
+      chip.className = 'model-summary-chip';
+      chip.textContent = text;
+      el.appendChild(chip);
+    }
+  } else {
+    labelChip.textContent = 'Modelo (agregado)';
+    el.appendChild(labelChip);
+    const idChip = document.createElement('span');
+    idChip.className = 'model-summary-chip';
+    idChip.textContent = modelMeta.id || currentCustomOpenRouterModel || '';
+    el.appendChild(idChip);
+    const ctx = formatContextLength(modelMeta.context_length);
+    if (ctx) {
+      const ctxChip = document.createElement('span');
+      ctxChip.className = 'model-summary-chip';
+      ctxChip.textContent = ctx;
+      el.appendChild(ctxChip);
+    }
+    const priceChip = document.createElement('span');
+    priceChip.className = 'model-summary-chip';
+    const priceIn = formatModelPrice(modelMeta.prompt_price ?? 0);
+    const priceOut = formatModelPrice(modelMeta.completion_price ?? 0);
+    priceChip.textContent = `${priceIn} in · ${priceOut} out`;
+    el.appendChild(priceChip);
+  }
+  show(el);
+}
+
 export function initLanding() {
   updateApiKeyUI();
 
@@ -352,13 +486,32 @@ export function initLanding() {
   _openrouterProviderCombobox = createCombobox(openRouterProviderCombobox, {
     placeholder: 'Selecciona un modelo primero…',
     items: [],
-    onSelect(value) {
+    onSelect(value, item) {
+      // value is the canonical endpoint tag (routing key); the displayed
+      // label is provider_name. Persist the tag, not the display label.
       currentOpenRouterProvider = value;
+      currentOpenRouterProviderEndpoint = (item && item.endpoint) || null;
       hide(openRouterProviderFetchError);
+      renderCustomModelSummary();
       persistModelSelector();
     },
     emptyText: 'No hay proveedores disponibles',
   });
+
+  // Manual-edit guard (Named Risk): if the user types into the provider
+  // input instead of picking an option, clear any previously selected
+  // endpoint metadata and treat the current text as manual provider text.
+  // Programmatic setValue() (option commit, restore) sets input.value
+  // directly and does NOT fire an `input` event, so selections are safe.
+  const providerComboboxInput = openRouterProviderCombobox.querySelector('input');
+  if (providerComboboxInput) {
+    providerComboboxInput.addEventListener('input', () => {
+      currentOpenRouterProviderEndpoint = null;
+      currentOpenRouterProvider = providerComboboxInput.value;
+      renderCustomModelSummary();
+      persistModelSelector();
+    });
+  }
 
   const tabPdf = $('tab-pdf');
   const tabYoutube = $('tab-youtube');
@@ -493,40 +646,19 @@ export function initLanding() {
           onSelect(value) {
             currentCustomOpenRouterModel = value;
             hide(openRouterCustomModelError);
-            // Populate chosen-model summary
+            // Cache chosen model aggregate metadata for summary rendering
             const chosen = models.find((m) => (m.id || m.value || m) === value);
-            const el = $('openrouter-custom-model-summary');
-            if (el && chosen) {
-              el.innerHTML = '';
-              const nameSpan = document.createElement('span');
-              nameSpan.className = 'model-summary-name';
-              nameSpan.textContent = chosen.name || chosen.label || value;
-              el.appendChild(nameSpan);
-              const idChip = document.createElement('span');
-              idChip.className = 'model-summary-chip';
-              idChip.textContent = chosen.id || value;
-              el.appendChild(idChip);
-              const ctx = formatContextLength(chosen.context_length);
-              if (ctx) {
-                const ctxChip = document.createElement('span');
-                ctxChip.className = 'model-summary-chip';
-                ctxChip.textContent = ctx;
-                el.appendChild(ctxChip);
-              }
-              const priceChip = document.createElement('span');
-              priceChip.className = 'model-summary-chip';
-              const priceIn = formatModelPrice(chosen.prompt_price ?? 0);
-              const priceOut = formatModelPrice(chosen.completion_price ?? 0);
-              priceChip.textContent = `${priceIn} in · ${priceOut} out`;
-              el.appendChild(priceChip);
-              show(el);
-            }
-            // Reset and auto-populate provider combobox for this model
+            currentCustomOpenRouterModelMeta = chosen || null;
+            // Reset provider state for the newly chosen model
+            currentOpenRouterProvider = '';
+            currentOpenRouterProviderEndpoint = null;
             if (_openrouterProviderCombobox) {
               _openrouterProviderCombobox.setValue('');
               _openrouterProviderCombobox.setItems([]);
             }
             hide(openRouterProviderFetchError);
+            // Render aggregate summary (no endpoint selected yet)
+            renderCustomModelSummary();
             fetchEndpointsForModel(value);
             persistModelSelector();
           },
@@ -540,6 +672,10 @@ export function initLanding() {
     if (!isValidOpenRouterModel(model)) return;
     currentOpenRouterMode = 'preset';
     currentOpenRouterModel = model;
+    currentCustomOpenRouterModel = null;
+    currentCustomOpenRouterModelMeta = null;
+    currentOpenRouterProvider = '';
+    currentOpenRouterProviderEndpoint = null;
     if (_openrouterCombobox) {
       _openrouterCombobox.destroy();
       _openrouterCombobox = null;
@@ -577,39 +713,48 @@ export function initLanding() {
     }
   }
 
-  /** Format provider slug into a human-readable label. */
-  function formatProviderLabel(slug) {
-    return slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
-  }
-
   /**
-   * Fetch available providers for a model and populate the provider combobox.
-   * Falls back gracefully — user can always type a provider manually.
+   * Fetch available provider endpoints for a model and populate the provider
+   * combobox. Caches endpoint row objects keyed by model id. Falls back
+   * gracefully — user can always type a provider manually.
+   * Returns the endpoint rows (cached or freshly fetched), or [] on error.
+   * @param {string} modelId
+   * @returns {Promise<object[]>}
    */
   async function fetchEndpointsForModel(modelId) {
-    if (!modelId || !_openrouterProviderCombobox) return;
+    if (!modelId || !_openrouterProviderCombobox) return [];
     if (_orEndpointsCache[modelId]) {
-      _openrouterProviderCombobox.setItems(formatProviderItems(_orEndpointsCache[modelId]));
-      return;
+      const cached = _orEndpointsCache[modelId];
+      _openrouterProviderCombobox.setItems(formatProviderItems(cached));
+      return cached;
     }
     try {
       const data = await api(`/api/openrouter/models/endpoints?model=${encodeURIComponent(modelId)}`);
-      const providers = data.providers || [];
-      _orEndpointsCache[modelId] = providers;
-      _openrouterProviderCombobox.setItems(formatProviderItems(providers));
+      const endpoints = Array.isArray(data && data.endpoints) ? data.endpoints : [];
+      _orEndpointsCache[modelId] = endpoints;
+      _openrouterProviderCombobox.setItems(formatProviderItems(endpoints));
+      return endpoints;
     } catch (err) {
       // Non-blocking: user can still type a provider manually
       show(openRouterProviderFetchError);
       openRouterProviderFetchError.textContent = 'No se pudieron cargar los proveedores disponibles. Escríbelo manualmente.';
+      return [];
     }
   }
 
-  function formatProviderItems(providers) {
-    return providers.map((p) => ({
-      value: p,
-      label: formatProviderLabel(p),
-      sublabel: p,
-      meta: p,
+  /**
+   * Map endpoint rows into provider combobox items. The canonical routing
+   * key (`tag`) is the item value; `provider_name` is the display label.
+   * @param {object[]} endpoints
+   * @returns {Array<{value:string, label:string, sublabel:string, meta:string, endpoint:object}>}
+   */
+  function formatProviderItems(endpoints) {
+    return (endpoints || []).map((endpoint) => ({
+      value: endpoint.tag,
+      label: endpoint.provider_name || endpoint.tag,
+      sublabel: endpoint.tag,
+      meta: formatEndpointMeta(endpoint),
+      endpoint,
     }));
   }
 
@@ -766,7 +911,7 @@ export function initLanding() {
     const { pendingCustomModel, pendingProvider } = _customRestore;
     const _loadPromise = setOpenRouterModel('__custom__');
     if (_loadPromise && typeof _loadPromise.then === 'function') {
-      _loadPromise.then(() => {
+      _loadPromise.then(async () => {
         // Teardown-race guard (mirrors T5): bail if user switched mode while models loaded
         if (currentOpenRouterMode !== 'custom') return;
         const mountEl = $('openrouter-custom-model-combobox');
@@ -777,12 +922,36 @@ export function initLanding() {
         const displayVal = (loadedModel && (loadedModel.name || loadedModel.label)) || pendingCustomModel;
         if (_openrouterCombobox) _openrouterCombobox.setValue(displayVal);
         currentCustomOpenRouterModel = pendingCustomModel;
-        // Trigger endpoint fetch so provider combobox gets populated
-        fetchEndpointsForModel(pendingCustomModel);
-        // Restore saved provider into provider combobox
-        if (pendingProvider && _openrouterProviderCombobox) {
-          _openrouterProviderCombobox.setValue(pendingProvider);
+        currentCustomOpenRouterModelMeta = loadedModel || null;
+        // Refetch endpoint rows so the saved provider can be re-matched by tag
+        // (do not trust stale display metadata from localStorage).
+        const endpoints = await fetchEndpointsForModel(pendingCustomModel);
+        // Teardown-race guard: bail if user left custom mode while endpoints loaded
+        if (currentOpenRouterMode !== 'custom') return;
+        const matched = pendingProvider && Array.isArray(endpoints)
+          ? endpoints.find((ep) => ep && ep.tag === pendingProvider)
+          : null;
+        if (matched) {
+          // Re-matched by tag: show provider_name in the input, persist the tag,
+          // and render endpoint-specific summary chips.
+          currentOpenRouterProvider = matched.tag;
+          currentOpenRouterProviderEndpoint = matched;
+          if (_openrouterProviderCombobox) {
+            _openrouterProviderCombobox.setValue(matched.provider_name || matched.tag);
+          }
+        } else if (pendingProvider) {
+          // Saved tag is not in the endpoint rows: restore as manual text and
+          // keep the summary on aggregate model chips.
+          currentOpenRouterProvider = pendingProvider;
+          currentOpenRouterProviderEndpoint = null;
+          if (_openrouterProviderCombobox) {
+            _openrouterProviderCombobox.setValue(pendingProvider);
+          }
+        } else {
+          currentOpenRouterProvider = '';
+          currentOpenRouterProviderEndpoint = null;
         }
+        renderCustomModelSummary();
         // Restore provider-only checkbox state
         if (openRouterProviderOnlyCheckbox) {
           openRouterProviderOnlyCheckbox.checked = currentOpenRouterProviderOnly;
@@ -916,11 +1085,12 @@ async function handleUpload() {
     if (currentExplainerProvider === 'openrouter') {
       if (currentOpenRouterMode === 'custom') {
         processPayload.openrouter_model = currentCustomOpenRouterModel;
-        const providerVal = _openrouterProviderCombobox
-          ? _openrouterProviderCombobox.getValue().trim()
-          : '';
-        if (providerVal) {
-          processPayload.openrouter_provider = providerVal;
+        // currentOpenRouterProvider holds the canonical endpoint tag when an
+        // endpoint row is selected, or the manual typed text otherwise. The
+        // combobox's getValue() returns the display label (provider_name),
+        // which is not a valid routing key, so we submit the stored value.
+        if (currentOpenRouterProvider) {
+          processPayload.openrouter_provider = currentOpenRouterProvider;
           processPayload.openrouter_provider_only = currentOpenRouterProviderOnly;
         }
       } else {
@@ -929,6 +1099,9 @@ async function handleUpload() {
       // Reset custom state after upload
       currentOpenRouterMode = 'preset';
       currentCustomOpenRouterModel = null;
+      currentCustomOpenRouterModelMeta = null;
+      currentOpenRouterProvider = '';
+      currentOpenRouterProviderEndpoint = null;
       currentOpenRouterProviderOnly = false;
       if (_openrouterProviderCombobox) {
         _openrouterProviderCombobox.setValue('');

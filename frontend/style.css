@@ -5486,6 +5486,16 @@ body.is-offline .project-card[data-pinned="true"] {
   flex-shrink: 0;
 }
 
+/* Label chip distinguishes the data source: aggregate model data vs an
+   exact endpoint row matched by tag. */
+.model-summary-chip--label {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-color: var(--amber);
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
 @media (max-width: 680px) {
   .openrouter-custom-model-summary {
     padding: 8px 10px;

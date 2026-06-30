@@ -478,8 +478,8 @@ describe('landing.js project creation flow', () => {
             { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0.0000005, completion_price: 0.0000015 },
           ],
         })
-        // fetchEndpointsForModel call
-        .mockResolvedValueOnce({ providers: [] });
+        // fetchEndpointsForModel call (Task 01 contract: endpoints[])
+        .mockResolvedValueOnce({ endpoints: [] });
 
       const { initLanding } = await import('../../frontend/js/landing.js');
       initLanding();
@@ -511,6 +511,11 @@ describe('landing.js project creation flow', () => {
       expect(summaryEl.textContent).toMatch(/Qwen 3\.6 Plus/);
       expect(summaryEl.textContent).toMatch(/qwen\/qwen3\.6-plus/);
       expect(summaryEl.textContent).toMatch(/128K ctx/);
+      // No provider endpoint selected → aggregate label + model-list prices
+      expect(summaryEl.textContent).toMatch(/Modelo \(agregado\)/);
+      expect(summaryEl.textContent).not.toMatch(/Proveedor exacto/);
+      expect(summaryEl.textContent).toMatch(/\$0\.5\/1M in/);
+      expect(summaryEl.textContent).toMatch(/\$1\.5\/1M out/);
     });
 
     it('teardown guard: switching to preset while models fetch is in flight aborts combobox creation', async () => {
@@ -547,6 +552,238 @@ describe('landing.js project creation flow', () => {
       // No combobox option should have been rendered into the mount
       const comboboxOption = document.querySelector('.combobox-option');
       expect(comboboxOption).toBeNull();
+    });
+  });
+
+  describe('provider endpoint hydration (Task 02)', () => {
+    const RICH_MODEL = {
+      id: 'qwen/qwen3.6-plus',
+      name: 'Qwen 3.6 Plus',
+      context_length: 128000,
+      prompt_price: 0.0000005,
+      completion_price: 0.0000015,
+    };
+    const RICH_ENDPOINT = {
+      tag: 'novita/fp8',
+      provider_name: 'Novita',
+      name: 'Novita | qwen/qwen3.6-plus',
+      context_length: 128000,
+      max_completion_tokens: 16384,
+      max_prompt_tokens: 120000,
+      prompt_price: 0.0000005,
+      completion_price: 0.0000015,
+    };
+
+    // Drives the UI into custom mode and commits the first model option,
+    // which triggers fetchEndpointsForModel. Returns the model combobox input.
+    async function selectCustomModel() {
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+      const customRadio = document.getElementById('openrouter-model-custom');
+      customRadio.checked = true;
+      customRadio.dispatchEvent(new Event('change', { bubbles: true }));
+      await flushAsyncWork();
+      const modelComboboxInput = document.querySelector('#openrouter-custom-model-combobox input');
+      modelComboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const modelOption = document.querySelector('#openrouter-custom-model-combobox .combobox-option');
+      modelOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flushAsyncWork();
+      return modelComboboxInput;
+    }
+
+    it('renders provider combobox option with endpoint tag, provider_name and rich meta', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({ models: [RICH_MODEL] })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [RICH_ENDPOINT],
+          stale: false,
+        });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+      await selectCustomModel();
+
+      // Open the provider combobox so options render
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      providerComboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      const providerOption = document.querySelector('#openrouter-provider-combobox .combobox-option');
+      expect(providerOption).not.toBeNull();
+      // label is provider_name, sublabel is the canonical tag
+      expect(providerOption.querySelector('.combobox-option-name').textContent).toBe('Novita');
+      expect(providerOption.querySelector('.combobox-option-id').textContent).toBe('novita/fp8');
+      const meta = providerOption.querySelector('.combobox-option-meta').textContent;
+      expect(meta).toMatch(/128K ctx/);
+      expect(meta).toMatch(/16K max out/);
+      expect(meta).toMatch(/120K max in/);
+      expect(meta).toMatch(/\$0\.5\/1M in/);
+      expect(meta).toMatch(/\$1\.5\/1M out/);
+    });
+
+    it('selecting a provider endpoint shows Proveedor exacto summary and submits the canonical tag', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({ models: [RICH_MODEL] })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [RICH_ENDPOINT],
+          stale: false,
+        })
+        .mockResolvedValueOnce({ id: 'project-1' })
+        .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      // Web source + name so the upload can proceed
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Test endpoint pin';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      await selectCustomModel();
+
+      // Open provider combobox and pick the endpoint option
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      providerComboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const providerOption = document.querySelector('#openrouter-provider-combobox .combobox-option');
+      providerOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flushAsyncWork();
+
+      // Input display is the provider_name, NOT the tag
+      expect(providerComboboxInput.value).toBe('Novita');
+
+      // Summary switches to Proveedor exacto with endpoint-specific chips
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.classList.contains('hidden')).toBe(false);
+      expect(summaryEl.textContent).toMatch(/Proveedor exacto/);
+      expect(summaryEl.textContent).toMatch(/Novita/);
+      expect(summaryEl.textContent).toMatch(/novita\/fp8/);
+      expect(summaryEl.textContent).toMatch(/128K ctx/);
+      expect(summaryEl.textContent).toMatch(/16K max out/);
+      expect(summaryEl.textContent).toMatch(/120K max in/);
+      expect(summaryEl.textContent).toMatch(/\$0\.5\/1M in/);
+      expect(summaryEl.textContent).toMatch(/\$1\.5\/1M out/);
+
+      // Submit sends the canonical tag even though the display label is Novita
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(api).toHaveBeenNthCalledWith(
+        4,
+        '/api/projects/project-1/process',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            explainer_provider: 'openrouter',
+            target_language: 'es-ES',
+            openrouter_model: 'qwen/qwen3.6-plus',
+            openrouter_provider: 'novita/fp8',
+            openrouter_provider_only: false,
+          }),
+        }),
+      );
+    });
+
+    it('manual typed provider keeps aggregate chips and submits the typed value', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({ models: [RICH_MODEL] })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [RICH_ENDPOINT],
+          stale: false,
+        })
+        .mockResolvedValueOnce({ id: 'project-1' })
+        .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Test manual provider';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      await selectCustomModel();
+
+      // Type a provider that does not match any endpoint row (no option click)
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      providerComboboxInput.value = 'deepseek';
+      providerComboboxInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await flushAsyncWork();
+
+      // Summary stays on aggregate model chips — no exact endpoint chips
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.classList.contains('hidden')).toBe(false);
+      expect(summaryEl.textContent).toMatch(/Modelo \(agregado\)/);
+      expect(summaryEl.textContent).not.toMatch(/Proveedor exacto/);
+      expect(summaryEl.textContent).not.toMatch(/16K max out/);
+
+      // Submit sends the typed value
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(api).toHaveBeenNthCalledWith(
+        4,
+        '/api/projects/project-1/process',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            explainer_provider: 'openrouter',
+            target_language: 'es-ES',
+            openrouter_model: 'qwen/qwen3.6-plus',
+            openrouter_provider: 'deepseek',
+            openrouter_provider_only: false,
+          }),
+        }),
+      );
+    });
+
+    it('editing the provider input after selecting an endpoint reverts the summary to aggregate', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({ models: [RICH_MODEL] })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [RICH_ENDPOINT],
+          stale: false,
+        });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+      await selectCustomModel();
+
+      // Select the endpoint → exact summary
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      providerComboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const providerOption = document.querySelector('#openrouter-provider-combobox .combobox-option');
+      providerOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flushAsyncWork();
+
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.textContent).toMatch(/Proveedor exacto/);
+
+      // Manually edit the input → revert to aggregate, clear endpoint metadata
+      providerComboboxInput.value = 'my-manual-provider';
+      providerComboboxInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await flushAsyncWork();
+
+      expect(summaryEl.textContent).toMatch(/Modelo \(agregado\)/);
+      expect(summaryEl.textContent).not.toMatch(/Proveedor exacto/);
+      expect(summaryEl.textContent).not.toMatch(/16K max out/);
     });
   });
 
@@ -775,8 +1012,8 @@ describe('landing.js project creation flow', () => {
           { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0, completion_price: 0 },
         ],
       });
-      // Second call for fetchEndpointsForModel
-      api.mockResolvedValueOnce({ providers: [] });
+      // Second call for fetchEndpointsForModel (Task 01 contract: endpoints[])
+      api.mockResolvedValueOnce({ endpoints: [] });
 
       localStorage.setItem(SELECTOR_KEY, JSON.stringify({
         explainerProvider: 'openrouter',
@@ -839,6 +1076,119 @@ describe('landing.js project creation flow', () => {
       // Custom panel must remain hidden (preset is active)
       const customPanel = document.getElementById('openrouter-custom-panel');
       expect(customPanel.classList.contains('hidden')).toBe(true);
+    });
+
+    it('restore custom mode with saved provider tag — refetches endpoints, matches by tag, sets provider display to provider_name, renders exact chips', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({
+          models: [
+            { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0.0000005, completion_price: 0.0000015 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [
+            {
+              tag: 'novita/fp8',
+              provider_name: 'Novita',
+              name: 'Novita | qwen/qwen3.6-plus',
+              context_length: 128000,
+              max_completion_tokens: 16384,
+              max_prompt_tokens: 120000,
+              prompt_price: 0.0000005,
+              completion_price: 0.0000015,
+            },
+          ],
+          stale: false,
+        });
+
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'custom',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: 'qwen/qwen3.6-plus',
+        openrouterProvider: 'novita/fp8',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+      await flushAsyncWork();
+      await flushAsyncWork();
+
+      // Provider combobox display is the provider_name, not the tag
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      expect(providerComboboxInput.value).toBe('Novita');
+
+      // Persisted provider remains the canonical tag
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.openrouterProvider).toBe('novita/fp8');
+
+      // Summary shows exact endpoint chips
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.classList.contains('hidden')).toBe(false);
+      expect(summaryEl.textContent).toMatch(/Proveedor exacto/);
+      expect(summaryEl.textContent).toMatch(/Novita/);
+      expect(summaryEl.textContent).toMatch(/novita\/fp8/);
+      expect(summaryEl.textContent).toMatch(/128K ctx/);
+      expect(summaryEl.textContent).toMatch(/16K max out/);
+      expect(summaryEl.textContent).toMatch(/120K max in/);
+      expect(summaryEl.textContent).toMatch(/\$0\.5\/1M in/);
+      expect(summaryEl.textContent).toMatch(/\$1\.5\/1M out/);
+
+      // Endpoints were refetched for the saved model
+      expect(api).toHaveBeenCalledWith(expect.stringContaining('/api/openrouter/models/endpoints'));
+    });
+
+    it('restore with a saved provider tag that is not in endpoint rows sets the provider input to the saved tag and leaves aggregate model chips', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({
+          models: [
+            { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0, completion_price: 0 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          model_id: 'qwen/qwen3.6-plus',
+          model_name: 'Qwen 3.6 Plus',
+          endpoints: [
+            { tag: 'novita/fp8', provider_name: 'Novita', context_length: 128000, prompt_price: 0, completion_price: 0 },
+          ],
+          stale: false,
+        });
+
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'custom',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: 'qwen/qwen3.6-plus',
+        openrouterProvider: 'some/other-tag',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+      await flushAsyncWork();
+      await flushAsyncWork();
+
+      // Saved tag is not in endpoint rows → restore as manual text
+      const providerComboboxInput = document.querySelector('#openrouter-provider-combobox input');
+      expect(providerComboboxInput.value).toBe('some/other-tag');
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.openrouterProvider).toBe('some/other-tag');
+
+      // Summary stays on aggregate model chips
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.classList.contains('hidden')).toBe(false);
+      expect(summaryEl.textContent).toMatch(/Modelo \(agregado\)/);
+      expect(summaryEl.textContent).not.toMatch(/Proveedor exacto/);
     });
   });
 });

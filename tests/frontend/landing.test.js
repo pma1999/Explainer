@@ -22,6 +22,8 @@ import {
   isValidTargetLanguage,
   formatModelPrice,
   formatContextLength,
+  formatEndpointMeta,
+  buildEndpointSummaryChips,
 } from '../../frontend/js/landing.js';
 
 // vi.hoisted ensures mockState is initialized before vi.mock factory runs (hoisting order)
@@ -352,6 +354,106 @@ describe('landing.js', () => {
 
     it('handles 1M token context', () => {
       expect(formatContextLength(1000000)).toBe('1000K ctx');
+    });
+  });
+
+  describe('formatEndpointMeta', () => {
+    it('renders context only when no other endpoint values are present', () => {
+      expect(formatEndpointMeta({ context_length: 128000 })).toBe('128K ctx');
+    });
+
+    it('renders context plus max completion and max prompt tokens', () => {
+      const meta = formatEndpointMeta({
+        context_length: 128000,
+        max_completion_tokens: 16384,
+        max_prompt_tokens: 120000,
+      });
+      expect(meta).toBe('128K ctx · 16K max out · 120K max in');
+    });
+
+    it('renders input/output endpoint pricing', () => {
+      const meta = formatEndpointMeta({
+        prompt_price: 0.0000005,
+        completion_price: 0.0000015,
+      });
+      expect(meta).toBe('$0.5/1M in · $1.5/1M out');
+    });
+
+    it('joins every present segment with the separator', () => {
+      const meta = formatEndpointMeta({
+        context_length: 128000,
+        max_completion_tokens: 16384,
+        max_prompt_tokens: 120000,
+        prompt_price: 0.0000005,
+        completion_price: 0.0000015,
+      });
+      expect(meta).toBe('128K ctx · 16K max out · 120K max in · $0.5/1M in · $1.5/1M out');
+    });
+
+    it('omits pricing when the endpoint lacks both a positive prompt and completion price', () => {
+      // 0 prices mean "absent" on the backend (defaults to 0.0); never label as exact.
+      expect(formatEndpointMeta({ context_length: 128000, prompt_price: 0, completion_price: 0 }))
+        .toBe('128K ctx');
+    });
+
+    it('returns empty string for a falsy endpoint', () => {
+      expect(formatEndpointMeta(null)).toBe('');
+      expect(formatEndpointMeta(undefined)).toBe('');
+    });
+
+    it('ignores non-positive or non-finite max-token values', () => {
+      expect(formatEndpointMeta({ context_length: 128000, max_completion_tokens: 0, max_prompt_tokens: -10 }))
+        .toBe('128K ctx');
+    });
+  });
+
+  describe('buildEndpointSummaryChips', () => {
+    it('includes provider_name, tag, context, max tokens and prices for a full endpoint row', () => {
+      expect(buildEndpointSummaryChips({
+        tag: 'novita/fp8',
+        provider_name: 'Novita',
+        context_length: 128000,
+        max_completion_tokens: 16384,
+        max_prompt_tokens: 120000,
+        prompt_price: 0.0000005,
+        completion_price: 0.0000015,
+      })).toEqual([
+        'Novita',
+        'novita/fp8',
+        '128K ctx',
+        '16K max out',
+        '120K max in',
+        '$0.5/1M in · $1.5/1M out',
+      ]);
+    });
+
+    it('absent endpoint values produce no misleading exact chip — only identity chips', () => {
+      // No context, no max tokens, no prices → only provider_name + tag remain.
+      expect(buildEndpointSummaryChips({ tag: 'novita/fp8', provider_name: 'Novita' }))
+        .toEqual(['Novita', 'novita/fp8']);
+    });
+
+    it('omits the pricing chip when both prompt and completion prices are zero/absent', () => {
+      expect(buildEndpointSummaryChips({
+        tag: 'novita/fp8',
+        provider_name: 'Novita',
+        context_length: 128000,
+        prompt_price: 0,
+        completion_price: 0,
+      })).toEqual(['Novita', 'novita/fp8', '128K ctx']);
+    });
+
+    it('falls back to tag when provider_name is missing', () => {
+      const chips = buildEndpointSummaryChips({ tag: 'novita/fp8', context_length: 128000 });
+      // provider_name falls back to tag, then the explicit tag chip is also added
+      expect(chips).toContain('novita/fp8');
+      expect(chips).toContain('128K ctx');
+      expect(chips.some((c) => /\$|in ·|out/.test(c))).toBe(false);
+    });
+
+    it('returns an empty array for a falsy endpoint', () => {
+      expect(buildEndpointSummaryChips(null)).toEqual([]);
+      expect(buildEndpointSummaryChips(undefined)).toEqual([]);
     });
   });
 

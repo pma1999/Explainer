@@ -138,6 +138,33 @@ class TestBuildProviderRouting:
         fn = _build_provider_routing_fn()
         assert fn("bad provider!", False) is None
 
+    def test_accepts_slash_variant_tag(self):
+        fn = _build_provider_routing_fn()
+        result = fn("novita/fp8", False)
+        assert result == {"order": ["novita/fp8"]}
+
+    def test_lowercases_slash_variant_tag(self):
+        fn = _build_provider_routing_fn()
+        result = fn("Novita/FP8", False)
+        assert result == {"order": ["novita/fp8"]}
+
+    def test_slash_variant_with_only_true(self):
+        fn = _build_provider_routing_fn()
+        result = fn("novita/fp8", True)
+        assert result == {"order": ["novita/fp8"], "allow_fallbacks": False}
+
+    def test_rejects_display_name_with_pipe(self):
+        fn = _build_provider_routing_fn()
+        assert fn("DeepSeek | model", False) is None
+
+    def test_rejects_leading_slash(self):
+        fn = _build_provider_routing_fn()
+        assert fn("/novita", False) is None
+
+    def test_rejects_trailing_slash(self):
+        fn = _build_provider_routing_fn()
+        assert fn("novita/", False) is None
+
 
 # ===================================================================
 # ACCEPTANCE: ProcessProjectRequest new fields

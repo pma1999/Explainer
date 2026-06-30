@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, AsyncGenerator, Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -219,7 +219,7 @@ def _build_openrouter_provider_routing(provider: str | None, only: bool) -> dict
     slug = provider.strip().lower()
     if not slug:
         return None
-    if not re.fullmatch(r"[\w.-]+", slug):
+    if not re.fullmatch(r"[\w.-]+(?:/[\w.-]+)*", slug):
         return None
     if len(slug) > 64:
         return None
@@ -4131,8 +4131,53 @@ async def _fetch_openrouter_models() -> tuple[list[dict], bool]:
     )
 
 
-async def _fetch_openrouter_endpoints(model: str) -> tuple[list[str], bool]:
-    """Returns (providers_list, stale_bool) or raises."""
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Best-effort float conversion; falls back to default on absent/malformed values."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_openrouter_endpoints(endpoints: list) -> list[dict]:
+    """Project upstream endpoint rows into the rich, tag-gated metadata shape.
+
+    Endpoint rows without a non-empty `tag` (the canonical routing key) are
+    skipped, since they offer no safe provider routing slug.
+    """
+    normalized: list[dict] = []
+    for ep in endpoints:
+        if not isinstance(ep, dict):
+            continue
+        tag = (ep.get("tag") or "").strip()
+        if not tag:
+            continue
+        pricing = ep.get("pricing") or {}
+        normalized.append(
+            {
+                "tag": tag,
+                "provider_name": ep.get("provider_name") or tag,
+                "name": ep.get("name") or tag,
+                "context_length": ep.get("context_length"),
+                "max_completion_tokens": ep.get("max_completion_tokens"),
+                "max_prompt_tokens": ep.get("max_prompt_tokens"),
+                "pricing": pricing,
+                "prompt_price": _safe_float(pricing.get("prompt", 0)),
+                "completion_price": _safe_float(pricing.get("completion", 0)),
+                "supported_parameters": ep.get("supported_parameters") or [],
+                "supports_implicit_caching": ep.get("supports_implicit_caching"),
+                "status": ep.get("status"),
+            }
+        )
+    return normalized
+
+
+async def _fetch_openrouter_endpoints(model: str) -> tuple[dict, bool]:
+    """Returns (endpoints_payload, stale_bool) or raises.
+
+    payload shape: {"model_id", "model_name", "endpoints": [...]} where each
+    endpoint row carries the rich provider-aware metadata keyed by `tag`.
+    """
     # 1. Try cache first (non-stale)
     cached, _ = _cache_get(("endpoints", model))
     if cached is not None:
@@ -4142,22 +4187,20 @@ async def _fetch_openrouter_endpoints(model: str) -> tuple[list[str], bool]:
     try:
         resp = await asyncio.to_thread(
             lambda: requests.get(
-                f"https://openrouter.ai/api/v1/models/{model}/endpoints",
+                f"https://openrouter.ai/api/v1/models/{quote(model, safe='/')}/endpoints",
                 headers={"User-Agent": "Explainer/1.0"},
                 timeout=15,
             )
         )
         if resp.status_code == 200:
-            payload = resp.json()
-            endpoints = payload.get("data", {}).get("endpoints", [])
-            providers = [
-                ep.get("id") or ep.get("slug") or ep.get("name") or ""
-                for ep in endpoints
-                if isinstance(ep, dict)
-                and (ep.get("id") or ep.get("slug") or ep.get("name"))
-            ]
-            _cache_set(("endpoints", model), providers)
-            return providers, False
+            data = resp.json().get("data", {})
+            payload = {
+                "model_id": data.get("id", model),
+                "model_name": data.get("name", model),
+                "endpoints": _normalize_openrouter_endpoints(data.get("endpoints", [])),
+            }
+            _cache_set(("endpoints", model), payload)
+            return payload, False
     except Exception:
         pass
 
@@ -4203,11 +4246,13 @@ async def get_openrouter_endpoints(
     model: str = Query(..., description="Model ID in 'author/slug' format"),
     user_id: str = Depends(get_current_user_id),
 ):
-    """Return cached or live list of providers/endpoints for a model."""
+    """Return cached or live rich endpoint metadata for a model."""
     validated_model = _validate_model_id(model)
-    providers, stale = await _fetch_openrouter_endpoints(validated_model)
+    payload, stale = await _fetch_openrouter_endpoints(validated_model)
     return {
-        "providers": providers,
+        "model_id": payload["model_id"],
+        "model_name": payload["model_name"],
+        "endpoints": payload["endpoints"],
         "stale": stale,
     }
 

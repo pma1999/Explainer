@@ -607,3 +607,152 @@ class TestGetOpenRouterModels:
         assert model["context_length"] == 128000
         assert isinstance(model["prompt_price"], float)
         assert isinstance(model["completion_price"], float)
+
+
+class TestGetOpenRouterEndpoints:
+    """GET /api/openrouter/models/endpoints — rich, tag-gated endpoint metadata."""
+
+    _ENDPOINT_PAYLOAD = {
+        "data": {
+            "id": "qwen/qwen3.6-plus",
+            "name": "Qwen 3.6 Plus",
+            "endpoints": [
+                {
+                    "tag": "novita/fp8",
+                    "provider_name": "Novita",
+                    "name": "Novita | qwen/qwen3.6-plus",
+                    "context_length": 128000,
+                    "max_completion_tokens": 16384,
+                    "max_prompt_tokens": 120000,
+                    "pricing": {"prompt": "0.0000005", "completion": "0.0000015"},
+                    "supported_parameters": ["tools", "reasoning"],
+                    "supports_implicit_caching": True,
+                    "status": 0,
+                },
+                {
+                    # no tag -> must be skipped
+                    "provider_name": "Mystery Provider",
+                    "name": "Mystery | qwen/qwen3.6-plus",
+                    "context_length": 64000,
+                    "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                },
+            ],
+        }
+    }
+
+    def _make_mock_resp(self, payload: dict) -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = payload
+        return mock_resp
+
+    def test_returns_rich_endpoints_and_skips_untagged(self, auth_client):
+        mock_resp = self._make_mock_resp(self._ENDPOINT_PAYLOAD)
+        with patch.dict("main._cache", {}, clear=True):
+            with patch("main.requests.get", return_value=mock_resp) as mock_get:
+                r = auth_client.get(
+                    "/api/openrouter/models/endpoints?model=qwen/qwen3.6-plus",
+                    headers={"Authorization": "Bearer fake-token"},
+                )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["model_id"] == "qwen/qwen3.6-plus"
+        assert data["model_name"] == "Qwen 3.6 Plus"
+        assert data["stale"] is False
+
+        endpoints = data["endpoints"]
+        assert len(endpoints) == 1, "untagged endpoint must be skipped"
+        ep = endpoints[0]
+        assert ep["tag"] == "novita/fp8"
+        assert ep["provider_name"] == "Novita"
+        assert ep["name"] == "Novita | qwen/qwen3.6-plus"
+        assert ep["context_length"] == 128000
+        assert ep["max_completion_tokens"] == 16384
+        assert ep["max_prompt_tokens"] == 120000
+        assert ep["pricing"] == {"prompt": "0.0000005", "completion": "0.0000015"}
+        assert ep["prompt_price"] == 0.0000005
+        assert ep["completion_price"] == 0.0000015
+        assert isinstance(ep["prompt_price"], float)
+        assert isinstance(ep["completion_price"], float)
+        assert ep["supported_parameters"] == ["tools", "reasoning"]
+        assert ep["supports_implicit_caching"] is True
+        assert ep["status"] == 0
+
+        # outbound URL must target the per-model endpoints path
+        called_url = mock_get.call_args.args[0]
+        assert called_url.endswith("/models/qwen/qwen3.6-plus/endpoints")
+
+    def test_stale_cache_fallback_returns_rich_shape(self, auth_client):
+        import main as m
+
+        rich_payload = {
+            "model_id": "qwen/qwen3.6-plus",
+            "model_name": "Qwen 3.6 Plus",
+            "endpoints": [
+                {
+                    "tag": "novita/fp8",
+                    "provider_name": "Novita",
+                    "name": "Novita | qwen/qwen3.6-plus",
+                    "context_length": 128000,
+                    "max_completion_tokens": 16384,
+                    "max_prompt_tokens": 120000,
+                    "pricing": {"prompt": "0.0000005", "completion": "0.0000015"},
+                    "prompt_price": 0.0000005,
+                    "completion_price": 0.0000015,
+                    "supported_parameters": ["tools"],
+                    "supports_implicit_caching": True,
+                    "status": 0,
+                }
+            ],
+        }
+        # pre-seed an expired cache entry so the live fetch must fall back to it
+        expired_ts = m.time.monotonic() - m.CACHE_TTL - 1
+        stale_cache = {("endpoints", "qwen/qwen3.6-plus"): (rich_payload, expired_ts)}
+
+        failed_resp = MagicMock()
+        failed_resp.status_code = 500
+
+        with patch.dict("main._cache", stale_cache, clear=True):
+            with patch("main.requests.get", return_value=failed_resp):
+                r = auth_client.get(
+                    "/api/openrouter/models/endpoints?model=qwen/qwen3.6-plus",
+                    headers={"Authorization": "Bearer fake-token"},
+                )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["stale"] is True
+        assert data["model_id"] == "qwen/qwen3.6-plus"
+        assert data["model_name"] == "Qwen 3.6 Plus"
+        assert len(data["endpoints"]) == 1
+        assert data["endpoints"][0]["tag"] == "novita/fp8"
+        assert data["endpoints"][0]["prompt_price"] == 0.0000005
+
+    def test_malformed_pricing_does_not_crash(self, auth_client):
+        payload = {
+            "data": {
+                "id": "org/slug",
+                "name": "Org Slug",
+                "endpoints": [
+                    {
+                        "tag": "prov",
+                        "provider_name": "Prov",
+                        "name": "Prov | org/slug",
+                        "pricing": {"prompt": "not-a-number", "completion": None},
+                    }
+                ],
+            }
+        }
+        mock_resp = self._make_mock_resp(payload)
+        with patch.dict("main._cache", {}, clear=True):
+            with patch("main.requests.get", return_value=mock_resp):
+                r = auth_client.get(
+                    "/api/openrouter/models/endpoints?model=org/slug",
+                    headers={"Authorization": "Bearer fake-token"},
+                )
+
+        assert r.status_code == 200
+        ep = r.json()["endpoints"][0]
+        assert ep["prompt_price"] == 0.0
+        assert ep["completion_price"] == 0.0
