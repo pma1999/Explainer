@@ -4096,6 +4096,7 @@ async def _fetch_openrouter_models() -> tuple[list[dict], bool]:
             lambda: requests.get(
                 "https://openrouter.ai/api/v1/models",
                 headers={"User-Agent": "Explainer/1.0"},
+                params={"output_modalities": "text"},
                 timeout=15,
             )
         )
@@ -4111,6 +4112,7 @@ async def _fetch_openrouter_models() -> tuple[list[dict], bool]:
                 }
                 for m in data
                 if m.get("id")
+                and "text" in (m.get("architecture", {}).get("output_modalities") or [])
             ]
             _cache_set(("models",), normalized)
             return normalized, False

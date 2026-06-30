@@ -242,6 +242,7 @@
                   <span class="provider-card-title">Gemini</span>
                   <span class="provider-card-sub">Gemini 3.1 Flash Lite</span>
                 </span>
+                <span class="provider-card-status" id="provider-card-gemini-status" aria-hidden="false"></span>
               </label>
               <label class="provider-card" id="provider-card-openrouter" for="explainer-provider-openrouter">
                 <input type="radio" name="explainer-provider" id="explainer-provider-openrouter" value="openrouter" />
@@ -249,6 +250,7 @@
                   <span class="provider-card-title">OpenRouter</span>
                   <span class="provider-card-sub">MiMo V2.5 Pro, MiMo V2.5 o DeepSeek V4 Pro</span>
                 </span>
+                <span class="provider-card-status" id="provider-card-openrouter-status" aria-hidden="false"></span>
               </label>
               <label class="provider-card" id="provider-card-deepseek" for="explainer-provider-deepseek">
                 <input type="radio" name="explainer-provider" id="explainer-provider-deepseek" value="deepseek" />
@@ -256,6 +258,7 @@
                   <span class="provider-card-title">DeepSeek directo</span>
                   <span class="provider-card-sub">DeepSeek V4 Pro o V4 Flash, sin OpenRouter</span>
                 </span>
+                <span class="provider-card-status" id="provider-card-deepseek-status" aria-hidden="false"></span>
               </label>
             </div>
             <div class="openrouter-model-panel hidden" id="openrouter-model-panel">
@@ -282,15 +285,15 @@
                     <span class="provider-card-sub">Razonamiento avanzado. Proveedor: deepseek.</span>
                   </span>
                 </label>
-                <label class="provider-card" id="openrouter-model-card-custom">
+                <label class="provider-card" id="openrouter-model-card-custom" for="openrouter-model-custom">
                   <input type="radio" name="openrouter-model" id="openrouter-model-custom" value="__custom__" autocomplete="off">
-                  <div class="provider-card-content">
+                  <span class="provider-card-main">
                     <span class="provider-card-title">Personalizado</span>
-                    <span class="provider-card-desc">Elige cualquier modelo de OpenRouter</span>
-                  </div>
+                    <span class="provider-card-sub">Elige cualquier modelo de OpenRouter</span>
+                  </span>
                 </label>
               </div>
-              <div class="hidden" id="openrouter-custom-panel" style="margin-top:12px;">
+              <div class="hidden openrouter-custom-panel" id="openrouter-custom-panel">
                 <!-- Model combobox -->
                 <div class="form-group">
                   <label class="form-label" for="openrouter-custom-model-combobox">Modelo</label>
@@ -298,28 +301,29 @@
                   <p class="input-error hidden" id="openrouter-custom-model-error">Selecciona o escribe un modelo</p>
                 </div>
 
+                <!-- Chosen model summary -->
+                <div class="openrouter-custom-model-summary hidden" id="openrouter-custom-model-summary"></div>
+
                 <!-- Provider control — combobox with auto-populated endpoints -->
-                <div class="form-group" style="margin-top:10px;">
+                <div class="form-group">
                   <label class="form-label" for="openrouter-provider-combobox">Proveedor preferido (opcional)</label>
                   <div id="openrouter-provider-combobox"></div>
                   <p class="input-hint" id="openrouter-provider-hint">Selecciona un modelo para ver sus proveedores, o escríbelo manualmente</p>
-                  <p class="input-error hidden" id="openrouter-provider-fetch-error" style="margin-top:6px;"></p>
+                  <p class="input-error hidden" id="openrouter-provider-fetch-error"></p>
                 </div>
 
                 <!-- Only-this toggle -->
-                <label class="checkbox-label" style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;">
-                  <input type="checkbox" id="openrouter-provider-only" style="accent-color:var(--amber);">
-                  <span style="font-family:var(--font-ui);font-size:13px;color:var(--text-secondary);">
-                    Usar solo este proveedor (sin alternativas)
-                  </span>
+                <label class="provider-only-toggle" for="openrouter-provider-only">
+                  <input type="checkbox" id="openrouter-provider-only">
+                  <span>Usar solo este proveedor (sin alternativas)</span>
                 </label>
 
                 <!-- Loading -->
-                <p class="input-hint hidden" id="openrouter-custom-loading" style="margin-top:8px;">
+                <p class="input-hint hidden" id="openrouter-custom-loading">
                   Cargando modelos…
                 </p>
                 <!-- Error display -->
-                <p class="input-error hidden" id="openrouter-custom-fetch-error" style="margin-top:8px;"></p>
+                <p class="input-error hidden" id="openrouter-custom-fetch-error"></p>
               </div>
             </div>
             <div class="openrouter-model-panel hidden" id="deepseek-model-panel">
@@ -341,10 +345,10 @@
                 </label>
               </div>
             </div>
-            <p class="input-hint" id="explainer-provider-hint">
+            <p class="input-hint" id="explainer-provider-hint" aria-live="polite">
               La explicación usará Gemini. Segmentación, recorrido, recursos y formateo siguen funcionando con Gemini.
             </p>
-            <p class="input-error hidden" id="explainer-provider-error"></p>
+            <p class="input-error hidden" id="explainer-provider-error" aria-live="assertive"></p>
           </div>
         </div>
 

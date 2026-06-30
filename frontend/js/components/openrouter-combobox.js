@@ -40,7 +40,6 @@ export function createCombobox(mountEl, options) {
 
   const wrapper = document.createElement("div");
   wrapper.className = "combobox-wrapper";
-  wrapper.setAttribute("role", "combobox");
   wrapper.setAttribute("aria-expanded", "false");
   wrapper.setAttribute("aria-controls", listboxId);
 

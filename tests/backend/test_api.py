@@ -523,3 +523,87 @@ class TestMistralApiKeys:
                     )
 
         assert response.status_code == 200
+
+
+class TestGetOpenRouterModels:
+    """GET /api/openrouter/models — text-only output filter and metadata pass-through."""
+
+    def _make_mock_resp(self, data: list) -> MagicMock:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": data}
+        return mock_resp
+
+    def test_filters_non_text_output_models(self, auth_client):
+        """Only models with 'text' in architecture.output_modalities are returned."""
+        mixed_data = [
+            {
+                "id": "author/text-model",
+                "name": "Text Model",
+                "context_length": 128000,
+                "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                "architecture": {"output_modalities": ["text"]},
+            },
+            {
+                "id": "author/image-model",
+                "name": "Image Model",
+                "context_length": 32000,
+                "pricing": {"prompt": "0.000003", "completion": "0.000004"},
+                "architecture": {"output_modalities": ["image"]},
+            },
+            {
+                "id": "author/no-arch-model",
+                "name": "No Architecture Model",
+                "context_length": 64000,
+                "pricing": {"prompt": "0.000005", "completion": "0.000006"},
+            },
+        ]
+        mock_resp = self._make_mock_resp(mixed_data)
+
+        with patch.dict("main._cache", {}, clear=True):
+            with patch("main.requests.get", return_value=mock_resp):
+                r = auth_client.get(
+                    "/api/openrouter/models",
+                    headers={"Authorization": "Bearer fake-token"},
+                )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert "models" in data
+        assert "stale" in data
+        assert "fetched_at" in data
+        model_ids = [m["id"] for m in data["models"]]
+        assert "author/text-model" in model_ids, "text-output model must be included"
+        assert "author/image-model" not in model_ids, "image-output model must be excluded"
+        assert "author/no-arch-model" not in model_ids, "model without architecture must be excluded"
+
+    def test_response_model_shape_is_unchanged(self, auth_client):
+        """Returned model dicts keep exactly: id, name, context_length, prompt_price, completion_price."""
+        single_text_model = [
+            {
+                "id": "author/text-model",
+                "name": "Text Model",
+                "context_length": 128000,
+                "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                "architecture": {"output_modalities": ["text"]},
+            },
+        ]
+        mock_resp = self._make_mock_resp(single_text_model)
+
+        with patch.dict("main._cache", {}, clear=True):
+            with patch("main.requests.get", return_value=mock_resp):
+                r = auth_client.get(
+                    "/api/openrouter/models",
+                    headers={"Authorization": "Bearer fake-token"},
+                )
+
+        assert r.status_code == 200
+        models = r.json()["models"]
+        assert len(models) == 1
+        model = models[0]
+        assert set(model.keys()) == {"id", "name", "context_length", "prompt_price", "completion_price"}
+        assert model["id"] == "author/text-model"
+        assert model["name"] == "Text Model"
+        assert model["context_length"] == 128000
+        assert isinstance(model["prompt_price"], float)
+        assert isinstance(model["completion_price"], float)

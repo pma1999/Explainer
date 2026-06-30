@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// jsdom doesn't implement scrollIntoView; stub it globally to suppress unhandled errors
+// from the combobox calling el.scrollIntoView({ block: 'nearest' }).
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = vi.fn();
+}
+
 const state = {
   hasApiKey: true,
   hasOpenRouterKey: false,
@@ -81,6 +87,7 @@ function renderLandingDom() {
       <label class="checkbox-label">
         <input type="checkbox" id="openrouter-provider-only" />
       </label>
+      <div class="openrouter-custom-model-summary hidden" id="openrouter-custom-model-summary"></div>
       <p class="input-hint hidden" id="openrouter-custom-loading"></p>
       <p class="input-error hidden" id="openrouter-custom-fetch-error"></p>
     </div>
@@ -95,9 +102,9 @@ function renderLandingDom() {
     <div id="panel-pdf"></div>
     <div id="panel-youtube"></div>
     <div id="panel-web"></div>
-    <div id="provider-card-gemini"></div>
-    <div id="provider-card-openrouter"></div>
-    <div id="provider-card-deepseek"></div>
+    <div id="provider-card-gemini"><span id="provider-card-gemini-status"></span></div>
+    <div id="provider-card-openrouter"><span id="provider-card-openrouter-status"></span></div>
+    <div id="provider-card-deepseek"><span id="provider-card-deepseek-status"></span></div>
     <div id="openrouter-model-card-pro"></div>
     <div id="openrouter-model-card-standard"></div>
     <div id="openrouter-model-card-deepseek"></div>
@@ -124,6 +131,7 @@ async function flushAsyncWork() {
 describe('landing.js project creation flow', () => {
   beforeEach(() => {
     vi.resetModules();
+    localStorage.clear();
     api.mockReset();
     invalidateProjectsCache.mockReset();
     loadBackupAsync.mockReset();
@@ -424,6 +432,413 @@ describe('landing.js project creation flow', () => {
       const fetchError = document.getElementById('openrouter-custom-fetch-error');
       expect(fetchError.classList.contains('hidden')).toBe(false);
       expect(fetchError.textContent).toMatch(/no se pudieron|cargar|modelo|escribe/i);
+    });
+
+    it('enriches combobox items with a non-empty meta badge (context + price)', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      // Provide a rich model object with context_length and prompt_price
+      api.mockResolvedValueOnce({
+        models: [
+          { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0.0000005, completion_price: 0.0000015 },
+        ],
+      });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const customRadio = document.getElementById('openrouter-model-custom');
+      customRadio.checked = true;
+      customRadio.dispatchEvent(new Event('change', { bubbles: true }));
+      await flushAsyncWork();
+
+      // Open the combobox to trigger render() (options are rendered lazily on open)
+      const comboboxInput = document.querySelector('#openrouter-custom-model-combobox input');
+      expect(comboboxInput).not.toBeNull();
+      comboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      // The combobox should now have rendered list items with meta spans
+      const metaSpan = document.querySelector('.combobox-option-meta');
+      expect(metaSpan).not.toBeNull();
+      // Should contain context length badge
+      expect(metaSpan.textContent).toMatch(/128K ctx/);
+      // Should contain price badge (0.0000005 * 1e6 = 0.5 → $0.5/1M)
+      expect(metaSpan.textContent).toMatch(/\$0\.5\/1M/);
+    });
+
+    it('populates and shows #openrouter-custom-model-summary when a model is selected', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api
+        .mockResolvedValueOnce({
+          models: [
+            { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0.0000005, completion_price: 0.0000015 },
+          ],
+        })
+        // fetchEndpointsForModel call
+        .mockResolvedValueOnce({ providers: [] });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const customRadio = document.getElementById('openrouter-model-custom');
+      customRadio.checked = true;
+      customRadio.dispatchEvent(new Event('change', { bubbles: true }));
+      await flushAsyncWork();
+
+      // Summary should be hidden before any selection
+      const summaryEl = document.getElementById('openrouter-custom-model-summary');
+      expect(summaryEl.classList.contains('hidden')).toBe(true);
+
+      // Open the combobox to trigger render()
+      const comboboxInput = document.querySelector('#openrouter-custom-model-combobox input');
+      comboboxInput.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      // Now trigger the combobox onSelect by clicking the first option in the list
+      const firstOption = document.querySelector('.combobox-option');
+      expect(firstOption).not.toBeNull();
+      firstOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await flushAsyncWork();
+
+      // Summary should now be visible with model details
+      expect(summaryEl.classList.contains('hidden')).toBe(false);
+      expect(summaryEl.textContent).toMatch(/Qwen 3\.6 Plus/);
+      expect(summaryEl.textContent).toMatch(/qwen\/qwen3\.6-plus/);
+      expect(summaryEl.textContent).toMatch(/128K ctx/);
+    });
+
+    it('teardown guard: switching to preset while models fetch is in flight aborts combobox creation', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+
+      // Use a deferred promise to simulate a slow fetch
+      let resolveModels;
+      const slowFetch = new Promise((resolve) => { resolveModels = resolve; });
+      api.mockReturnValueOnce(slowFetch);
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Enter custom mode (kicks off the slow fetch)
+      const customRadio = document.getElementById('openrouter-model-custom');
+      customRadio.checked = true;
+      customRadio.dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Before the fetch resolves, switch back to preset
+      document.getElementById('openrouter-model-pro').click();
+      document.getElementById('openrouter-model-pro').dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Now resolve the fetch with model data
+      resolveModels({ models: [{ id: 'qwen/qwen3.6-plus', name: 'Qwen', context_length: 128000, prompt_price: 0 }] });
+      await flushAsyncWork();
+
+      // The custom panel should be hidden (preset mode is active)
+      const customPanel = document.getElementById('openrouter-custom-panel');
+      expect(customPanel.classList.contains('hidden')).toBe(true);
+      // No combobox option should have been rendered into the mount
+      const comboboxOption = document.querySelector('.combobox-option');
+      expect(comboboxOption).toBeNull();
+    });
+  });
+
+  describe('provider API key status indicators', () => {
+    it('shows needs-key indicator on OpenRouter card when hasOpenRouterKey is false', async () => {
+      state.hasOpenRouterKey = false;
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      const openRouterCard = document.getElementById('provider-card-openrouter');
+      const statusSlot = document.getElementById('provider-card-openrouter-status');
+
+      expect(openRouterCard.classList.contains('needs-key')).toBe(true);
+      expect(statusSlot.textContent).toMatch(/falta.*ajustes/i);
+    });
+
+    it('clears needs-key indicator on OpenRouter card when hasOpenRouterKey is true', async () => {
+      state.hasOpenRouterKey = true;
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      const openRouterCard = document.getElementById('provider-card-openrouter');
+      const statusSlot = document.getElementById('provider-card-openrouter-status');
+
+      expect(openRouterCard.classList.contains('needs-key')).toBe(false);
+      expect(statusSlot.textContent).toBe('');
+    });
+
+    it('shows needs-key indicator on Gemini card when hasApiKey is false', async () => {
+      state.hasApiKey = false;
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      const geminiCard = document.getElementById('provider-card-gemini');
+      const statusSlot = document.getElementById('provider-card-gemini-status');
+
+      expect(geminiCard.classList.contains('needs-key')).toBe(true);
+      expect(statusSlot.textContent).toMatch(/falta.*ajustes/i);
+    });
+
+    it('shows needs-key indicator on DeepSeek card when hasDeepSeekKey is false', async () => {
+      state.hasDeepSeekKey = false;
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      const deepSeekCard = document.getElementById('provider-card-deepseek');
+      const statusSlot = document.getElementById('provider-card-deepseek-status');
+
+      expect(deepSeekCard.classList.contains('needs-key')).toBe(true);
+      expect(statusSlot.textContent).toMatch(/falta.*ajustes/i);
+    });
+
+    it('clears all needs-key indicators when all required keys are present', async () => {
+      state.hasApiKey = true;
+      state.hasOpenRouterKey = true;
+      state.hasDeepSeekKey = true;
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('provider-card-gemini').classList.contains('needs-key')).toBe(false);
+      expect(document.getElementById('provider-card-openrouter').classList.contains('needs-key')).toBe(false);
+      expect(document.getElementById('provider-card-deepseek').classList.contains('needs-key')).toBe(false);
+      expect(document.getElementById('provider-card-gemini-status').textContent).toBe('');
+      expect(document.getElementById('provider-card-openrouter-status').textContent).toBe('');
+      expect(document.getElementById('provider-card-deepseek-status').textContent).toBe('');
+    });
+  });
+
+  describe('localStorage persistence (T6)', () => {
+    const SELECTOR_KEY = 'explainer.modelSelector.v1';
+
+    it('selecting a provider persists it to localStorage', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved).not.toBeNull();
+      expect(saved.explainerProvider).toBe('openrouter');
+    });
+
+    it('selecting a preset openrouter model persists it to localStorage', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      const { initLanding, OPENROUTER_MODEL_MIMO } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-openrouter').click();
+      document.getElementById('explainer-provider-openrouter').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('openrouter-model-standard').checked = true;
+      document.getElementById('openrouter-model-standard').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.explainerProvider).toBe('openrouter');
+      expect(saved.openrouterMode).toBe('preset');
+      expect(saved.openrouterModel).toBe(OPENROUTER_MODEL_MIMO);
+    });
+
+    it('selecting a deepseek model persists it to localStorage', async () => {
+      state.hasDeepSeekKey = true;
+      state.hasTavilyKey = true;
+      const { initLanding, DEEPSEEK_MODEL_V4_FLASH } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-deepseek').click();
+      document.getElementById('explainer-provider-deepseek').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('deepseek-model-flash').checked = true;
+      document.getElementById('deepseek-model-flash').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.explainerProvider).toBe('deepseek');
+      expect(saved.deepseekModel).toBe(DEEPSEEK_MODEL_V4_FLASH);
+    });
+
+    it('restores a saved gemini selection on initLanding re-entry', async () => {
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'gemini',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-gemini').checked).toBe(true);
+      expect(document.getElementById('provider-card-gemini').classList.contains('selected')).toBe(true);
+    });
+
+    it('restores a saved preset openrouter selection on initLanding re-entry', async () => {
+      state.hasOpenRouterKey = true;
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding, OPENROUTER_MODEL_MIMO } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-openrouter').checked).toBe(true);
+      expect(document.getElementById('openrouter-model-standard').checked).toBe(true);
+      expect(document.getElementById('openrouter-model-card-standard').classList.contains('selected')).toBe(true);
+    });
+
+    it('restores a saved deepseek selection on initLanding re-entry', async () => {
+      state.hasDeepSeekKey = true;
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'deepseek',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-flash',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-deepseek').checked).toBe(true);
+      expect(document.getElementById('deepseek-model-flash').checked).toBe(true);
+    });
+
+    it('falls back to gemini when the saved provider requires a missing key', async () => {
+      // state.hasOpenRouterKey = false (default in beforeEach)
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      // openrouter key is missing → must restore as gemini
+      expect(document.getElementById('explainer-provider-gemini').checked).toBe(true);
+      expect(document.getElementById('provider-card-gemini').classList.contains('selected')).toBe(true);
+    });
+
+    it('falls back to gemini when the saved deepseek provider is missing key', async () => {
+      // state.hasDeepSeekKey = false (default in beforeEach)
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'deepseek',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-gemini').checked).toBe(true);
+    });
+
+    it('restores custom openrouter mode — builds combobox and sets the saved model', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+      api.mockResolvedValueOnce({
+        models: [
+          { id: 'qwen/qwen3.6-plus', name: 'Qwen 3.6 Plus', context_length: 128000, prompt_price: 0, completion_price: 0 },
+        ],
+      });
+      // Second call for fetchEndpointsForModel
+      api.mockResolvedValueOnce({ providers: [] });
+
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'custom',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: 'qwen/qwen3.6-plus',
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+      await flushAsyncWork();
+
+      // Custom panel must be visible
+      const customPanel = document.getElementById('openrouter-custom-panel');
+      expect(customPanel.classList.contains('hidden')).toBe(false);
+
+      // The model combobox must exist and have a value (label or id of saved model)
+      const comboboxInput = document.querySelector('#openrouter-custom-model-combobox input');
+      expect(comboboxInput).not.toBeNull();
+      expect(comboboxInput.value).not.toBe('');
+      // Should show the model name from the loaded list
+      expect(comboboxInput.value).toContain('Qwen');
+
+      // models API must have been called once (for the load)
+      expect(api).toHaveBeenCalledWith('/api/openrouter/models');
+    });
+
+    it('teardown-race guard: switching away from custom before models load aborts restore', async () => {
+      state.hasOpenRouterKey = true;
+      state.hasMistralKey = true;
+
+      let resolveModels;
+      const slowFetch = new Promise((resolve) => { resolveModels = resolve; });
+      api.mockReturnValueOnce(slowFetch);
+
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'openrouter',
+        openrouterMode: 'custom',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: 'qwen/qwen3.6-plus',
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      // Before models arrive, switch to a preset — this changes currentOpenRouterMode
+      document.getElementById('openrouter-model-pro').click();
+      document.getElementById('openrouter-model-pro').dispatchEvent(new Event('change', { bubbles: true }));
+
+      // Now resolve models
+      resolveModels({ models: [{ id: 'qwen/qwen3.6-plus', name: 'Qwen', context_length: 128000, prompt_price: 0 }] });
+      await flushAsyncWork();
+
+      // Custom panel must remain hidden (preset is active)
+      const customPanel = document.getElementById('openrouter-custom-panel');
+      expect(customPanel.classList.contains('hidden')).toBe(true);
     });
   });
 });

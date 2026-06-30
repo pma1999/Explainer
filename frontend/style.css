@@ -664,26 +664,43 @@ body {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, opacity 0.2s;
+  /* transitions live in the prefers-reduced-motion block below */
 }
 
-.provider-card:hover {
+.provider-card:hover:not(.disabled):not(.is-loading) {
   border-color: var(--border-light);
-  transform: translateY(-1px);
+  background: var(--bg-hover);
+  /* transform lives in the prefers-reduced-motion block below */
 }
 
 .provider-card.selected {
   border-color: var(--amber);
-  box-shadow: 0 0 0 3px var(--amber-dim);
-  background: linear-gradient(180deg, rgba(250, 204, 21, 0.08), rgba(250, 204, 21, 0.02));
+  background: var(--amber-dim);
+  box-shadow: 0 0 0 2px var(--amber-border);
 }
 
 .provider-card.disabled {
-  opacity: 0.45;
+  opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
-  transform: none;
-  filter: grayscale(0.3);
+  filter: grayscale(0.25);
+}
+
+/* ── API key status indicator ── */
+.provider-card-status {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.provider-card.needs-key {
+  border-color: var(--amber-border);
+}
+
+.provider-card.needs-key .provider-card-status {
+  color: var(--amber);
 }
 
 .provider-card input {
@@ -714,11 +731,13 @@ body {
 }
 
 .openrouter-model-panel {
-  margin-top: 12px;
-  padding: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  /* 3px left accent signals nesting; overrides the shorthand left border */
   border: 1px solid var(--border);
+  border-left: 3px solid var(--amber-border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-surface);
 }
 
 .openrouter-model-panel .form-label {
@@ -726,7 +745,112 @@ body {
 }
 
 .openrouter-model-grid .provider-card {
-  min-height: 82px;
+  min-height: 72px;
+}
+
+/* ── Focus ring: radio is visually hidden, style the card via :has ── */
+.provider-card:has(input:focus-visible) {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--amber-dim);
+}
+
+/* ── Motion-safe transitions and lift ── */
+@media (prefers-reduced-motion: no-preference) {
+  .provider-card {
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease,
+      background 0.2s ease,
+      outline-color 0.1s ease,
+      transform 0.15s ease;
+  }
+  .provider-card:hover:not(.disabled):not(.is-loading) {
+    transform: translateY(-1px);
+  }
+}
+
+/* ── Loading affordance ── */
+.provider-card.is-loading {
+  cursor: wait;
+  pointer-events: none;
+  border-color: var(--amber-border);
+  background: var(--amber-dim);
+}
+
+@keyframes card-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .provider-card.is-loading {
+    animation: card-pulse 1.4s ease-in-out infinite;
+  }
+}
+
+/* Provider-only toggle — replaces inline styles on checkbox label */
+.provider-only-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.provider-only-toggle input[type="checkbox"] {
+  accent-color: var(--amber);
+}
+.provider-only-toggle span {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Custom panel — third-level inset panel (deepest surface, compact) */
+.openrouter-custom-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+}
+.openrouter-custom-panel .form-group + .form-group {
+  margin-top: 10px;
+}
+.openrouter-custom-panel .form-group:first-child {
+  margin-top: 0;
+}
+#openrouter-provider-fetch-error {
+  margin-top: 6px;
+}
+#openrouter-custom-loading,
+#openrouter-custom-fetch-error {
+  margin-top: 8px;
+}
+
+/* ── Loading spinner for custom panel ── */
+#openrouter-custom-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+#openrouter-custom-loading::before {
+  content: "";
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--amber-border);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+}
+@keyframes spin-loader {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  #openrouter-custom-loading::before {
+    animation: spin-loader 0.8s linear infinite;
+  }
 }
 
 .upload-note {
@@ -2740,6 +2864,22 @@ body {
 @media (max-width: 680px) {
   .provider-grid {
     grid-template-columns: 1fr;
+  }
+
+  /* Sub-panels: tighter padding and thinner accent on narrow viewports */
+  .openrouter-model-panel {
+    border-left-width: 2px;
+    padding: 10px 10px 10px 12px;
+  }
+
+  /* Custom panel: reduce padding, keep content readable */
+  .openrouter-custom-panel {
+    padding: 10px;
+  }
+
+  /* Cap combobox listbox height so it doesn't overflow on small screens */
+  .combobox-listbox {
+    max-height: 200px;
   }
 }
 
@@ -5310,6 +5450,51 @@ body.is-offline .project-card[data-pinned="true"] {
   padding: 20px 14px;
   font-family: var(--font-ui);
   list-style: none;
+}
+
+/* ── Chosen-model summary (custom OpenRouter picker) ── */
+.openrouter-custom-model-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.model-summary-name {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.model-summary-chip {
+  font-family: SFMono-Regular, Consolas, Monaco, 'Liberation Mono', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@media (max-width: 680px) {
+  .openrouter-custom-model-summary {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .model-summary-chip {
+    font-size: 10px;
+    padding: 2px 5px;
+  }
 }
 
 /* ── Personalizado card (custom OpenRouter model) ── */

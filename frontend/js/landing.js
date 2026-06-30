@@ -32,6 +32,8 @@ let _orEndpointsCache = {}; // modelId -> [provider slugs]
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
 let _landingListenersAttached = false;
 
+const SELECTOR_KEY = 'explainer.modelSelector.v1';
+
 export function extractYouTubeVideoId(url) {
   const patterns = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
@@ -100,8 +102,123 @@ function openRouterModelLabel(model) {
   return 'Xiaomi MiMo V2.5 Pro';
 }
 
+/**
+ * Format a per-token USD price as a readable badge string.
+ * Returns 'Gratis' when the price is exactly 0; otherwise '$<N>/1M'
+ * where N = perTokenUsd * 1e6 rendered to 2 significant figures.
+ * @param {number} perTokenUsd
+ * @returns {string}
+ */
+export function formatModelPrice(perTokenUsd) {
+  if (perTokenUsd === 0) return 'Gratis';
+  const perMillion = perTokenUsd * 1e6;
+  // 2 significant figures; parseFloat strips trailing zeros
+  const formatted = parseFloat(perMillion.toPrecision(2)).toString();
+  return `$${formatted}/1M`;
+}
+
+/**
+ * Format a context length in tokens as a readable 'NNK ctx' badge.
+ * Returns '' for falsy input (0 / undefined / null).
+ * @param {number|undefined} n
+ * @returns {string}
+ */
+export function formatContextLength(n) {
+  if (!n) return '';
+  return `${Math.round(n / 1000)}K ctx`;
+}
+
 export function isValidDeepSeekModel(model) {
   return model === DEEPSEEK_MODEL_V4_PRO || model === DEEPSEEK_MODEL_V4_FLASH;
+}
+
+/**
+ * Write current model-selector state to localStorage.
+ * Wrapped in try/catch — storage may throw in private mode or on quota exceeded.
+ */
+export function persistModelSelector() {
+  try {
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: currentExplainerProvider,
+      openrouterMode: currentOpenRouterMode,
+      openrouterModel: currentOpenRouterModel,
+      customOpenrouterModel: currentCustomOpenRouterModel,
+      openrouterProvider: currentOpenRouterProvider,
+      openrouterProviderOnly: currentOpenRouterProviderOnly,
+      deepseekModel: currentDeepSeekModel,
+    }));
+  } catch (_) {
+    // Ignore write failures (private mode, quota exceeded, etc.)
+  }
+}
+
+/**
+ * Read + validate model-selector state from localStorage and apply it to module vars.
+ * Never throws — corrupt / missing data results in a no-op (defaults remain).
+ * Validates every field before applying; falls back to safe defaults when invalid.
+ * Returns `{ pendingCustomModel, pendingProvider }` when a custom-mode async restore
+ * is needed (caller must drive `setOpenRouterModel('__custom__')` + the post-load step),
+ * otherwise returns null.
+ *
+ * @returns {{ pendingCustomModel: string, pendingProvider: string } | null}
+ */
+export function restoreModelSelector() {
+  let saved;
+  try {
+    const raw = localStorage.getItem(SELECTOR_KEY);
+    if (!raw) return null;
+    saved = JSON.parse(raw);
+  } catch (_) {
+    return null; // corrupt / missing JSON — no-op
+  }
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
+
+  // --- explainerProvider ---
+  const validProviders = ['gemini', 'openrouter', 'deepseek'];
+  let provider = validProviders.includes(saved.explainerProvider) ? saved.explainerProvider : 'gemini';
+
+  // Key-availability fallback (primary key only — submit-time validates full set)
+  if (provider === 'openrouter' && !state.hasOpenRouterKey) provider = 'gemini';
+  if (provider === 'deepseek' && !state.hasDeepSeekKey) provider = 'gemini';
+  // Source-type fallback (default source is 'pdf'; re-checked after source switches)
+  if (!isExplainerProviderSupportedForSource(currentSourceType, provider)) provider = 'gemini';
+  currentExplainerProvider = provider;
+
+  // --- deepseekModel ---
+  currentDeepSeekModel = isValidDeepSeekModel(saved.deepseekModel)
+    ? saved.deepseekModel
+    : DEEPSEEK_MODEL_V4_PRO;
+
+  // --- openrouterProviderOnly (coerce to boolean) ---
+  currentOpenRouterProviderOnly = Boolean(saved.openrouterProviderOnly);
+
+  // --- openrouterProvider ---
+  currentOpenRouterProvider = typeof saved.openrouterProvider === 'string'
+    ? saved.openrouterProvider
+    : '';
+
+  // --- openrouterMode + model ---
+  const validModes = ['preset', 'custom'];
+  const mode = validModes.includes(saved.openrouterMode) ? saved.openrouterMode : 'preset';
+
+  if (mode === 'custom'
+      && typeof saved.customOpenrouterModel === 'string'
+      && saved.customOpenrouterModel) {
+    // Signal to initLanding: drive the async custom-mode restore
+    currentOpenRouterMode = 'custom';
+    currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO; // safe fallback while loading
+    currentCustomOpenRouterModel = null; // set after combobox is ready
+    return { pendingCustomModel: saved.customOpenrouterModel, pendingProvider: currentOpenRouterProvider };
+  }
+
+  // Preset or custom-with-no-model → apply preset
+  const orModel = isPresetOpenRouterModel(saved.openrouterModel)
+    ? saved.openrouterModel
+    : OPENROUTER_MODEL_MIMO_PRO;
+  currentOpenRouterMode = 'preset';
+  currentOpenRouterModel = orModel;
+  currentCustomOpenRouterModel = null;
+  return null;
 }
 
 function deepSeekModelLabel(model) {
@@ -235,8 +352,10 @@ export function initLanding() {
   _openrouterProviderCombobox = createCombobox(openRouterProviderCombobox, {
     placeholder: 'Selecciona un modelo primero…',
     items: [],
-    onSelect() {
+    onSelect(value) {
+      currentOpenRouterProvider = value;
       hide(openRouterProviderFetchError);
+      persistModelSelector();
     },
     emptyText: 'No hay proveedores disponibles',
   });
@@ -251,6 +370,21 @@ export function initLanding() {
   function clearProviderError() {
     providerError.textContent = '';
     hide(providerError);
+  }
+
+  function providerNeedsKey(provider) {
+    if (provider === 'gemini') {
+      return state.hasApiKey ? null : 'Falta API key de Gemini — configúrala en Ajustes';
+    }
+    if (provider === 'openrouter') {
+      if (!state.hasOpenRouterKey) return 'Falta API key de OpenRouter — configúrala en Ajustes';
+      if (!state.hasApiKey) return 'Falta API key de Gemini (auxiliar) — configúrala en Ajustes';
+      return null;
+    }
+    if (provider === 'deepseek') {
+      return state.hasDeepSeekKey ? null : 'Falta API key de DeepSeek — configúrala en Ajustes';
+    }
+    return null;
   }
 
   function syncExplainerProviderUI() {
@@ -301,12 +435,26 @@ export function initLanding() {
     $('deepseek-model-card-flash').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH);
 
     providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
+
+    const geminiMsg = providerNeedsKey('gemini');
+    $('provider-card-gemini').classList.toggle('needs-key', geminiMsg !== null);
+    $('provider-card-gemini-status').textContent = geminiMsg || '';
+
+    const openRouterMsg = providerNeedsKey('openrouter');
+    $('provider-card-openrouter').classList.toggle('needs-key', openRouterMsg !== null);
+    $('provider-card-openrouter-status').textContent = openRouterMsg || '';
+
+    const deepSeekMsg = providerNeedsKey('deepseek');
+    $('provider-card-deepseek').classList.toggle('needs-key', deepSeekMsg !== null);
+    $('provider-card-deepseek-status').textContent = deepSeekMsg || '';
+
     clearProviderError();
   }
 
   function setExplainerProvider(provider) {
     currentExplainerProvider = provider;
     syncExplainerProviderUI();
+    persistModelSelector();
   }
 
   function setOpenRouterModel(model) {
@@ -314,23 +462,65 @@ export function initLanding() {
       currentOpenRouterMode = 'custom';
       currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO; // keep a valid fallback
       syncExplainerProviderUI();
-      // Lazily load models and init combobox
-      loadOpenRouterModels().then((models) => {
+      // Hide stale summary while loading a fresh combobox
+      const summaryEl = $('openrouter-custom-model-summary');
+      if (summaryEl) hide(summaryEl);
+      // Loading affordance on the card while the fetch is in flight
+      const customCard = $('openrouter-model-card-custom');
+      if (customCard) customCard.classList.add('is-loading');
+      // Lazily load models and init combobox; return the promise so initLanding can chain off it
+      return loadOpenRouterModels().then((models) => {
+        if (customCard) customCard.classList.remove('is-loading');
+        // Teardown-race guard: bail if user has since left custom mode or mount is gone
+        if (currentOpenRouterMode !== 'custom') return;
+        const mountEl = $('openrouter-custom-model-combobox');
+        if (!mountEl || !document.body.contains(mountEl)) return;
         if (_openrouterCombobox) {
           _openrouterCombobox.destroy();
           _openrouterCombobox = null;
         }
-        const mountEl = $('openrouter-custom-model-combobox');
         _openrouterCombobox = createCombobox(mountEl, {
           placeholder: 'Busca un modelo de OpenRouter…',
           items: models.map((m) => ({
             value: m.id || m.value || m,
             label: m.name || m.label || m,
             sublabel: m.id || m.value || '',
+            meta: [
+              formatContextLength(m.context_length),
+              m.prompt_price !== undefined ? formatModelPrice(m.prompt_price) : '',
+            ].filter(Boolean).join(' · '),
           })),
           onSelect(value) {
             currentCustomOpenRouterModel = value;
             hide(openRouterCustomModelError);
+            // Populate chosen-model summary
+            const chosen = models.find((m) => (m.id || m.value || m) === value);
+            const el = $('openrouter-custom-model-summary');
+            if (el && chosen) {
+              el.innerHTML = '';
+              const nameSpan = document.createElement('span');
+              nameSpan.className = 'model-summary-name';
+              nameSpan.textContent = chosen.name || chosen.label || value;
+              el.appendChild(nameSpan);
+              const idChip = document.createElement('span');
+              idChip.className = 'model-summary-chip';
+              idChip.textContent = chosen.id || value;
+              el.appendChild(idChip);
+              const ctx = formatContextLength(chosen.context_length);
+              if (ctx) {
+                const ctxChip = document.createElement('span');
+                ctxChip.className = 'model-summary-chip';
+                ctxChip.textContent = ctx;
+                el.appendChild(ctxChip);
+              }
+              const priceChip = document.createElement('span');
+              priceChip.className = 'model-summary-chip';
+              const priceIn = formatModelPrice(chosen.prompt_price ?? 0);
+              const priceOut = formatModelPrice(chosen.completion_price ?? 0);
+              priceChip.textContent = `${priceIn} in · ${priceOut} out`;
+              el.appendChild(priceChip);
+              show(el);
+            }
             // Reset and auto-populate provider combobox for this model
             if (_openrouterProviderCombobox) {
               _openrouterProviderCombobox.setValue('');
@@ -338,14 +528,14 @@ export function initLanding() {
             }
             hide(openRouterProviderFetchError);
             fetchEndpointsForModel(value);
+            persistModelSelector();
           },
           getItemLabel(item) {
             return item.label + ' ' + (item.sublabel || '');
           },
           emptyText: 'No se encontraron modelos',
         });
-      });
-      return;
+      }); // return value exits the if-block
     }
     if (!isValidOpenRouterModel(model)) return;
     currentOpenRouterMode = 'preset';
@@ -361,12 +551,14 @@ export function initLanding() {
     }
     hide(openRouterProviderFetchError);
     syncExplainerProviderUI();
+    persistModelSelector();
   }
 
   function setDeepSeekModel(model) {
     if (!isValidDeepSeekModel(model)) return;
     currentDeepSeekModel = model;
     syncExplainerProviderUI();
+    persistModelSelector();
   }
 
   async function loadOpenRouterModels() {
@@ -491,6 +683,7 @@ export function initLanding() {
     });
     openRouterProviderOnlyCheckbox.addEventListener('change', (e) => {
       currentOpenRouterProviderOnly = e.target.checked;
+      persistModelSelector();
     });
 
     function checkReady() {
@@ -564,6 +757,39 @@ export function initLanding() {
     $('btn-go-projects').addEventListener('click', () => {
       if (window.pushRoute) window.pushRoute({ view: 'projects' });
     });
+  }
+
+  // T6: Restore persisted model-selector state, validate, then apply.
+  // For custom mode, drive the async load + combobox setup after models arrive.
+  const _customRestore = restoreModelSelector();
+  if (_customRestore && currentExplainerProvider === 'openrouter') {
+    const { pendingCustomModel, pendingProvider } = _customRestore;
+    const _loadPromise = setOpenRouterModel('__custom__');
+    if (_loadPromise && typeof _loadPromise.then === 'function') {
+      _loadPromise.then(() => {
+        // Teardown-race guard (mirrors T5): bail if user switched mode while models loaded
+        if (currentOpenRouterMode !== 'custom') return;
+        const mountEl = $('openrouter-custom-model-combobox');
+        if (!mountEl || !document.body.contains(mountEl)) return;
+        // Resolve display label from cached models list if available
+        const loadedModel = _orModelsCache &&
+          _orModelsCache.find((m) => (m.id || m.value || m) === pendingCustomModel);
+        const displayVal = (loadedModel && (loadedModel.name || loadedModel.label)) || pendingCustomModel;
+        if (_openrouterCombobox) _openrouterCombobox.setValue(displayVal);
+        currentCustomOpenRouterModel = pendingCustomModel;
+        // Trigger endpoint fetch so provider combobox gets populated
+        fetchEndpointsForModel(pendingCustomModel);
+        // Restore saved provider into provider combobox
+        if (pendingProvider && _openrouterProviderCombobox) {
+          _openrouterProviderCombobox.setValue(pendingProvider);
+        }
+        // Restore provider-only checkbox state
+        if (openRouterProviderOnlyCheckbox) {
+          openRouterProviderOnlyCheckbox.checked = currentOpenRouterProviderOnly;
+        }
+        persistModelSelector();
+      });
+    }
   }
 
   syncExplainerProviderUI();

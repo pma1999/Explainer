@@ -1,7 +1,7 @@
 /**
  * Unit tests for landing.js YouTube helpers.
  */
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   extractYouTubeVideoId,
   isValidYouTubeUrl,
@@ -20,7 +20,39 @@ import {
   DEFAULT_TARGET_LANGUAGE,
   SUPPORTED_TARGET_LANGUAGES,
   isValidTargetLanguage,
+  formatModelPrice,
+  formatContextLength,
 } from '../../frontend/js/landing.js';
+
+// vi.hoisted ensures mockState is initialized before vi.mock factory runs (hoisting order)
+const mockState = vi.hoisted(() => ({
+  hasApiKey: true,
+  hasOpenRouterKey: false,
+  hasMistralKey: false,
+  hasDeepSeekKey: false,
+  hasTavilyKey: false,
+  user: null,
+}));
+
+vi.mock('../../frontend/js/state.js', () => ({ state: mockState }));
+vi.mock('../../frontend/js/dom.js', () => ({
+  $: (id) => document.getElementById(id),
+  show: (el) => el && el.classList && el.classList.remove('hidden'),
+  hide: (el) => el && el.classList && el.classList.add('hidden'),
+  formatBytes: (b) => `${b} B`,
+  toast: vi.fn(),
+}));
+vi.mock('../../frontend/js/api.js', () => ({ api: vi.fn() }));
+vi.mock('../../frontend/js/storage.js', () => ({
+  invalidateProjectsCache: vi.fn(),
+  loadBackupAsync: vi.fn(async () => ({ projects: [] })),
+  mergeProjects: vi.fn((a, b) => [...a, ...b]),
+  syncProjectsToBackup: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock('../../frontend/js/auth.js', () => ({
+  updateApiKeyUI: vi.fn(),
+  showSettings: vi.fn(),
+}));
 
 describe('landing.js', () => {
   describe('extractYouTubeVideoId', () => {
@@ -264,4 +296,303 @@ describe('landing.js', () => {
     });
   });
 
+  describe('formatModelPrice', () => {
+    it('returns Gratis when price is exactly 0', () => {
+      expect(formatModelPrice(0)).toBe('Gratis');
+    });
+
+    it('formats a small per-token price as $/1M with 2 significant figures', () => {
+      // 0.0000005 per token = 0.5 per million
+      expect(formatModelPrice(0.0000005)).toBe('$0.5/1M');
+    });
+
+    it('formats a typical per-token price (e.g. 0.000001) correctly', () => {
+      // 0.000001 per token = 1.0 per million → 2 sig figs = "1" after parseFloat
+      expect(formatModelPrice(0.000001)).toBe('$1/1M');
+    });
+
+    it('formats a larger per-token price (e.g. 0.0000015) correctly', () => {
+      // 0.0000015 per token = 1.5 per million
+      expect(formatModelPrice(0.0000015)).toBe('$1.5/1M');
+    });
+
+    it('formats a price that rounds to a round number', () => {
+      // 0.000002 per token = 2.0 per million → "2" after parseFloat
+      expect(formatModelPrice(0.000002)).toBe('$2/1M');
+    });
+
+    it('never returns $0.00 for a non-zero price — multiplies by 1e6', () => {
+      const result = formatModelPrice(0.0000001);
+      expect(result).not.toBe('$0/1M');
+      expect(result).toMatch(/^\$[\d.]+\/1M$/);
+    });
+  });
+
+  describe('formatContextLength', () => {
+    it('returns 128K ctx for 128000', () => {
+      expect(formatContextLength(128000)).toBe('128K ctx');
+    });
+
+    it('returns empty string for 0', () => {
+      expect(formatContextLength(0)).toBe('');
+    });
+
+    it('returns empty string for undefined', () => {
+      expect(formatContextLength(undefined)).toBe('');
+    });
+
+    it('returns empty string for null', () => {
+      expect(formatContextLength(null)).toBe('');
+    });
+
+    it('rounds to nearest 1K', () => {
+      expect(formatContextLength(32768)).toBe('33K ctx');
+      expect(formatContextLength(8192)).toBe('8K ctx');
+    });
+
+    it('handles 1M token context', () => {
+      expect(formatContextLength(1000000)).toBe('1000K ctx');
+    });
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// persistModelSelector / restoreModelSelector — pure validation unit tests
+// Each test uses a fresh module instance via vi.resetModules() + dynamic import
+// so module-level vars start at their initialized defaults.
+// ---------------------------------------------------------------------------
+describe('persistModelSelector / restoreModelSelector', () => {
+  const SELECTOR_KEY = 'explainer.modelSelector.v1';
+
+  let persistModelSelector;
+  let restoreModelSelector;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    localStorage.clear();
+    mockState.hasApiKey = true;
+    mockState.hasOpenRouterKey = false;
+    mockState.hasDeepSeekKey = false;
+
+    const mod = await import('../../frontend/js/landing.js');
+    persistModelSelector = mod.persistModelSelector;
+    restoreModelSelector = mod.restoreModelSelector;
+  });
+
+  it('corrupt JSON in localStorage does not throw and leaves defaults', () => {
+    localStorage.setItem(SELECTOR_KEY, '{bad json!');
+    expect(() => restoreModelSelector()).not.toThrow();
+    // Module vars remain at defaults → persist should save gemini defaults
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+    expect(saved.deepseekModel).toBe('deepseek-v4-pro');
+  });
+
+  it('missing key in localStorage is a no-op and does not throw', () => {
+    // localStorage is empty (cleared in beforeEach)
+    expect(() => restoreModelSelector()).not.toThrow();
+    // State unchanged: persist writes defaults
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('invalid explainerProvider falls back to gemini', () => {
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'notavalidprovider',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('openrouter provider with missing key falls back to gemini', () => {
+    mockState.hasOpenRouterKey = false; // key unavailable
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'openrouter',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('deepseek provider with missing key falls back to gemini', () => {
+    mockState.hasDeepSeekKey = false;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'deepseek',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('valid gemini preset round-trip', () => {
+    const original = {
+      explainerProvider: 'gemini',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    };
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify(original));
+    const result = restoreModelSelector();
+    expect(result).toBeNull(); // no async custom restore needed
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+    expect(saved.openrouterMode).toBe('preset');
+    expect(saved.openrouterModel).toBe('xiaomi/mimo-v2.5-pro');
+    expect(saved.deepseekModel).toBe('deepseek-v4-pro');
+  });
+
+  it('valid openrouter preset round-trip when key is available', () => {
+    mockState.hasOpenRouterKey = true;
+    const original = {
+      explainerProvider: 'openrouter',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    };
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify(original));
+    const result = restoreModelSelector();
+    expect(result).toBeNull();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('openrouter');
+    expect(saved.openrouterModel).toBe('xiaomi/mimo-v2.5');
+  });
+
+  it('valid deepseek round-trip when key is available', () => {
+    mockState.hasDeepSeekKey = true;
+    const original = {
+      explainerProvider: 'deepseek',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-flash',
+    };
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify(original));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('deepseek');
+    expect(saved.deepseekModel).toBe('deepseek-v4-flash');
+  });
+
+  it('invalid openrouterModel falls back to mimo-pro default', () => {
+    mockState.hasOpenRouterKey = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'openrouter',
+      openrouterMode: 'preset',
+      openrouterModel: 'not-a-valid-model',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.openrouterModel).toBe('xiaomi/mimo-v2.5-pro');
+  });
+
+  it('invalid deepseekModel falls back to v4-pro default', () => {
+    mockState.hasDeepSeekKey = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'deepseek',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'invalid-model',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.deepseekModel).toBe('deepseek-v4-pro');
+  });
+
+  it('custom mode with valid customOpenrouterModel returns pendingCustomModel', () => {
+    mockState.hasOpenRouterKey = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'openrouter',
+      openrouterMode: 'custom',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: 'qwen/qwen3.6-plus',
+      openrouterProvider: 'deepseek',
+      openrouterProviderOnly: true,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    const result = restoreModelSelector();
+    expect(result).not.toBeNull();
+    expect(result.pendingCustomModel).toBe('qwen/qwen3.6-plus');
+    expect(result.pendingProvider).toBe('deepseek');
+  });
+
+  it('custom mode with empty customOpenrouterModel falls back to preset', () => {
+    mockState.hasOpenRouterKey = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'openrouter',
+      openrouterMode: 'custom',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: '', // empty → treat as no custom model
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    const result = restoreModelSelector();
+    expect(result).toBeNull(); // falls back to preset path
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.openrouterMode).toBe('preset');
+  });
+
+  it('openrouterProviderOnly is coerced to boolean', () => {
+    mockState.hasOpenRouterKey = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'openrouter',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: 1, // truthy non-boolean
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(typeof saved.openrouterProviderOnly).toBe('boolean');
+    expect(saved.openrouterProviderOnly).toBe(true);
+  });
 });
