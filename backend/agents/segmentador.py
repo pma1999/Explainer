@@ -22,6 +22,17 @@ from google.genai import types
 
 logger = get_logger("backend.agents.segmentador")
 
+OBRA_METADATA_INSTRUCTIONS = """  <obra_metadata>
+  Al inicio de tu análisis y con visión global del documento COMPLETO, extrae los metadatos de la obra. Estos metadatos los usarán los agentes explainer que vienen después, que solo ven fragmentos del documento y necesitan saber de qué obra forman parte.
+
+  - `titulo`: el título exacto de la obra si el documento lo identifica (portada, cabeceras, tabla de contenidos). Si no hay título explícito, usa un título descriptivo breve y fiel (máximo ~10 palabras) que identifique la obra sin ambigüedad. PROHIBIDO añadir prefijos editoriales ("Análisis de...", "Estudio sobre...", "Resumen de...").
+  - `autor`: autor(es) tal como la obra los acredita. Cadena vacía "" si el documento no identifica autor (NO inventar, NO escribir "Desconocido").
+  - `descripcion`: 2-4 frases completas y compactas: tipo/género de la obra (ensayo, manual, artículo académico, conferencia, documento normativo...), tema central, alcance/cobertura del contenido, y estructura o propósito. Redáctala para que un explainer que solo verá un fragmento sepa de qué obra forma parte sin leer el documento completo. Debe derivarse SOLO del contenido del documento, nunca inventarse.
+
+  Los metadatos son de la obra COMPLETA (nivel raíz del JSON de salida), no por parte.
+  </obra_metadata>
+"""
+
 SYSTEM_INSTRUCTION = """<system_instruction>
   <role>
   Eres un **Arquitecto de Segmentación Didáctica**, especializado en dividir contenido académico o técnico de forma óptima para su posterior explicación exhaustiva.
@@ -304,6 +315,7 @@ Si tu input incluye una sección `<paginas_contenido_verificado>`, ejecuta este 
 
 Solo tras completar todos los pasos aplicables, genera tu output estructurado en el formato especificado.
 </thinking_protocol>
+""" + OBRA_METADATA_INSTRUCTIONS + """
 </system_instruction>"""
 
 _DELIMITACION_EXPLAINER_SCHEMA = genai.types.Schema(
@@ -364,6 +376,26 @@ _DELIMITACION_EXPLAINER_SCHEMA = genai.types.Schema(
     },
 )
 
+META_OBRA_SCHEMA = genai.types.Schema(
+    type=genai.types.Type.OBJECT,
+    required=["titulo", "autor", "descripcion"],
+    properties={
+        "titulo": genai.types.Schema(
+            type=genai.types.Type.STRING,
+            description="Título de la obra extraído del documento, o título descriptivo breve si no hay título explícito.",
+        ),
+        "autor": genai.types.Schema(
+            type=genai.types.Type.STRING,
+            description="Autor(es) de la obra tal como la acredita el documento. Cadena vacía si no consta autor.",
+        ),
+        "descripcion": genai.types.Schema(
+            type=genai.types.Type.STRING,
+            description="2-4 frases: tipo de obra, tema central, alcance y estructura. Contexto para los explainers downstream.",
+        ),
+    },
+    description="Metadatos de la obra completa, extraídos por el segmentador con visión global del documento.",
+)
+
 RESPONSE_SCHEMA = genai.types.Schema(
     type=genai.types.Type.OBJECT,
     required=[
@@ -372,8 +404,10 @@ RESPONSE_SCHEMA = genai.types.Schema(
         "decision_justificacion",
         "partes",
         "consideraciones_estudiante",
+        "meta_obra",
     ],
     properties={
+        "meta_obra": META_OBRA_SCHEMA,
         "analisis_texto": genai.types.Schema(
             type=genai.types.Type.STRING,
             description="2-3 frases: longitud aproximada, tipo de contenido, si tiene estructura explícita o no.",
@@ -704,6 +738,7 @@ TEXT_SYSTEM_INSTRUCTION = """<system_instruction>
   - Si `es_segmentable = false`: `decision_num_partes = 0`, `partes = []`.
   </output_format>
 
+""" + OBRA_METADATA_INSTRUCTIONS + """
 </system_instruction>
 
 <few_shot_examples>
@@ -771,8 +806,10 @@ TEXT_RESPONSE_SCHEMA = genai.types.Schema(
         "decision_justificacion",
         "partes",
         "consideraciones_estudiante",
+        "meta_obra",
     ],
     properties={
+        "meta_obra": META_OBRA_SCHEMA,
         "evaluacion_fuente": genai.types.Schema(
             type=genai.types.Type.OBJECT,
             required=["es_segmentable", "motivo", "indicios"],
@@ -951,6 +988,7 @@ DEFAULT_DESCRIPTION = "Procesar TODO el documento completo sin omitir ninguna se
 
 OPENROUTER_PDF_JSON_CONTRACT = """Devuelve exactamente el objeto JSON raíz siguiente, sin array raíz y sin texto fuera del JSON:
 {
+  "meta_obra": {"titulo": "string", "autor": "string", "descripcion": "string"},
   "analisis_texto": "string",
   "decision_num_partes": 1,
   "decision_justificacion": "string",
@@ -999,6 +1037,7 @@ Todas las claves anteriores son obligatorias. Si una lista no tiene elementos, d
 OPENROUTER_TEXT_JSON_CONTRACT = """Devuelve exactamente el objeto JSON raíz siguiente, sin array raíz y sin texto fuera del JSON:
 {
   "evaluacion_fuente": {"es_segmentable": true, "motivo": "string", "indicios": []},
+  "meta_obra": {"titulo": "string", "autor": "string", "descripcion": "string"},
   "analisis_texto": "string",
   "decision_num_partes": 1,
   "decision_justificacion": "string",
@@ -1233,7 +1272,7 @@ def run_segmentador_or(
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,
-        reasoning=max_reasoning_preferences(),
+        reasoning=max_reasoning_preferences(model),
         temperature=TEMPERATURE_SEGMENTADOR,
         provider=deepseek_provider_preferences(),
         json_retry_instruction=json_contract,

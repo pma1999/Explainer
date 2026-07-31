@@ -523,8 +523,9 @@ def _normalize_web_source_url(url: str) -> str:
 @project_create_rate_limit
 async def api_create_project(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    name: str = Form(...),
+    name: str | None = Form(None),
     description: str = Form(""),
+    auto_title: bool = Form(False),
     file: UploadFile | None = File(None),
     youtube_url: str | None = Form(None),
     web_url: str | None = Form(None),
@@ -533,6 +534,17 @@ async def api_create_project(
 
     normalized_youtube = (youtube_url or "").strip() or None
     normalized_web = (web_url or "").strip() or None
+
+    if not (name or "").strip() and not auto_title:
+        raise HTTPException(
+            status_code=400,
+            detail="Proporciona un nombre para el proyecto o marca el título automático.",
+        )
+
+    effective_name = (name or "").strip() or "Sin título"
+    create_kwargs: dict[str, Any] = {}
+    if auto_title:
+        create_kwargs["source_metadata"] = {"auto_title": True}
 
     provided_sources = [
         bool(file),
@@ -557,12 +569,13 @@ async def api_create_project(
         pdf_content = await file.read()
         project = supabase_create_project(
             user_id=user_id,
-            name=name,
+            name=effective_name,
             description=description,
             pdf_filename=pdf_filename,
             pdf_content=pdf_content,
             source_type="pdf",
             source_url=None,
+            **create_kwargs,
         )
     elif normalized_youtube:
         # YouTube source
@@ -574,12 +587,13 @@ async def api_create_project(
 
         project = supabase_create_project(
             user_id=user_id,
-            name=name,
+            name=effective_name,
             description=description,
             pdf_filename=pdf_filename,
             pdf_content=None,
             source_type="youtube",
             source_url=normalized_youtube,
+            **create_kwargs,
         )
     else:
         try:
@@ -593,12 +607,13 @@ async def api_create_project(
 
         project = supabase_create_project(
             user_id=user_id,
-            name=name,
+            name=effective_name,
             description=description,
             pdf_filename=pdf_filename,
             pdf_content=None,
             source_type="web",
             source_url=validated_web_url,
+            **create_kwargs,
         )
 
     return project
@@ -884,6 +899,21 @@ def _strip_str(value: object | None) -> str | None:
     return s or None
 
 
+def _extract_obra_metadata(segmentation: dict | None, project: dict | None) -> dict[str, str]:
+    """Extrae metadatos de la obra del output del segmentador con fallbacks lenientes.
+
+    Devuelve siempre {"titulo": str, "autor": str, "descripcion": str}
+    (cadenas vacías si no se pudieron extraer). Nunca lanza.
+    """
+    raw = segmentation.get("meta_obra") if isinstance(segmentation, dict) else None
+    meta = raw if isinstance(raw, dict) else {}
+    return {
+        "titulo": _strip_str(meta.get("titulo")) or "",
+        "autor": _strip_str(meta.get("autor")) or "",
+        "descripcion": _strip_str(meta.get("descripcion")) or "",
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class PartHandoffContext:
     """Structured segmentador output passed to downstream agents for coverage and continuity."""
@@ -893,6 +923,7 @@ class PartHandoffContext:
     intent_usuario: str | None
     continuidad_previa: str | None
     vision_global_division: str | None
+    obra_context: str | None = None
 
 
 def _part_handoff_base(
@@ -901,6 +932,7 @@ def _part_handoff_base(
     intent_usuario: str | None,
     continuidad_previa: str | None,
     vision_global_division: str | None,
+    obra_context: str | None = None,
 ) -> PartHandoffContext:
     num = parte.get("numero")
     titulo = str(parte.get("titulo") or "").strip() or (f"Parte {num}" if num is not None else "Parte")
@@ -911,6 +943,7 @@ def _part_handoff_base(
         intent_usuario=intent_usuario,
         continuidad_previa=continuidad_previa,
         vision_global_division=vision_global_division,
+        obra_context=obra_context,
     )
 
 
@@ -1244,8 +1277,36 @@ def _assemble_part_explainer(
         "conclusion": parte.get("conclusion", ""),
         "conexiones_contextuales": parte.get("conexiones_contextuales") or [],
     }
+
+
+def _format_obra_context(obra_meta: dict) -> str:
+    """Bloque de contexto de la obra para los prompts de explainer. '' si no hay datos."""
+    titulo = _strip_str(obra_meta.get("titulo"))
+    autor = _strip_str(obra_meta.get("autor"))
+    descripcion = _strip_str(obra_meta.get("descripcion"))
+    if not (titulo or autor or descripcion):
+        return ""
+    lines = ["CONTEXTO DE LA OBRA"]
+    if titulo:
+        header = f"Estás explicando un fragmento de: «{titulo}»"
+        if autor:
+            header += f" — {autor}"
+        lines.append(header + ".")
+    elif autor:
+        lines.append(f"Estás explicando un fragmento de una obra de {autor}.")
+    if descripcion:
+        lines.append("")
+        lines.append(f"Descripción de la obra: {descripcion}")
+    lines.append("")
+    lines.append("Este bloque es SOLO contexto: tu fragmento objetivo sigue siendo el delimitado por el contrato de alcance y la identificación.")
+    return "\n".join(lines)
+
+
 def _format_handoff_section(ctx: PartHandoffContext, *, part_id: int, num_partes: int) -> str:
     blocks: list[str] = []
+    if ctx.obra_context:
+        blocks.append(ctx.obra_context)
+        blocks.append("")
     blocks.append("CONTEXTO DEL SEGMENTADOR Y DEL USUARIO")
     blocks.append(
         "Lo siguiente resume decisiones ya tomadas sobre este documento. "
@@ -2714,6 +2775,23 @@ async def _process_project(
                 await send_event(project_id, {"type": "error", "message": error_message})
                 return
 
+        # Metadatos de la obra extraídos por el segmentador (contexto para explainers + autotítulo)
+        obra_meta = _extract_obra_metadata(segmentation, project)
+        source_metadata = {**source_metadata, "obra": obra_meta}
+        auto_title = bool((project.get("source_metadata") or {}).get("auto_title"))
+        if obra_meta["titulo"]:
+            source_title = obra_meta["titulo"]
+        logger.info(
+            "[Process] Metadatos de obra extraídos",
+            extra={
+                "project_id": project_id,
+                "auto_title": auto_title,
+                "obra_titulo": obra_meta["titulo"][:80] or None,
+                "obra_autor": obra_meta["autor"][:80] or None,
+                "obra_descripcion_len": len(obra_meta["descripcion"]),
+            },
+        )
+
         partes_preview = [{"numero": p["numero"], "titulo": p["titulo"]} for p in segmentation["partes"]]
         partes_contenido = {}
         for parte in segmentation["partes"]:
@@ -2728,9 +2806,11 @@ async def _process_project(
             "segmentation": segmentation,
             "partes_contenido": partes_contenido,
             "status": "processing",
+            "source_metadata": source_metadata,
         }
-        if is_text_source:
-            update_payload["source_metadata"] = source_metadata
+        if auto_title and obra_meta["titulo"]:
+            update_payload["name"] = obra_meta["titulo"][:200]
+            project["name"] = obra_meta["titulo"][:200]  # mantener coherente el dict local
         update_project(project_id, user_id, update_payload)
         await send_event(project_id, {"type": "segmented", "partes": partes_preview})
 
@@ -2818,6 +2898,7 @@ async def _process_project(
                 intent_usuario=user_intent,
                 continuidad_previa=continuidad_previa,
                 vision_global_division=vision_global_division,
+                obra_context=_format_obra_context(obra_meta),
             )
 
             # Establecer contexto para esta parte

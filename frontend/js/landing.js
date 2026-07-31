@@ -36,6 +36,10 @@ let _landingListenersAttached = false;
 
 const SELECTOR_KEY = 'explainer.modelSelector.v1';
 
+const PROJECT_NAME_PLACEHOLDER = 'Ej: Are Prisons Obsolete — Davis';
+const AUTO_TITLE_PLACEHOLDER = 'La IA decidirá el título';
+const AUTO_TITLE_FIELD_ID = 'project-autotitle';
+
 export function extractYouTubeVideoId(url) {
   const patterns = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
@@ -458,6 +462,7 @@ export function initLanding() {
   const btnUpload = $('btn-upload');
   const nameInput = $('project-name');
   const descInput = $('project-description');
+  const autoTitleCheckbox = $(AUTO_TITLE_FIELD_ID);
   const youtubeUrlInput = $('youtube-url');
   const webUrlInput = $('web-url');
   const targetLanguageSelect = $('target-language');
@@ -832,7 +837,7 @@ export function initLanding() {
     });
 
     function checkReady() {
-      const hasName = nameInput.value.trim();
+      const hasName = nameInput.value.trim() || (autoTitleCheckbox && autoTitleCheckbox.checked);
       if (currentSourceType === 'pdf') {
         const ready = selectedFile && hasName;
         btnUpload.disabled = !ready;
@@ -845,6 +850,21 @@ export function initLanding() {
         const ready = isValidWebUrl(url) && hasName;
         btnUpload.disabled = !ready;
       }
+    }
+
+    if (autoTitleCheckbox) {
+      autoTitleCheckbox.addEventListener('change', () => {
+        if (autoTitleCheckbox.checked) {
+          nameInput.value = '';
+          nameInput.disabled = true;
+          nameInput.placeholder = AUTO_TITLE_PLACEHOLDER;
+        } else {
+          nameInput.disabled = false;
+          nameInput.placeholder = PROJECT_NAME_PLACEHOLDER;
+        }
+        validateForm();
+        checkReady();
+      });
     }
 
     zone.addEventListener('click', () => fileInput.click());
@@ -985,7 +1005,8 @@ function validateForm() {
   const nameInput = $('project-name');
   const youtubeUrlInput = $('youtube-url');
   const webUrlInput = $('web-url');
-  const hasName = nameInput.value.trim();
+  const autoTitleChecked = (($(AUTO_TITLE_FIELD_ID)) || {}).checked;
+  const hasName = nameInput.value.trim() || autoTitleChecked;
 
   if (currentSourceType === 'pdf') {
     const ready = selectedFile && hasName;
@@ -1002,7 +1023,8 @@ function validateForm() {
 }
 
 async function handleUpload() {
-  const name = $('project-name').value.trim();
+  const autotitle = (($(AUTO_TITLE_FIELD_ID)) || {}).checked;
+  const name = autotitle ? '' : $('project-name').value.trim();
   const description = $('project-description').value.trim();
   const errEl = $('upload-error');
   const providerError = $('explainer-provider-error');
@@ -1039,6 +1061,7 @@ async function handleUpload() {
     const fd = new FormData();
     fd.append('name', name);
     fd.append('description', description);
+    if (autotitle) fd.append('auto_title', 'true');
 
     if (currentSourceType === 'pdf') {
       if (!selectedFile) {
@@ -1077,6 +1100,12 @@ async function handleUpload() {
 
     clearFile();
     $('project-name').value = '';
+    if (autotitle) {
+      const autoTitleEl = $(AUTO_TITLE_FIELD_ID);
+      if (autoTitleEl) autoTitleEl.checked = false;
+      $('project-name').disabled = false;
+      $('project-name').placeholder = PROJECT_NAME_PLACEHOLDER;
+    }
     $('project-description').value = '';
     $('youtube-url').value = '';
     $('web-url').value = '';

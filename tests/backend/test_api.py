@@ -187,6 +187,59 @@ class TestCreateProject:
         assert r.status_code == 400
         assert r.json()["detail"] == "URL web inválida"
 
+    def test_creates_project_with_auto_title_and_empty_name(self, auth_client):
+        mock_project = {"id": "web-2", "source_type": "web", "source_url": "https://example.com/auto"}
+        with patch("main._normalize_web_source_url", return_value="https://example.com/auto"):
+            with patch("main.supabase_create_project", return_value=mock_project) as mock_create:
+                r = auth_client.post(
+                    "/api/projects",
+                    headers={"Authorization": "Bearer fake-token"},
+                    data={
+                        "name": "",
+                        "web_url": "https://example.com/auto",
+                        "auto_title": "true",
+                    },
+                )
+
+        assert r.status_code == 200
+        mock_create.assert_called_once()
+        _, kwargs = mock_create.call_args
+        assert kwargs["name"] == "Sin título"
+        assert kwargs["source_metadata"] == {"auto_title": True}
+
+    def test_rejects_empty_name_without_auto_title(self, auth_client):
+        r = auth_client.post(
+            "/api/projects",
+            headers={"Authorization": "Bearer fake-token"},
+            data={
+                "name": "",
+                "web_url": "https://example.com/article",
+            },
+        )
+
+        assert r.status_code == 400
+        assert r.json()["detail"] == "Proporciona un nombre para el proyecto o marca el título automático."
+
+    def test_auto_title_respects_provided_name(self, auth_client):
+        mock_project = {"id": "web-3", "source_type": "web", "source_url": "https://example.com/named"}
+        with patch("main._normalize_web_source_url", return_value="https://example.com/named"):
+            with patch("main.supabase_create_project", return_value=mock_project) as mock_create:
+                r = auth_client.post(
+                    "/api/projects",
+                    headers={"Authorization": "Bearer fake-token"},
+                    data={
+                        "name": "Mi artículo",
+                        "web_url": "https://example.com/named",
+                        "auto_title": "true",
+                    },
+                )
+
+        assert r.status_code == 200
+        mock_create.assert_called_once()
+        _, kwargs = mock_create.call_args
+        assert kwargs["name"] == "Mi artículo"
+        assert kwargs["source_metadata"] == {"auto_title": True}
+
     def test_rejects_multiple_sources(self, auth_client):
         r = auth_client.post(
             "/api/projects",

@@ -50,6 +50,7 @@ function renderLandingDom() {
     <input id="file-input" type="file" />
     <button id="btn-upload"><span class="btn-text">Iniciar análisis</span></button>
     <input id="project-name" />
+    <input id="project-autotitle" type="checkbox" />
     <textarea id="project-description"></textarea>
     <input id="youtube-url" />
     <input id="web-url" />
@@ -218,6 +219,86 @@ describe('landing.js project creation flow', () => {
     );
     expect(targetLanguageSelect.value).toBe(DEFAULT_TARGET_LANGUAGE);
     expect(document.getElementById('upload-error').textContent).toBe('');
+  });
+
+  it('auto-title: con el checkbox marcado y sin nombre habilita el botón y envía auto_title=true con name vacío', async () => {
+    api
+      .mockResolvedValueOnce({ id: 'project-1', name: 'Sin título', description: '' })
+      .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+    const { initLanding } = await import('../../frontend/js/landing.js');
+    initLanding();
+
+    document.getElementById('tab-web').click();
+
+    const autoTitleCheckbox = document.getElementById('project-autotitle');
+    const nameInput = document.getElementById('project-name');
+
+    // Marcar el checkbox: el input de nombre se deshabilita, se limpia y cambia el placeholder
+    autoTitleCheckbox.checked = true;
+    autoTitleCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(nameInput.disabled).toBe(true);
+    expect(nameInput.value).toBe('');
+    expect(nameInput.placeholder).toBe('La IA decidirá el título');
+
+    // La fuente sigue siendo obligatoria: sin URL el botón sigue deshabilitado
+    expect(document.getElementById('btn-upload').disabled).toBe(true);
+
+    const webUrlInput = document.getElementById('web-url');
+    webUrlInput.value = 'https://example.com/article';
+    webUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Con fuente válida y sin nombre, el botón se habilita
+    expect(document.getElementById('btn-upload').disabled).toBe(false);
+
+    document.getElementById('btn-upload').click();
+    await flushAsyncWork();
+
+    expect(api).toHaveBeenCalledTimes(2);
+    const createCall = api.mock.calls[0];
+    expect(createCall[0]).toBe('/api/projects');
+    const fd = createCall[1].body;
+    expect(fd).toBeInstanceOf(FormData);
+    expect(fd.get('name')).toBe('');
+    expect(fd.get('auto_title')).toBe('true');
+
+    // Tras la subida el formulario se resetea: checkbox desmarcado e input re-habilitado
+    expect(document.getElementById('project-autotitle').checked).toBe(false);
+    expect(document.getElementById('project-name').disabled).toBe(false);
+    expect(document.getElementById('project-name').placeholder).toBe('Ej: Are Prisons Obsolete — Davis');
+  });
+
+  it('auto-title: desmarcar el checkbox re-habilita el input y vuelve a exigir nombre', async () => {
+    const { initLanding } = await import('../../frontend/js/landing.js');
+    initLanding();
+
+    document.getElementById('tab-web').click();
+
+    const autoTitleCheckbox = document.getElementById('project-autotitle');
+    const nameInput = document.getElementById('project-name');
+
+    autoTitleCheckbox.checked = true;
+    autoTitleCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(nameInput.disabled).toBe(true);
+
+    // Desmarcar: el input vuelve a estar activo con su placeholder original
+    autoTitleCheckbox.checked = false;
+    autoTitleCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(nameInput.disabled).toBe(false);
+    expect(nameInput.placeholder).toBe('Ej: Are Prisons Obsolete — Davis');
+
+    // Sin nombre, el botón sigue deshabilitado aunque haya URL válida
+    const webUrlInput = document.getElementById('web-url');
+    webUrlInput.value = 'https://example.com/article';
+    webUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(document.getElementById('btn-upload').disabled).toBe(true);
+
+    // Con nombre, se habilita
+    nameInput.value = 'Mi proyecto';
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(document.getElementById('btn-upload').disabled).toBe(false);
   });
 
   describe('custom model panel (Personalizado)', () => {

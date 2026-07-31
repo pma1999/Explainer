@@ -806,6 +806,37 @@ body {
   color: var(--text-secondary);
 }
 
+/* Auto-title toggle (IA) — same visual language as provider-only-toggle */
+.auto-title-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.auto-title-toggle input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--amber);
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.auto-title-toggle span {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+}
+.auto-title-toggle:hover span {
+  color: var(--text-primary);
+}
+.auto-title-toggle input:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* Custom panel — third-level inset panel (deepest surface, compact) */
 .openrouter-custom-panel {
   margin-top: 12px;

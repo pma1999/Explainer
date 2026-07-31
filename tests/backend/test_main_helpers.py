@@ -130,6 +130,170 @@ def _scope_handoff():
     )
 
 
+def test_extract_obra_metadata_full_dict():
+    import main as m
+
+    segmentation = {
+        "meta_obra": {
+            "titulo": "El Príncipe",
+            "autor": "Nicolás Maquiavelo",
+            "descripcion": "Ensayo político clásico sobre la adquisición y conservación del poder.",
+        },
+        "partes": [],
+    }
+    result = m._extract_obra_metadata(segmentation, None)
+    assert result == {
+        "titulo": "El Príncipe",
+        "autor": "Nicolás Maquiavelo",
+        "descripcion": "Ensayo político clásico sobre la adquisición y conservación del poder.",
+    }
+
+
+def test_extract_obra_metadata_missing_or_malformed_meta_obra():
+    import main as m
+
+    empty = {"titulo": "", "autor": "", "descripcion": ""}
+    assert m._extract_obra_metadata(None, None) == empty
+    assert m._extract_obra_metadata({}, None) == empty
+    assert m._extract_obra_metadata({"partes": []}, None) == empty
+    assert m._extract_obra_metadata({"meta_obra": "no-dict"}, None) == empty
+    assert m._extract_obra_metadata({"meta_obra": {"titulo": None}}, None) == empty
+
+
+def test_extract_obra_metadata_strips_whitespace():
+    import main as m
+
+    segmentation = {
+        "meta_obra": {
+            "titulo": "  El Príncipe  ",
+            "autor": "  \n",
+            "descripcion": "  Ensayo político.  ",
+        }
+    }
+    result = m._extract_obra_metadata(segmentation, None)
+    assert result["titulo"] == "El Príncipe"
+    assert result["autor"] == ""
+    assert result["descripcion"] == "Ensayo político."
+
+
+def test_format_obra_context_empty_returns_empty_string():
+    import main as m
+
+    assert m._format_obra_context({}) == ""
+    assert m._format_obra_context({"titulo": "", "autor": " ", "descripcion": None}) == ""
+
+
+def test_format_obra_context_full_block():
+    import main as m
+
+    block = m._format_obra_context({
+        "titulo": "El Príncipe",
+        "autor": "Nicolás Maquiavelo",
+        "descripcion": "Ensayo político clásico sobre la adquisición del poder.",
+    })
+
+    assert "CONTEXTO DE LA OBRA" in block
+    assert "«El Príncipe»" in block
+    assert "Nicolás Maquiavelo" in block
+    assert "Descripción de la obra:" in block
+    assert "SOLO contexto" in block
+
+
+def test_format_obra_context_autor_only():
+    import main as m
+
+    block = m._format_obra_context({"titulo": "", "autor": "Anónimo", "descripcion": ""})
+    assert "una obra de Anónimo" in block
+
+
+def test_build_subpart_pdf_prompt_includes_obra_context_when_set():
+    import main as m
+
+    handoff = m.PartHandoffContext(
+        titulo="Parte 2",
+        resumen_alcance="Instituciones del Estado Moderno",
+        intent_usuario=None,
+        continuidad_previa=None,
+        vision_global_division=None,
+        obra_context=(
+            "CONTEXTO DE LA OBRA\n"
+            "Estás explicando un fragmento de: «El Príncipe» — Nicolás Maquiavelo.\n\n"
+            "Descripción de la obra: Ensayo político clásico."
+        ),
+    )
+    parte = {
+        "numero": 2,
+        "titulo": "El Estado Moderno",
+        "identificacion": "Parte 2 completa",
+        "pagina_inicio": 12,
+        "pagina_fin": 27,
+    }
+    subpartes = [
+        {
+            "numero_subparte": 1,
+            "titulo": "Precursores",
+            "contenido": "Teorización política previa",
+            "pagina_inicio": 18,
+            "pagina_fin": 19,
+        },
+    ]
+
+    prompt = m._build_subpart_pdf_prompt(
+        "TABLA",
+        parte,
+        subpartes[0],
+        subpartes,
+        2,
+        5,
+        handoff,
+        pdf_scope_mode="subpdf_buffered",
+        nucleo_inicio=12,
+        nucleo_fin=27,
+    )
+
+    assert "CONTEXTO DE LA OBRA" in prompt
+    assert "«El Príncipe»" in prompt
+    # El bloque de la obra va ANTES del bloque de segmentador/usuario
+    assert prompt.index("CONTEXTO DE LA OBRA") < prompt.index("CONTEXTO DEL SEGMENTADOR Y DEL USUARIO")
+
+
+def test_build_subpart_pdf_prompt_omits_obra_context_when_unset():
+    import main as m
+
+    parte = {
+        "numero": 2,
+        "titulo": "El Estado Moderno",
+        "identificacion": "Parte 2 completa",
+        "pagina_inicio": 12,
+        "pagina_fin": 27,
+    }
+    subpartes = [
+        {
+            "numero_subparte": 1,
+            "titulo": "Precursores",
+            "contenido": "Teorización política previa",
+            "pagina_inicio": 18,
+            "pagina_fin": 19,
+        },
+    ]
+
+    prompt = m._build_subpart_pdf_prompt(
+        "TABLA",
+        parte,
+        subpartes[0],
+        subpartes,
+        2,
+        5,
+        _scope_handoff(),
+        pdf_scope_mode="subpdf_buffered",
+        nucleo_inicio=12,
+        nucleo_fin=27,
+    )
+
+    assert "CONTEXTO DE LA OBRA" not in prompt
+    assert "CONTEXTO DEL SEGMENTADOR Y DEL USUARIO" in prompt
+
+
 def test_build_subpart_pdf_prompt_includes_structured_scope_and_negative_neighbors():
     import main as m
 

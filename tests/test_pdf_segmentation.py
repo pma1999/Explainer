@@ -646,6 +646,47 @@ def test_segmentador_schema():
         properties["pagina_fin"].type == genai_types.Type.INTEGER
     )
 
+    from backend.agents.segmentador import META_OBRA_SCHEMA
+
+    all_passed &= print_test(
+        "meta_obra is in required fields",
+        "meta_obra" in RESPONSE_SCHEMA.required,
+        f"Required: {RESPONSE_SCHEMA.required}"
+    )
+
+    all_passed &= print_test(
+        "meta_obra property exists in schema",
+        "meta_obra" in RESPONSE_SCHEMA.properties
+    )
+
+    all_passed &= print_test(
+        "meta_obra is OBJECT type",
+        RESPONSE_SCHEMA.properties["meta_obra"].type == genai_types.Type.OBJECT
+    )
+
+    meta_required = META_OBRA_SCHEMA.required
+    meta_props = META_OBRA_SCHEMA.properties
+    all_passed &= print_test(
+        "META_OBRA_SCHEMA requires titulo",
+        "titulo" in meta_required,
+        f"Required: {meta_required}"
+    )
+
+    all_passed &= print_test(
+        "META_OBRA_SCHEMA requires autor",
+        "autor" in meta_required
+    )
+
+    all_passed &= print_test(
+        "META_OBRA_SCHEMA requires descripcion",
+        "descripcion" in meta_required
+    )
+
+    all_passed &= print_test(
+        "META_OBRA_SCHEMA has titulo/autor/descripcion properties",
+        all(k in meta_props for k in ("titulo", "autor", "descripcion"))
+    )
+
     return all_passed
 
 
@@ -1058,6 +1099,59 @@ def test_text_segmentador_schema_refusal_contract():
         evaluation_schema.properties["es_segmentable"].type == genai_types.Type.BOOLEAN
     )
 
+    all_passed &= print_test(
+        "meta_obra is required in TEXT_RESPONSE_SCHEMA",
+        "meta_obra" in required_fields,
+        f"Required: {required_fields}"
+    )
+
+    all_passed &= print_test(
+        "meta_obra property exists in TEXT_RESPONSE_SCHEMA",
+        "meta_obra" in properties
+    )
+
+    return all_passed
+
+
+# ============================================================
+# TEST 22: OpenRouter JSON contracts include meta_obra
+# ============================================================
+
+def test_openrouter_json_contracts_include_meta_obra():
+    """Verify both OpenRouter segmentador contracts include meta_obra."""
+    print("\n═══ TEST 22: OpenRouter JSON contracts include meta_obra ═══")
+    all_passed = True
+
+    from backend.agents.segmentador import (
+        OPENROUTER_PDF_JSON_CONTRACT,
+        OPENROUTER_TEXT_JSON_CONTRACT,
+    )
+
+    all_passed &= print_test(
+        "PDF contract includes meta_obra",
+        '"meta_obra"' in OPENROUTER_PDF_JSON_CONTRACT
+    )
+
+    all_passed &= print_test(
+        "PDF contract meta_obra has titulo",
+        '"titulo"' in OPENROUTER_PDF_JSON_CONTRACT
+    )
+
+    all_passed &= print_test(
+        "Text contract includes meta_obra",
+        '"meta_obra"' in OPENROUTER_TEXT_JSON_CONTRACT
+    )
+
+    all_passed &= print_test(
+        "Text contract meta_obra has autor",
+        '"autor"' in OPENROUTER_TEXT_JSON_CONTRACT
+    )
+
+    all_passed &= print_test(
+        "Text contract meta_obra has descripcion",
+        '"descripcion"' in OPENROUTER_TEXT_JSON_CONTRACT
+    )
+
     return all_passed
 
 
@@ -1092,6 +1186,7 @@ def main():
         test_segmentador_prompt_content,
         test_text_segmentador_prompt_content,
         test_text_segmentador_schema_refusal_contract,
+        test_openrouter_json_contracts_include_meta_obra,
     ]
 
     results = []
