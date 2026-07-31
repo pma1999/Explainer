@@ -67,12 +67,12 @@ PRICING = {
         "output_small": 0.28,
         "output_large": 0.28,
     },
-    "deepseek/deepseek-v4-pro": {
+    "deepseek/deepseek-v4-flash-0731": {
         # Fallback only. For OpenRouter calls, prefer usage.cost from the API response.
-        "input_small": 0.50,
-        "input_large": 0.50,
-        "output_small": 1.50,
-        "output_large": 1.50,
+        "input_small": 0.14,
+        "input_large": 0.14,
+        "output_small": 0.28,
+        "output_large": 0.28,
     },
     "deepseek-v4-flash": {
         # DeepSeek direct fallback pricing (USD per 1M tokens).

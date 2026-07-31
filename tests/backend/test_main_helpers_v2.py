@@ -37,7 +37,7 @@ class TestModelValidationRelaxation:
     def test_preset_models_still_resolve(self):
         fn = _resolve_explainer_model_fn()
         # Each known preset must pass the shape gate
-        for model_id in ("xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5", "deepseek/deepseek-v4-pro"):
+        for model_id in ("xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5", "deepseek/deepseek-v4-flash-0731"):
             result = fn("openrouter", model_id)
             assert result == model_id
 

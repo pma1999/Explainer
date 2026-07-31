@@ -48,7 +48,7 @@ OPENROUTER_STRUCTURED_OUTPUT_MODELS = frozenset(
     }
 )
 _OPENROUTER_PROVIDER_OVERRIDES = {
-    "deepseek/deepseek-v4-pro": {"order": ["deepseek"], "allow_fallbacks": False},
+    "deepseek/deepseek-v4-flash-0731": {"order": ["deepseek"], "allow_fallbacks": False},
 }
 
 # PDF parsing plugin (used only in the fallback path for direct file sends)

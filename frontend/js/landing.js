@@ -15,7 +15,7 @@ let currentExplainerProvider = 'gemini';
 let currentTargetLanguage = 'es-ES';
 export const OPENROUTER_MODEL_MIMO_PRO = 'xiaomi/mimo-v2.5-pro';
 export const OPENROUTER_MODEL_MIMO = 'xiaomi/mimo-v2.5';
-export const OPENROUTER_MODEL_DEEPSEEK_V4_PRO = 'deepseek/deepseek-v4-pro';
+export const OPENROUTER_MODEL_DEEPSEEK_V4_FLASH = 'deepseek/deepseek-v4-flash-0731';
 export const DEFAULT_TARGET_LANGUAGE = 'es-ES';
 export const SUPPORTED_TARGET_LANGUAGES = ['es-ES', 'en', 'fr', 'de', 'it', 'pt-PT'];
 export const DEEPSEEK_MODEL_V4_PRO = 'deepseek-v4-pro';
@@ -77,11 +77,11 @@ export function isExplainerProviderSupportedForSource(sourceType, provider) {
 }
 
 export function isValidOpenRouterModel(model) {
-  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
+  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH;
 }
 
 export function isPresetOpenRouterModel(model) {
-  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO;
+  return model === OPENROUTER_MODEL_MIMO_PRO || model === OPENROUTER_MODEL_MIMO || model === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH;
 }
 
 export function setCustomOpenRouterModel(value) {
@@ -100,7 +100,7 @@ function setTargetLanguage(language) {
 
 function openRouterModelLabel(model) {
   if (model === OPENROUTER_MODEL_MIMO) return 'Xiaomi MiMo V2.5';
-  if (model === OPENROUTER_MODEL_DEEPSEEK_V4_PRO) return 'DeepSeek V4 Pro';
+  if (model === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH) return 'DeepSeek V4 Flash';
   return 'Xiaomi MiMo V2.5 Pro';
 }
 
@@ -565,7 +565,7 @@ export function initLanding() {
     deepseekModelPanel.classList.toggle('hidden', currentExplainerProvider !== 'deepseek' || !deepSeekSupported);
     modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO && currentOpenRouterMode === 'preset';
     modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO && currentOpenRouterMode === 'preset';
-    modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO && currentOpenRouterMode === 'preset';
+    modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH && currentOpenRouterMode === 'preset';
     openRouterCustomRadio.checked = currentOpenRouterMode === 'custom';
     if (currentOpenRouterMode === 'custom') {
       openRouterCustomPanel.classList.remove('hidden');
@@ -580,7 +580,7 @@ export function initLanding() {
       $('openrouter-model-card-custom').classList.remove('selected');
       $('openrouter-model-card-pro').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO);
       $('openrouter-model-card-standard').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_MIMO);
-      $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+      $('openrouter-model-card-deepseek').classList.toggle('selected', currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH);
     }
     deepseekModelPro.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO;
     deepseekModelFlash.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH;
@@ -811,7 +811,7 @@ export function initLanding() {
       if (modelStandard.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO);
     });
     modelDeepseek.addEventListener('change', () => {
-      if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO);
+      if (modelDeepseek.checked) setOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_FLASH);
     });
     if (targetLanguageSelect) {
       setTargetLanguage(targetLanguageSelect.value || DEFAULT_TARGET_LANGUAGE);

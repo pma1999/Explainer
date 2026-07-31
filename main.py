@@ -162,7 +162,7 @@ OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
     {
         "xiaomi/mimo-v2.5-pro",
         "xiaomi/mimo-v2.5",
-        "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4-flash-0731",
     }
 )
 INTERRUPTED_PDF_PROCESS_ERROR_MESSAGE = (

@@ -15,7 +15,7 @@ import {
   DEEPSEEK_MODEL_V4_PRO,
   OPENROUTER_MODEL_MIMO,
   OPENROUTER_MODEL_MIMO_PRO,
-  OPENROUTER_MODEL_DEEPSEEK_V4_PRO,
+  OPENROUTER_MODEL_DEEPSEEK_V4_FLASH,
   validateExplainerProviderSelection,
   DEFAULT_TARGET_LANGUAGE,
   SUPPORTED_TARGET_LANGUAGES,
@@ -141,7 +141,7 @@ describe('landing.js', () => {
     it('accepts all supported OpenRouter model choices', () => {
       expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
       expect(isValidOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
-      expect(isValidOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO)).toBe(true);
+      expect(isValidOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_FLASH)).toBe(true);
     });
 
     it('rejects unsupported OpenRouter model ids', () => {
@@ -154,7 +154,7 @@ describe('landing.js', () => {
     it('returns true for all three preset model ids', () => {
       expect(isPresetOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO)).toBe(true);
       expect(isPresetOpenRouterModel(OPENROUTER_MODEL_MIMO)).toBe(true);
-      expect(isPresetOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_PRO)).toBe(true);
+      expect(isPresetOpenRouterModel(OPENROUTER_MODEL_DEEPSEEK_V4_FLASH)).toBe(true);
     });
 
     it('returns false for the custom sentinel value', () => {
