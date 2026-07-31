@@ -607,7 +607,7 @@ def run_resources_or(
         api_key=api_key,
         response_format="json_object",
         enable_response_healing=True,
-        reasoning=max_reasoning_preferences(),
+        reasoning=max_reasoning_preferences(model),
         provider=deepseek_provider_preferences(),
         tools=[openrouter_web_search_tool_auto()],
         json_retry_instruction=OPENROUTER_JSON_RETRY_INSTRUCTION,

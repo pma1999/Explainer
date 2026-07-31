@@ -543,7 +543,7 @@ def check_explainer_validation_or(
             api_key=openrouter_api_key,
             response_format="json_object",
             enable_response_healing=True,
-            reasoning=max_reasoning_preferences(),
+            reasoning=max_reasoning_preferences(model),
             provider=deepseek_provider_preferences(),
             json_retry_instruction=_OPENROUTER_VALIDATOR_JSON_RETRY_INSTRUCTION,
         )

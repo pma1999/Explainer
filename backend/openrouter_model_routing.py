@@ -7,6 +7,14 @@ OPENROUTER_MODEL_AUXILIARY = "deepseek/deepseek-v4-flash"
 OPENROUTER_DEEPSEEK_PROVIDER_ORDER = ("deepseek",)
 OPENROUTER_MAX_REASONING_EFFORT = "xhigh"
 
+# Esfuerzo de razonamiento máximo soportado por cada modelo (según la API pública
+# de OpenRouter, supported_efforts). Modelos no mapeados → OPENROUTER_MAX_REASONING_EFFORT.
+OPENROUTER_MODEL_MAX_REASONING_EFFORT: dict[str, str] = {
+    "deepseek/deepseek-v4-flash-0731": "max",
+    "deepseek/deepseek-v4-flash": "xhigh",
+    "deepseek/deepseek-v4-pro": "xhigh",
+}
+
 
 def deepseek_provider_preferences() -> dict[str, Any]:
     """Force OpenRouter to use DeepSeek capacity and fail instead of falling back."""
@@ -16,10 +24,17 @@ def deepseek_provider_preferences() -> dict[str, Any]:
     }
 
 
-def max_reasoning_preferences() -> dict[str, Any]:
-    """Use the highest OpenRouter reasoning effort while keeping reasoning text hidden."""
+def max_reasoning_preferences(model: str | None = None) -> dict[str, Any]:
+    """Use the highest OpenRouter reasoning effort while keeping reasoning text hidden.
+
+    El máximo depende del modelo: se resuelve con el mapeo
+    OPENROUTER_MODEL_MAX_REASONING_EFFORT (lookup exacto, sin normalizar);
+    modelos no mapeados usan el fallback OPENROUTER_MAX_REASONING_EFFORT.
+    """
+    normalized = (model or "").strip()
+    effort = OPENROUTER_MODEL_MAX_REASONING_EFFORT.get(normalized, OPENROUTER_MAX_REASONING_EFFORT)
     return {
-        "effort": OPENROUTER_MAX_REASONING_EFFORT,
+        "effort": effort,
         "exclude": True,
     }
 

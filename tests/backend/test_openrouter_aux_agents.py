@@ -199,3 +199,78 @@ def test_run_page_classifier_or_returns_content_pages(monkeypatch):
     assert "rangos_contenido" in captured["json_retry_instruction"]
     assert "<pagina_1>" in captured["messages"][0]["content"]
     assert "<pagina_N>" in captured["system_prompt"]
+
+
+def test_max_reasoning_preferences_is_model_aware():
+    from backend.openrouter_model_routing import max_reasoning_preferences
+
+    # Backward compat: sin modelo → fallback "xhigh"
+    r_none = max_reasoning_preferences(None)
+    assert r_none["effort"] == "xhigh"
+    assert r_none["exclude"] is True
+
+    # El fix clave: el modelo 0731 soporta "max" como máximo
+    r_0731 = max_reasoning_preferences("deepseek/deepseek-v4-flash-0731")
+    assert r_0731["effort"] == "max"
+    assert r_0731["exclude"] is True
+
+    # Modelos mapeados a "xhigh"
+    assert max_reasoning_preferences("deepseek/deepseek-v4-flash")["effort"] == "xhigh"
+    assert max_reasoning_preferences("deepseek/deepseek-v4-pro")["effort"] == "xhigh"
+
+    # Fallback para modelos desconocidos y entradas vacías
+    assert max_reasoning_preferences("otro/modelo")["effort"] == "xhigh"
+    assert max_reasoning_preferences("  ")["effort"] == "xhigh"
+    assert max_reasoning_preferences("")["effort"] == "xhigh"
+
+    # Solo strip de espacios (según spec); sin normalización lower: el lookup es exacto
+    assert max_reasoning_preferences(" deepseek/deepseek-v4-flash-0731 ")["effort"] == "max"
+    assert max_reasoning_preferences("DEEPSEEK/DEEPSEEK-V4-FLASH")["effort"] == "xhigh"
+
+
+def test_run_segmentador_or_passes_max_reasoning_for_flash_0731(monkeypatch):
+    """run_segmentador_or con model=deepseek/deepseek-v4-flash-0731 debe pedir effort 'max'."""
+    from backend.agents import segmentador
+
+    captured: dict = {}
+
+    def _fake_call_openrouter_chat(**kwargs):
+        captured.update(kwargs)
+        return (
+            {
+                "analisis_texto": "Documento OCR",
+                "decision_num_partes": 1,
+                "decision_justificacion": "Una unidad",
+                "partes": [
+                    {
+                        "numero": 1,
+                        "titulo": "Parte",
+                        "contenido": "Contenido",
+                        "identificacion": "Páginas 1-2",
+                        "pagina_inicio": 1,
+                        "pagina_fin": 2,
+                        "extension_estimada": "media",
+                        "complejidad": "media",
+                        "expansion_prevista": "alta",
+                        "subpartes": [],
+                    }
+                ],
+                "consideraciones_estudiante": "Orden natural",
+            },
+            _usage(),
+        )
+
+    monkeypatch.setattr(segmentador, "call_openrouter_chat", _fake_call_openrouter_chat)
+
+    result, usage = segmentador.run_segmentador_or(
+        api_key="sk-or-v1-test",
+        source_text="<pagina_1>\nContenido base\n</pagina_1>",
+        description="Procesar todo",
+        source_kind="pdf",
+        model="deepseek/deepseek-v4-flash-0731",
+    )
+
+    assert result["partes"][0]["pagina_inicio"] == 1
+    assert usage.total_token_count == 15
+    assert captured["model"] == "deepseek/deepseek-v4-flash-0731"
+    assert captured["reasoning"] == {"effort": "max", "exclude": True}

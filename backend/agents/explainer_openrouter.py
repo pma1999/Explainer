@@ -561,7 +561,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 response_format=response_format,
                 plugins=None,
                 enable_response_healing=True,
-                reasoning=max_reasoning_preferences(),
+                reasoning=max_reasoning_preferences(model),
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 provider=provider,
             )
@@ -584,7 +584,7 @@ def _call_openrouter_json_with_pdf_fallback(
                 response_format=response_format,
                 plugins=fallback_plugins,
                 enable_response_healing=True,
-                reasoning=max_reasoning_preferences(),
+                reasoning=max_reasoning_preferences(model),
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
                 provider=provider,
             )
@@ -605,7 +605,7 @@ def _call_openrouter_json_with_pdf_fallback(
         response_format=response_format,
         plugins=plugins,
         enable_response_healing=True,
-        reasoning=max_reasoning_preferences(),
+        reasoning=max_reasoning_preferences(model),
         temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
         provider=provider,
     )
