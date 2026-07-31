@@ -2223,6 +2223,34 @@ body {
   display: none;
 }
 
+/* Placeholder shown when a part has some agents ready but this tab is still generating */
+.panel-preparing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 56px 24px;
+  color: var(--text-muted);
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.panel-preparing-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--gold-dim, rgba(232, 184, 109, 0.2));
+  border-top-color: var(--gold, #e8b86d);
+  border-radius: 50%;
+  animation: panelPreparingSpin 0.9s linear infinite;
+}
+
+@keyframes panelPreparingSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .skeleton-block {
   height: 18px;
   background: linear-gradient(90deg, var(--ink-700), var(--ink-600), var(--ink-700));
@@ -2675,6 +2703,43 @@ body {
   font-style: italic;
   width: 100%;
   margin-top: 4px;
+}
+
+/* Actionable resource URL (secondary-style small button, gold palette) */
+.resource-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.resource-url-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  border-radius: 100px;
+  padding: 4px 12px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.resource-url-link:hover {
+  background: var(--gold-soft);
+  border-color: rgba(232, 184, 109, 0.4);
+}
+
+.resource-url-host {
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
 }
 
 .resources-integridad {
@@ -4104,6 +4169,43 @@ body {
 
 .proc-part-card.completed .proc-card-num {
   color: var(--emerald, #10b981);
+}
+
+/* Failed card: red accent (uses the .status-error / .error-state palette) */
+.proc-part-card.failed {
+  border-color: rgba(239, 68, 68, 0.35);
+  cursor: default;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.08), 0 0 20px rgba(239, 68, 68, 0.05);
+}
+
+.proc-part-card.failed .proc-card-num {
+  color: var(--red, #ef4444);
+}
+
+.proc-part-card.failed .proc-card-status-dot {
+  background: var(--red, #ef4444);
+  animation: none;
+}
+
+.proc-part-error {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--red-dim, rgba(239, 68, 68, 0.12));
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 8px;
+  color: var(--red, #ef4444);
+  font-family: var(--font-ui-r, 'DM Sans', system-ui, sans-serif);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Clickable while still processing (explainer ready, progressive unlock) */
+.proc-part-card.clickable {
+  cursor: pointer;
+}
+
+.proc-part-card.clickable:hover .proc-card-cta {
+  opacity: 1;
 }
 
 /* Card number chip */

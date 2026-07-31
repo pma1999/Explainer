@@ -216,7 +216,8 @@ Devuelve exclusivamente un objeto JSON raíz con esta estructura:
           "idioma": "string",
           "conexion_con_texto": "string",
           "nivel_y_accesibilidad": "string",
-          "nota": "string"
+          "nota": "string",
+          "url": "solo si conoces con alta confianza una URL directa y verificada (de tus resultados de búsqueda Tavily o fuentes oficiales); si no, cadena vacía. Nunca inventes URLs."
         }
       ]
     }
@@ -260,7 +261,8 @@ Devuelve exclusivamente un objeto JSON raíz con esta estructura:
           "idioma": "string",
           "conexion_con_texto": "string",
           "nivel_y_accesibilidad": "string",
-          "nota": "string"
+          "nota": "string",
+          "url": "solo si conoces con alta confianza una URL directa y verificada (de tus resultados de búsqueda Tavily o fuentes oficiales); si no, cadena vacía. Nunca inventes URLs."
         }
       ]
     }
@@ -293,7 +295,7 @@ DEEPSEEK_SYSTEM_INSTRUCTION = build_resources_deepseek_system_instruction("es-ES
 
 OPENROUTER_JSON_RETRY_INSTRUCTION = """El objeto JSON esperado tiene las claves raíz `titulo_mapa`, `vision_general`, `ejes_tematicos` y `nota_de_integridad`.
 `ejes_tematicos` es un array de objetos con `nombre_eje` y `recursos`.
-Cada recurso tiene `formato`, `titulo`, `autor_creador`, `tipo_y_datos`, `idioma`, `conexion_con_texto`, `nivel_y_accesibilidad` y `nota`.
+Cada recurso tiene `formato`, `titulo`, `autor_creador`, `tipo_y_datos`, `idioma`, `conexion_con_texto`, `nivel_y_accesibilidad`, `nota` y `url` (solo URLs directas y verificadas con alta confianza; si no, cadena vacía).
 La raíz debe ser un objeto JSON, nunca un array."""
 
 
@@ -419,6 +421,10 @@ RESPONSE_SCHEMA = genai.types.Schema(
                                 "nota": genai.types.Schema(
                                     type=genai.types.Type.STRING,
                                     description="Información adicional relevante: limitaciones, advertencias, etc. Null si no aplica.",
+                                ),
+                                "url": genai.types.Schema(
+                                    type=genai.types.Type.STRING,
+                                    description="URL directa y verificada del recurso si se conoce con alta confianza; vacío si no se tiene.",
                                 ),
                             },
                         ),

@@ -490,6 +490,7 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
         "source_metadata",
         "file_uri",
         "status",
+        "failed_parts",
         "segmentation",
         "partes_contenido",
         "usage",

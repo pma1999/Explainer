@@ -87,7 +87,7 @@ def test_process_project_pdf_agents_receive_subpdfs_not_full_document(monkeypatc
         monkeypatch.setattr(
             main,
             "update_project",
-            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+            lambda pid, uid, payload: updates.append(deepcopy(payload)) or {"id": pid},
         )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
@@ -249,7 +249,7 @@ def test_process_project_pdf_does_not_require_legacy_theme_fields(monkeypatch):
             lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda k: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, p: updates.append(p))
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, p: updates.append(p) or {"id": pid})
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
         async def _send_event(project_id, payload):
@@ -394,7 +394,7 @@ def test_process_project_pdf_respects_explicit_gemini_provider_even_if_openroute
         monkeypatch.setattr(
             main,
             "update_project",
-            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+            lambda pid, uid, payload: updates.append(deepcopy(payload)) or {"id": pid},
         )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
@@ -500,7 +500,7 @@ def test_process_project_pdf_validation_error_does_not_complete_project(monkeypa
             lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(deepcopy(payload)))
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: updates.append(deepcopy(payload)) or {"id": pid})
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
         async def _send_event(project_id, payload):
@@ -608,7 +608,7 @@ def test_process_project_pdf_uses_openrouter_only_when_selected(monkeypatch):
         monkeypatch.setattr(
             main,
             "update_project",
-            lambda pid, uid, payload: updates.append(deepcopy(payload)),
+            lambda pid, uid, payload: updates.append(deepcopy(payload)) or {"id": pid},
         )
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
 
@@ -841,7 +841,7 @@ def test_process_project_pdf_openrouter_primes_mistral_before_classifier_for_all
             ),
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: {"id": pid})
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
         async def _send_event(*args, **kwargs):
             return None
@@ -958,7 +958,7 @@ def test_process_project_pdf_deletes_source_object_after_success(monkeypatch):
             lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: {"id": pid})
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
         monkeypatch.setattr(
             main,
@@ -1039,7 +1039,7 @@ def test_process_project_pdf_deletes_source_object_after_error(monkeypatch):
             lambda uid, provider=None: "" if provider == main.PROVIDER_OPENROUTER else "AIzaFakeKey",
         )
         monkeypatch.setattr(main, "mask_api_key", lambda api_key: "AIza****")
-        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: None)
+        monkeypatch.setattr(main, "update_project", lambda pid, uid, payload: {"id": pid})
         monkeypatch.setattr(main, "download_pdf_to_temp", lambda pid, uid: pdf_path)
         monkeypatch.setattr(
             main,

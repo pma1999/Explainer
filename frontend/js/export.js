@@ -259,7 +259,7 @@ export function formatRecorridoMd(data, autor, obra, partName) {
   return md.trim() + '\n';
 }
 
-function formatRecursosMd(data, autor, obra, partName) {
+export function formatRecursosMd(data, autor, obra, partName) {
   let md = `# MAPA DE RECURSOS: ${data.titulo_mapa || partName}\n\n`;
   md += `**Autor:** ${autor}  \n**Obra:** *${obra}*\n\n---\n\n`;
   if (data.vision_general) {
@@ -273,6 +273,9 @@ function formatRecursosMd(data, autor, obra, partName) {
           const tipoIcon = r.formato === 'documental' ? '🎬' : r.formato?.includes('video') ? '🎥' : r.formato?.includes('podcast') ? '🎧' : '📚';
           md += `> [!tip]+ ${tipoIcon} ${r.titulo}\n`;
           md += `> **Autor/Creador:** ${r.autor_creador}  \n`;
+          if (r.url && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)) {
+            md += `> **URL:** [${r.titulo}](${r.url})  \n`;
+          }
           if (r.tipo_y_datos) md += `> **Tipo:** ${r.tipo_y_datos}  \n`;
           if (r.idioma) md += `> **Idioma:** ${r.idioma}  \n`;
           md += `> \n`;

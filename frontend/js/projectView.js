@@ -395,10 +395,15 @@ export function renderProcPartsGrid(project) {
           <span class="badge-icon">🗺️</span> Recursos
         </span>
       </div>
+      ${status === 'failed' ? `<div class="proc-part-error">⚠ ${escHtml(c.error_message || 'Error al generar esta sección')}</div>` : ''}
       <div class="proc-card-cta">Abrir →</div>
     `;
 
-    if (status === 'completed') {
+    // The card opens when the part is fully completed OR as soon as the
+    // explainer is valid (progressive unlock) — but never for failed parts.
+    const clickable = status === 'completed' || (status !== 'failed' && doneAgents.explainer);
+    if (clickable) {
+      card.classList.add('clickable');
       card.addEventListener('click', () => {
         if (window.pushRoute) {
           window.pushRoute({
@@ -432,9 +437,29 @@ export function updateProcPartCard(partId, agentName) {
   }
 }
 
+export function failProcPartCard(partId, message) {
+  const card = document.querySelector(`#proc-parts-grid .proc-part-card[data-part-id="${partId}"]`);
+  if (!card) return;
+
+  card.classList.remove('pending', 'processing', 'completed', 'clickable');
+  card.classList.add('failed');
+  card.style.cursor = 'default';
+
+  const existing = card.querySelector('.proc-part-error');
+  if (existing) existing.remove();
+
+  const err = document.createElement('div');
+  err.className = 'proc-part-error';
+  err.innerHTML = `⚠ ${escHtml(message || 'Error al generar esta sección')}`;
+  card.appendChild(err);
+}
+
 export function completeProcPartCard(partId) {
   const card = document.querySelector(`#proc-parts-grid .proc-part-card[data-part-id="${partId}"]`);
   if (!card) return;
+
+  // A failed part must never be converted back into a completed card.
+  if (card.classList.contains('failed')) return;
 
   card.classList.remove('pending', 'processing');
   card.classList.add('completed');
@@ -958,6 +983,16 @@ function renderResources(data) {
             ${r.idioma ? `<span class="resource-idioma">${escHtml(r.idioma)}</span>` : ''}
             ${r.nota ? `<span class="resource-nota">⚠ ${escHtml(r.nota)}</span>` : ''}
           </div>`;
+          if (r.url && typeof r.url === 'string' && /^https?:\/\//i.test(r.url)) {
+            let host = '';
+            try {
+              host = new URL(r.url).hostname;
+            } catch { /* invalid URL — render the link anyway */ }
+            html += `<div class="resource-url">
+              <a class="resource-url-link" href="${escHtml(r.url)}" target="_blank" rel="noopener noreferrer">Abrir ↗</a>
+              ${host ? `<span class="resource-url-host">${escHtml(host)}</span>` : ''}
+            </div>`;
+          }
           html += `</div>`;
         });
       }
@@ -1020,7 +1055,14 @@ export function renderTab(tabName, contenido) {
   hide(loading);
 
   if (!data) {
-    contentEl.innerHTML = '';
+    // Part has SOME agents ready, but this specific tab is still generating:
+    // show a "preparing" placeholder instead of an empty panel.
+    const preparing = contenido.status === 'processing'
+      && contenido.status !== 'completed'
+      && contenido.status !== 'failed';
+    contentEl.innerHTML = preparing
+      ? `<div class="panel-preparing"><div class="panel-preparing-spinner"></div><span>Esta sección se está generando…</span></div>`
+      : '';
     if (tabName === 'explicacion') clearSubsectionNavigation();
     return;
   }

@@ -7,6 +7,7 @@ import {
   buildSectionFolderName,
   prefillFromProjectName,
   formatRecorridoMd,
+  formatRecursosMd,
 } from '../../frontend/js/export.js';
 
 describe('export.js', () => {
@@ -110,6 +111,40 @@ describe('export.js', () => {
       expect(md).toContain('> [!quote] Autor, *Obra*\n> «Cita ya entrecomillada»');
       expect(md).not.toContain('Autor, *Obra*, \n');
       expect(md).not.toContain('undefined');
+    });
+  });
+
+  describe('formatRecursosMd', () => {
+    it('includes an actionable URL line when the resource has an http(s) url', () => {
+      const md = formatRecursosMd({
+        titulo_mapa: 'Mapa',
+        ejes_tematicos: [{
+          nombre_eje: 'Contexto',
+          recursos: [{
+            titulo: 'Artículo en línea',
+            autor_creador: 'Autor X',
+            url: 'https://example.com/articulo',
+          }],
+        }],
+      }, 'Autor', 'Obra', 'Parte I');
+
+      expect(md).toContain('> **URL:** [Artículo en línea](https://example.com/articulo)  \n');
+      expect(md).toContain('> **Autor/Creador:** Autor X  \n');
+    });
+
+    it('omits the URL line when url is missing or not http(s)', () => {
+      const md = formatRecursosMd({
+        titulo_mapa: 'Mapa',
+        ejes_tematicos: [{
+          nombre_eje: 'Contexto',
+          recursos: [
+            { titulo: 'Sin URL', autor_creador: 'A' },
+            { titulo: 'Raro', autor_creador: 'B', url: 'ftp://servidor/archivo' },
+          ],
+        }],
+      }, 'Autor', 'Obra', 'Parte I');
+
+      expect(md).not.toContain('**URL:**');
     });
   });
 });

@@ -22,6 +22,7 @@ import {
   renderProcPartsGrid,
   updateProcPartCard,
   completeProcPartCard,
+  failProcPartCard,
   updateUsageUI,
   showProcessingIndicator,
   hideProcessingIndicator,
@@ -121,19 +122,28 @@ export function startSSE(projectId, opts = {}) {
 
   function connect() {
     const token = getAccessToken();
-    const base = `${API_BASE_URL}/api/projects/${projectId}/events`;
-    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
-    const evtSource = new EventSource(url);
-    state.processingSSE = evtSource;
+    const url = `${API_BASE_URL}/api/projects/${projectId}/events`;
+    const controller = new AbortController();
+    let closed = false;
+    let readyState = 0; // EventSource.CONNECTING
 
-    evtSource.onmessage = async (e) => {
+    // EventSource-compatible wrapper so the rest of the app can keep using
+    // state.processingSSE.close() / .readyState (CONNECTING=0, OPEN=1, CLOSED=2).
+    const sse = {
+      get readyState() {
+        return readyState;
+      },
+      close() {
+        if (closed) return;
+        closed = true;
+        readyState = 2; // EventSource.CLOSED
+        controller.abort();
+      },
+    };
+    state.processingSSE = sse;
+
+    async function handleEvent(payload) {
       state.sseLastEventAt = Date.now();
-      let payload;
-      try {
-        payload = JSON.parse(e.data);
-      } catch {
-        return;
-      }
 
       const project = state.currentProject;
       if (!project || state.currentProjectId !== projectId) return;
@@ -235,6 +245,27 @@ export function startSSE(projectId, opts = {}) {
           break;
         }
 
+        case 'part_failed': {
+          failProcPartCard(payload.part_id, payload.message);
+          toast(`Sección ${payload.part_id}: ${payload.message || 'Error al generar esta sección'}`, 'error');
+          if (state.currentPartId === payload.part_id) {
+            try {
+              const fresh = await api(`/api/projects/${projectId}`);
+              if (state.currentProject && state.currentProjectId === projectId) {
+                state.currentProject = fresh;
+                const contenido = fresh.partes_contenido?.[String(payload.part_id)];
+                if (contenido) {
+                  renderTab('explicacion', contenido);
+                  renderTab('recorrido', contenido);
+                  renderTab('recursos', contenido);
+                }
+                renderSidebarNav(state.currentProject);
+              }
+            } catch (_) { }
+          }
+          break;
+        }
+
         case 'completed':
           try {
             await applyFreshProjectSnapshot(projectId);
@@ -248,8 +279,18 @@ export function startSSE(projectId, opts = {}) {
           document.querySelectorAll('.proc-step').forEach(el => { el.classList.remove('active'); el.classList.add('done'); });
           document.querySelectorAll('.proc-step-line').forEach(el => { el.classList.remove('active'); el.classList.add('done'); });
           setTimeout(() => hideProcessingIndicator(), 1200);
-          toast('¡Análisis completo! Ya puedes estudiar todo el contenido.', 'success');
-          evtSource.close();
+          if (payload.has_failed_parts) {
+            const failedCount = Array.isArray(payload.failed_parts) ? payload.failed_parts.length : 0;
+            toast(
+              failedCount === 1
+                ? '1 sección falló — revisa la tarjeta en rojo'
+                : `${failedCount} secciones fallaron — revisa las tarjetas en rojo`,
+              'error'
+            );
+          } else {
+            toast('¡Análisis completo! Ya puedes estudiar todo el contenido.', 'success');
+          }
+          sse.close();
           state.processingSSE = null;
           stopPolling();
           break;
@@ -262,20 +303,68 @@ export function startSSE(projectId, opts = {}) {
           }
           if ($('sidebar-status')) $('sidebar-status').innerHTML = `<span class="card-status-badge status-error">Error</span>`;
           toast('Error: ' + (payload.message || 'Error desconocido'), 'error');
-          evtSource.close();
+          sse.close();
           state.processingSSE = null;
           stopPolling();
           break;
 
         case 'stream_end':
-          evtSource.close();
+          sse.close();
           state.processingSSE = null;
           break;
       }
-    };
+    }
 
-    evtSource.onerror = () => {
-      evtSource.close();
+    async function pump() {
+      let resp;
+      try {
+        resp = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error(`SSE HTTP ${resp.status}`);
+        if (!resp.body || typeof resp.body.getReader !== 'function') {
+          throw new Error('SSE response has no readable stream');
+        }
+        readyState = 1; // EventSource.OPEN
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (closed) return;
+          buffer += decoder.decode(value, { stream: true });
+          let sep;
+          while (!closed && (sep = buffer.indexOf('\n\n')) !== -1) {
+            const frame = buffer.slice(0, sep);
+            buffer = buffer.slice(sep + 2);
+            const dataLine = frame.split('\n').find((l) => l.startsWith('data:'));
+            if (!dataLine) continue;
+            const raw = dataLine.slice(5).trim();
+            if (!raw) continue;
+            let payload;
+            try {
+              payload = JSON.parse(raw);
+            } catch {
+              continue;
+            }
+            await handleEvent(payload);
+          }
+        }
+        // Stream closed by the server without an explicit stream_end frame:
+        // treat it like EventSource's automatic reconnection path.
+        onError();
+      } catch (err) {
+        if (closed) return;
+        onError();
+      }
+    }
+
+    function onError() {
+      if (closed) return;
+      closed = true;
+      readyState = 2; // EventSource.CLOSED
       state.processingSSE = null;
       if (state.currentProjectId !== projectId) return;
       const isActive = state.currentProject && ['pending', 'uploading', 'segmenting', 'processing'].includes(state.currentProject.status);
@@ -286,7 +375,9 @@ export function startSSE(projectId, opts = {}) {
       } else {
         startCurrentProjectPolling(projectId);
       }
-    };
+    }
+
+    pump();
   }
 
   connect();

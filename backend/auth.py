@@ -13,9 +13,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else None
 
-# Legacy JWT secret (for backwards compatibility with old HS256 tokens)
-JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET") or os.environ.get("JWT_SECRET")
-
 security = HTTPBearer(auto_error=False)
 
 # Cache for JWKS
@@ -89,7 +86,7 @@ def _jwk_to_pem(jwk: dict) -> str:
 def verify_supabase_jwt(token: str) -> str:
     """Verify Supabase access token and return user_id (sub). Raises on invalid token.
 
-    Supports ES256 (ECC P-256) via JWKS and legacy HS256 via JWT_SECRET.
+    Only ES256 (ECC P-256) tokens are accepted, verified via Supabase JWKS.
     """
     try:
         # Decode without verification to get the header
@@ -103,50 +100,30 @@ def verify_supabase_jwt(token: str) -> str:
             detail=f"Invalid token format: {e}",
         )
 
-    # Try ES256 with JWKS
-    if alg == "ES256" and kid:
-        try:
-            jwk = _get_signing_key(kid)
-            pem = _jwk_to_pem(jwk)
-            payload = jwt.decode(
-                token,
-                pem,
-                algorithms=["ES256"],
-                audience="authenticated",
-            )
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token expired",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid token: {e}",
-            )
-    # Fallback to legacy HS256
-    elif alg == "HS256" and JWT_SECRET:
-        try:
-            payload = jwt.decode(
-                token,
-                JWT_SECRET,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token expired",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
-    else:
+    if alg != "ES256" or not kid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Unsupported algorithm: {alg}",
+        )
+
+    try:
+        jwk = _get_signing_key(kid)
+        pem = _jwk_to_pem(jwk)
+        payload = jwt.decode(
+            token,
+            pem,
+            algorithms=["ES256"],
+            audience="authenticated",
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid token: {e}",
         )
 
     user_id = payload.get("sub")

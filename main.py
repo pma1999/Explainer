@@ -306,6 +306,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/healthz")
+async def healthz():
+    """Public healthcheck: no auth, no Supabase, responds immediately.
+
+    Used by the platform (koyeb.yaml) so liveness probes don't hit
+    auth-protected endpoints (which returned 401 and caused restart loops).
+    """
+    return {"ok": True, "status": "healthy"}
+
+
 def _validate_gemini_api_key(api_key: str) -> str:
     """Validate and normalize Gemini API key. Raises HTTPException on invalid input."""
     key = (api_key or "").strip()
@@ -1955,6 +1966,9 @@ async def _format_and_finalize_part(
     """
     fmt_start = time.time()
     fmt_usage: dict = {}
+    formatter_error_message: str | None = None
+    failure_message: str | None = None
+    save_failed: bool = False
     try:
         is_markdown_format = isinstance(explainer_data, dict) and explainer_data.get("_format") == "markdown"
         if not isinstance(explainer_data, Exception) and isinstance(explainer_data, dict) and not is_markdown_format:
@@ -1981,15 +1995,106 @@ async def _format_and_finalize_part(
                 },
             )
     except Exception as exc:
+        formatter_error_message = str(exc)[:500]
         logger.warning(
             f"[Format] Error inesperado al formatear parte {part_id}, se conserva el original: {exc}",
             extra={"part_id": part_id, "error": str(exc)[:300]},
         )
     finally:
-        partes_contenido[str(part_id)]["formatter_version"] = 1
-        partes_contenido[str(part_id)]["status"] = "completed"
-        update_project(project_id, user_id, {"partes_contenido": partes_contenido})
-        await send_event(project_id, {"type": "part_completed", "part_id": part_id})
+        part_data = partes_contenido[str(part_id)]
+        part_data["formatter_version"] = 1
+
+        # Estado honesto: si el explainer falló (Exception o dict con "error")
+        # o el formatter lanzó excepción, la parte NO está completada.
+        if formatter_error_message:
+            failure_message = f"Error al formatear la parte: {formatter_error_message}"
+        elif isinstance(explainer_data, Exception):
+            failure_message = f"Explainer falló: {explainer_data}"
+        elif isinstance(explainer_data, dict) and "error" in explainer_data:
+            failure_message = str(explainer_data.get("error")) or "Explainer devolvió un error"
+
+        if failure_message:
+            part_data["status"] = "failed"
+            part_data["error_message"] = failure_message
+        else:
+            part_data["status"] = "completed"
+            part_data.pop("error_message", None)
+
+        save_result = update_project(project_id, user_id, {"partes_contenido": partes_contenido})
+        if save_result is None:
+            # Persistencia fallida: la parte no llegó a Supabase.
+            save_failed = True
+            part_data["status"] = "failed"
+            part_data["error_message"] = "No se pudo guardar la parte en Supabase"
+            logger.error(
+                "[Format] No se pudo guardar la parte %s en Supabase (project_id=%s)",
+                part_id,
+                project_id,
+                extra={"project_id": project_id, "part_id": part_id},
+            )
+
+    if save_failed:
+        await send_event(
+            project_id,
+            {"type": "part_failed", "part_id": part_id, "message": "No se pudo guardar la parte en Supabase"},
+        )
+        return
+
+    if failure_message:
+        logger.error(
+            f"[Format] Parte {part_id} fallida: {failure_message}",
+            extra={"project_id": project_id, "part_id": part_id},
+        )
+        await send_event(project_id, {"type": "part_failed", "part_id": part_id, "message": failure_message})
+        return
+
+    await send_event(project_id, {"type": "part_completed", "part_id": part_id})
+
+
+def _failed_part_ids(partes_contenido: dict) -> list[int]:
+    """Return the numeric ids of parts whose honest status is 'failed'."""
+    return [
+        int(part_id)
+        for part_id, part_data in partes_contenido.items()
+        if isinstance(part_data, dict) and part_data.get("status") == "failed"
+    ]
+
+
+def _warn_update_project_failed(project_id: str, context: str) -> None:
+    """Best-effort write returned None (project missing / network / payload too large)."""
+    logger.warning(
+        "[Process] update_project devolvió None (%s) — no se pudo persistir (project_id=%s)",
+        context,
+        project_id,
+        extra={"project_id": project_id, "update_context": context},
+    )
+
+
+def _sanitize_resources_urls(data: dict) -> dict:
+    """Strip non-HTTP(S) URLs from resources agent output before persisting.
+
+    Returns the same dict (mutated). Any `url` that is not a string with an
+    http/https scheme and a host is replaced with "" to avoid storing
+    javascript: URIs, typos or hallucinated links.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("ejes_tematicos"), list):
+        return data
+    for eje in data["ejes_tematicos"]:
+        if not isinstance(eje, dict):
+            continue
+        for recurso in eje.get("recursos") or []:
+            if not isinstance(recurso, dict) or "url" not in recurso:
+                continue
+            url = recurso.get("url")
+            parsed = urlparse(url) if isinstance(url, str) else None
+            if not (parsed and parsed.scheme in {"http", "https"} and parsed.netloc):
+                logger.debug(
+                    "[Process] URL de recurso descartada (no http(s) válida): %r",
+                    url,
+                    extra={"recurso": str(recurso.get("titulo"))[:100]},
+                )
+                recurso["url"] = ""
+    return data
 
 
 async def _process_project(
@@ -2289,7 +2394,9 @@ async def _process_project(
         async def _locked_apply_usage(usage_meta, phase: str = "unknown", *, cost_model: str) -> None:
             async with usage_lock:
                 _update_usage(usage_meta, phase=phase, cost_model=cost_model)
-                await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
+                usage_result = await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
+                if usage_result is None:
+                    _warn_update_project_failed(project_id, f"usage {phase}")
 
         # Determine source type and get file_uri
         source_type = project.get("source_type", "pdf")
@@ -2301,14 +2408,16 @@ async def _process_project(
             if not file_uri:
                 logger.error("[Process] URL de YouTube no encontrada en el proyecto")
                 await send_event(project_id, {"type": "error", "message": "URL de YouTube no encontrada en el proyecto"})
-                update_project(project_id, user_id, {"status": "error", "error_message": "URL de YouTube no configurada"})
+                if update_project(project_id, user_id, {"status": "error", "error_message": "URL de YouTube no configurada"}) is None:
+                    _warn_update_project_failed(project_id, "error youtube sin URL")
                 return
 
             logger.info(f"[Process] Usando URL de YouTube: {file_uri[:80]}...")
             resolved_source_url = file_uri
 
             # Skip "uploading" phase for YouTube - just update status to segmenting
-            update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"})
+            if update_project(project_id, user_id, {"file_uri": file_uri, "status": "segmenting"}) is None:
+                _warn_update_project_failed(project_id, "segmenting youtube")
             await send_event(project_id, {"type": "segmenting"})
 
         elif source_type == "web":
@@ -2316,7 +2425,8 @@ async def _process_project(
             if not source_url:
                 logger.error("[Process] URL web no encontrada en el proyecto")
                 await send_event(project_id, {"type": "error", "message": "URL web no encontrada en el proyecto"})
-                update_project(project_id, user_id, {"status": "error", "error_message": "URL web no configurada"})
+                if update_project(project_id, user_id, {"status": "error", "error_message": "URL web no configurada"}) is None:
+                    _warn_update_project_failed(project_id, "error web sin URL")
                 return
 
             logger.info("[Process] Iniciando preparación de fuente web")
@@ -3444,7 +3554,9 @@ async def _process_project(
                         _update_usage(usage_rec, phase=f"part_{part_id}_recorrido", cost_model=auxiliary_agents_model)
                     if usage_res:
                         _update_usage(usage_res, phase=f"part_{part_id}_resources", cost_model=auxiliary_agents_model)
-                    await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
+                    usage_result = await asyncio.to_thread(update_project, project_id, user_id, {"usage": cumulative_usage})
+                    if usage_result is None:
+                        _warn_update_project_failed(project_id, f"usage part_{part_id}")
                     await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
 
                 # Store explainer (assembled) and notify
@@ -3472,6 +3584,8 @@ async def _process_project(
                         partes_contenido[str(part_id)][agent_name] = {"error": str(result)}
                     else:
                         logger.debug(f"[Process] Agente {agent_name} completado para parte {part_id}")
+                        if agent_name == "resources":
+                            result = _sanitize_resources_urls(result)
                         partes_contenido[str(part_id)][agent_name] = result
                     await send_event(project_id, {"type": "agent_completed", "part_id": part_id, "agent": agent_name})
 
@@ -3543,7 +3657,9 @@ async def _process_project(
             cumulative_usage["total_cost"]       = round(
                 cumulative_usage["total_cost"] + total_fmt_cost, 6
             )
-            update_project(project_id, user_id, {"usage": cumulative_usage})
+            usage_result = update_project(project_id, user_id, {"usage": cumulative_usage})
+            if usage_result is None:
+                _warn_update_project_failed(project_id, "usage formatter")
             await send_event(project_id, {"type": "usage_update", "usage": cumulative_usage})
             logger.info(
                 f"[Process] Coste del formatter: ${total_fmt_cost:.6f} "
@@ -3568,8 +3684,48 @@ async def _process_project(
             }
         )
 
-        update_project(project_id, user_id, {"status": "completed"})
-        await send_event(project_id, {"type": "completed"})
+        failed_parts = _failed_part_ids(partes_contenido)
+        if failed_parts:
+            logger.warning(
+                "[Process] Proyecto completado con %d parte(s) fallida(s): %s",
+                len(failed_parts),
+                failed_parts,
+                extra={
+                    "project_id": project_id,
+                    "failed_parts": failed_parts,
+                    "failed_count": len(failed_parts),
+                },
+            )
+            project_result = update_project(project_id, user_id, {"status": "completed", "failed_parts": failed_parts})
+            if project_result is None:
+                logger.error(
+                    "[Process] No se pudo guardar el proyecto (persistencia) — estado final con partes fallidas no persistido (project_id=%s)",
+                    project_id,
+                    extra={"project_id": project_id, "failed_parts": failed_parts},
+                )
+                await send_event(
+                    project_id,
+                    {"type": "error", "message": "No se pudo guardar el proyecto (persistencia). Recarga la página."},
+                )
+            else:
+                await send_event(
+                    project_id,
+                    {"type": "completed", "has_failed_parts": True, "failed_parts": failed_parts},
+                )
+        else:
+            project_result = update_project(project_id, user_id, {"status": "completed"})
+            if project_result is None:
+                logger.error(
+                    "[Process] No se pudo guardar el proyecto (persistencia) (project_id=%s)",
+                    project_id,
+                    extra={"project_id": project_id},
+                )
+                await send_event(
+                    project_id,
+                    {"type": "error", "message": "No se pudo guardar el proyecto (persistencia). Recarga la página."},
+                )
+            else:
+                await send_event(project_id, {"type": "completed"})
 
     except ExplainerValidationError as exc:
         error_msg = (
@@ -3587,7 +3743,8 @@ async def _process_project(
                 "scope_status": exc.report.scope_status,
             },
         )
-        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        if update_project(project_id, user_id, {"status": "error", "error_message": error_msg}) is None:
+            _warn_update_project_failed(project_id, "error final del proyecto")
         await send_event(project_id, {"type": "error", "message": error_msg})
     except GeminiRateLimitError as exc:
         # Error específico de rate limit - mensaje amigable
@@ -3605,7 +3762,8 @@ async def _process_project(
                 "project_id": project_id,
             }
         )
-        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        if update_project(project_id, user_id, {"status": "error", "error_message": error_msg}) is None:
+            _warn_update_project_failed(project_id, "error final del proyecto")
         await send_event(project_id, {"type": "error", "message": error_msg})
     except GeminiError as exc:
         # Error específico de Gemini API con código de estado
@@ -3646,7 +3804,8 @@ async def _process_project(
                 "error_details": exc.details if hasattr(exc, "details") else None,
             }
         )
-        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        if update_project(project_id, user_id, {"status": "error", "error_message": error_msg}) is None:
+            _warn_update_project_failed(project_id, "error final del proyecto")
         await send_event(project_id, {"type": "error", "message": error_msg})
     except Exception as exc:
         # Error genérico - mostrar mensaje simplificado pero log completo
@@ -3665,7 +3824,8 @@ async def _process_project(
                 "user_id": user_id[:8] + "..." if len(user_id) > 8 else user_id,
             }
         )
-        update_project(project_id, user_id, {"status": "error", "error_message": error_msg})
+        if update_project(project_id, user_id, {"status": "error", "error_message": error_msg}) is None:
+            _warn_update_project_failed(project_id, "error final del proyecto")
         await send_event(project_id, {"type": "error", "message": error_msg})
     finally:
         if mistral_pdf_prepare_task is not None:
@@ -4096,12 +4256,28 @@ async def api_generate_mermaid(
 
 @app.get("/api/projects/{project_id}/events")
 async def api_project_events(
+    request: Request,
     project_id: str,
     token: str | None = Query(None, alias="token"),
 ):
-    user_id = get_user_id_from_token(token)
+    # El token se acepta PRIMERO desde el header Authorization: Bearer <token>.
+    # El query param ?token= se mantiene solo como compatibilidad transitoria.
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        credential = auth_header[len("Bearer "):].strip()
+    else:
+        credential = token
+        if token:
+            logger.warning(
+                "[SSE] Token enviado por query param (deprecated) — usa Authorization: Bearer",
+                extra={"project_id": project_id},
+            )
+    user_id = get_user_id_from_token(credential)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Token requerido (query: token=...)")
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido (header Authorization: Bearer o query: token=...)",
+        )
     if not get_project(project_id, user_id):
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 

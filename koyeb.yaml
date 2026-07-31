@@ -47,7 +47,7 @@ scaling:
 healthcheck:
   protocol: http
   port: 8000
-  path: /api/settings/api-key/status
+  path: /healthz
   method: GET
   grace_period: 30
   interval: 15
