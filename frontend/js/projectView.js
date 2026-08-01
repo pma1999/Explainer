@@ -7,6 +7,7 @@ import { $, show, hide, formatDate, statusLabel, formatIconForResource, escHtml,
 import { api } from './api.js';
 import { loadBackupAsync, syncProjectsToBackup } from './storage.js';
 import { isOffline } from './pwa.js';
+import { getTargetLanguage } from './landing.js';
 
 /**
  * Renders markdown text to HTML using marked.js.
@@ -1007,6 +1008,201 @@ function renderResources(data) {
   return html;
 }
 
+/* ============================================================
+   REPASO ACTIVO — on-demand self-assessment (5 questions)
+   ============================================================ */
+
+function _renderReviewTab(data, contenido) {
+  // The part's own pipeline failed → reuse the standard error state.
+  if (contenido.explainer?.error) {
+    return `<div class="error-state"><div class="error-state-title">Error en la generación</div>${escHtml(contenido.explainer.error)}</div>`;
+  }
+  if (!data) {
+    return state.isSharedView
+      ? `<div class="review-shared-empty">Esta sección no tiene repaso disponible.</div>`
+      : renderReviewEmpty(state.currentPartId, null);
+  }
+  if (data.error) {
+    // A previous generation attempt failed → offer a retry.
+    return state.isSharedView
+      ? `<div class="error-state"><div class="error-state-title">Error en la generación</div>${escHtml(data.error)}</div>`
+      : renderReviewEmpty(state.currentPartId, data.error);
+  }
+  return renderReview(data);
+}
+
+function renderReviewEmpty(partId, errorMsg) {
+  const isRetry = !!errorMsg;
+  const errorHtml = errorMsg
+    ? `<div class="review-empty-error">${escHtml(errorMsg)}</div>`
+    : '';
+  return `
+    <div class="review-empty">
+      <div class="review-empty-icon" aria-hidden="true">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M9.6 9.7a2.7 2.7 0 1 1 5 1.6c-1 .9-2.6 1.7-2.6 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="12" cy="17.6" r="1.1" fill="currentColor"/>
+        </svg>
+      </div>
+      <div class="review-empty-title">Repaso activo</div>
+      <p class="review-empty-text">Pon a prueba tu comprensión de esta sección con 5 preguntas.</p>
+      ${errorHtml}
+      <button type="button" class="btn-review-primary btn-generate-review" data-part-id="${partId}"
+        aria-label="${isRetry ? 'Reintentar generar el repaso' : 'Generar el repaso de esta sección'}">
+        <span class="btn-review-spinner" aria-hidden="true"></span>
+        <span class="btn-review-label">${isRetry ? 'Reintentar' : 'Repasar esta sección'}</span>
+      </button>
+      <p class="review-empty-hint">La respuesta solo se muestra cuando la pides, para que la autoevaluación sea honesta.</p>
+    </div>`;
+}
+
+function renderReview(data) {
+  const preguntas = Array.isArray(data.preguntas) ? data.preguntas : [];
+  const cards = preguntas.map((q, i) => {
+    const id = `review-answer-${i + 1}`;
+    const num = q.numero ?? i + 1;
+    const refChip = q.referencia
+      ? `<span class="review-ref-chip">${escHtml(q.referencia)}</span>`
+      : '';
+    return `
+      <article class="review-card">
+        <div class="review-card-front">
+          <span class="review-card-num">Pregunta ${escHtml(String(num))}</span>
+          <p class="review-card-question">${escHtml(q.pregunta)}</p>
+          <button type="button" class="review-reveal" aria-expanded="false" aria-controls="${id}">
+            <svg class="review-reveal-chevron" width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M6 8.5l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="review-reveal-label">Mostrar respuesta</span>
+          </button>
+        </div>
+        <div class="review-card-answer" id="${id}" role="region">
+          <div class="review-answer-inner">
+            <div class="review-answer-text">${nl2p(q.respuesta_razonada)}</div>
+            ${refChip ? `<div class="review-answer-ref">${refChip}</div>` : ''}
+          </div>
+        </div>
+      </article>`;
+  }).join('');
+
+  const nota = data.nota
+    ? `<aside class="review-note">
+        <div class="review-note-label">Nota de estudio</div>
+        <div class="review-note-text">${nl2p(data.nota)}</div>
+      </aside>`
+    : '';
+
+  const regenBtn = state.isSharedView ? '' : `
+    <button type="button" class="btn-regenerate-review" data-part-id="${state.currentPartId}"
+      aria-label="Regenerar el repaso de esta sección">
+      <span class="btn-review-spinner" aria-hidden="true"></span>
+      <svg class="review-regen-icon" width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3v3.4h-3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="btn-review-label">Regenerar</span>
+    </button>`;
+
+  return `
+    <div class="review-container">
+      <div class="review-head">
+        <span class="review-head-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M9.6 9.7a2.7 2.7 0 1 1 5 1.6c-1 .9-2.6 1.7-2.6 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="12" cy="17.6" r="1.1" fill="currentColor"/>
+          </svg>
+        </span>
+        <div class="review-head-text">
+          <div class="review-kicker">Autoevaluación</div>
+          <h3 class="review-title">Repaso activo</h3>
+          <p class="review-subtitle">Cinco preguntas para comprobar que la sección quedó bien asentada.</p>
+        </div>
+      </div>
+      <div class="review-cards">${cards}</div>
+      ${nota}
+      ${regenBtn ? `<div class="review-actions">${regenBtn}</div>` : ''}
+    </div>`;
+}
+
+/**
+ * Generates (or regenerates) the active review for a part.
+ * On success the response is cached into state so re-opening the section
+ * shows it directly, without another API call or credit cost.
+ */
+export async function generateReview(partId, opts = {}) {
+  const regenerate = Boolean(opts.regenerate);
+  const contentEl = document.getElementById('content-repaso');
+  const projectId = state.currentProjectId;
+  if (!contentEl || !projectId) return;
+
+  const btn = contentEl.querySelector(regenerate ? '.btn-regenerate-review' : '.btn-generate-review');
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    const label = btn.querySelector('.btn-review-label');
+    if (label) label.textContent = regenerate ? 'Regenerando…' : 'Generando…';
+  }
+
+  try {
+    const result = await api(`/api/projects/${projectId}/parts/${partId}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regenerate, target_language: getTargetLanguage() }),
+    });
+
+    const review = result?.review || null;
+    if (state.currentProject?.partes_contenido?.[String(partId)]) {
+      state.currentProject.partes_contenido[String(partId)].review = review;
+    }
+    renderTab('repaso', state.currentProject?.partes_contenido?.[String(partId)]);
+  } catch (err) {
+    const message = err?.message || 'Error desconocido';
+    if (state.currentProject?.partes_contenido?.[String(partId)]) {
+      state.currentProject.partes_contenido[String(partId)].review = { error: message };
+    }
+    renderTab('repaso', state.currentProject?.partes_contenido?.[String(partId)]);
+    toast('Error al generar el repaso: ' + message, 'error');
+  }
+}
+
+let _reviewListenersAttached = false;
+
+/**
+ * Delegated click handling for dynamically-rendered Repaso UI:
+ * reveal toggles, generate and regenerate buttons.
+ */
+export function initReviewTabListeners() {
+  if (_reviewListenersAttached) return;
+  _reviewListenersAttached = true;
+  document.addEventListener('click', (e) => {
+    const reveal = e.target.closest('.review-reveal');
+    if (reveal) {
+      const card = reveal.closest('.review-card');
+      if (!card) return;
+      const willReveal = !card.classList.contains('revealed');
+      card.classList.toggle('revealed', willReveal);
+      reveal.setAttribute('aria-expanded', String(willReveal));
+      const label = reveal.querySelector('.review-reveal-label');
+      if (label) label.textContent = willReveal ? 'Ocultar respuesta' : 'Mostrar respuesta';
+      return;
+    }
+    const genBtn = e.target.closest('.btn-generate-review');
+    if (genBtn && !genBtn.disabled) {
+      const partId = parseInt(genBtn.dataset.partId, 10);
+      if (!Number.isNaN(partId)) generateReview(partId, { regenerate: false });
+      return;
+    }
+    const regenBtn = e.target.closest('.btn-regenerate-review');
+    if (regenBtn && !regenBtn.disabled) {
+      const partId = parseInt(regenBtn.dataset.partId, 10);
+      if (!Number.isNaN(partId) && window.confirm('Regenerar consume crédito de tu API key. ¿Continuar?')) {
+        generateReview(partId, { regenerate: true });
+      }
+    }
+  });
+}
+
 export function renderTab(tabName, contenido) {
   const loadingId = `loading-${tabName}`;
   const contentId = `content-${tabName}`;
@@ -1023,6 +1219,7 @@ export function renderTab(tabName, contenido) {
   const agentKey = tabName === 'explicacion' ? 'explainer'
     : tabName === 'recorrido' ? 'recorrido'
     : tabName === 'recursos' ? 'resources'
+    : tabName === 'repaso' ? 'review'
     : 'mermaid';
   const data = contenido[agentKey];
 
@@ -1052,7 +1249,12 @@ export function renderTab(tabName, contenido) {
     return;
   }
 
+  // Repaso Activo is generated on-demand — independent of the main pipeline
   hide(loading);
+  if (tabName === 'repaso') {
+    contentEl.innerHTML = _renderReviewTab(data, contenido);
+    return;
+  }
 
   if (!data) {
     // Part has SOME agents ready, but this specific tab is still generating:
@@ -1175,6 +1377,7 @@ export function selectPart(partId) {
   renderTab('recorrido', contenido);
   renderTab('recursos', contenido);
   renderTab('esquema', contenido);
+  renderTab('repaso', contenido);
 
   activateTab(state.activeTab);
 
@@ -1282,6 +1485,7 @@ export async function handleReformat() {
         renderTab('recorrido', contenido);
         renderTab('recursos', contenido);
         renderTab('esquema', contenido);
+        renderTab('repaso', contenido);
       }
     }
 

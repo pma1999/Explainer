@@ -20,7 +20,7 @@ import { stopPolling } from './sse.js';
 import { initVisibilityHandling } from './sse.js';
 import { initObsidianExport, initFullProjectExport, exportProjectsBackup, importProjectsBackup } from './export.js';
 import { initShareModal } from './share.js';
-import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText, refreshGhostRailReadState, generateEsquema } from './projectView.js';
+import { selectPart, activateTab, markSectionComplete, toggleSectionComplete, renderProjectView, updateSharedCtaFloatingVisibility, initSharedCtaListeners, handleReformat, updateReformatBanner, positionGhostRailNodes, updateGhostRailActive, updateSmartBarText, refreshGhostRailReadState, generateEsquema, initReviewTabListeners } from './projectView.js';
 import { initPWA } from './pwa.js';
 import { initProgressSyncLifecycle, recordSubsectionProgress, flushSubsectionProgress } from './progressSync.js';
 
@@ -700,6 +700,9 @@ function bootstrap() {
       if (!isNaN(partId)) generateEsquema(partId);
     }
   });
+
+  // Delegated handler for dynamically-rendered Repaso Activo UI
+  initReviewTabListeners();
 
   // When network is restored, re-evaluate the reformat banner (it's hidden while offline).
   window.addEventListener('explainer:online', () => {

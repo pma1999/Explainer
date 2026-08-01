@@ -755,6 +755,14 @@
               </svg>
               Esquema Visual
             </button>
+            <button class="tab-btn" data-tab="repaso">
+              <svg class="tab-svg" width="15" height="15" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6"/>
+                <path d="M8 8.1a2.2 2.2 0 1 1 4.1 1.3c-.8.9-2.1 1.4-2.1 2.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <circle cx="10" cy="15.2" r="1" fill="currentColor"/>
+              </svg>
+              Repaso
+            </button>
           </div>
 
           <!-- Tab panels -->
@@ -788,6 +796,15 @@
           <div class="tab-panel hidden" id="panel-esquema">
             <div class="panel-loading hidden" id="loading-esquema"></div>
             <div class="panel-content" id="content-esquema"></div>
+          </div>
+
+          <div class="tab-panel hidden" id="panel-repaso">
+            <div class="panel-loading hidden" id="loading-repaso">
+              <div class="skeleton-block"></div>
+              <div class="skeleton-block skeleton-short"></div>
+              <div class="skeleton-block skeleton-med"></div>
+            </div>
+            <div class="panel-content" id="content-repaso"></div>
           </div>
 
         </div>

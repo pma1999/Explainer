@@ -305,10 +305,11 @@ class TestProcessProject:
         ):
             with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
                 with patch("main._process_project", new=_fake_process):
-                    r = auth_client.post(
-                        "/api/projects/proj-1/process",
-                        headers={"Authorization": "Bearer fake-token"},
-                    )
+                    with patch("main.update_project", return_value={"id": "proj-1"}):
+                        r = auth_client.post(
+                            "/api/projects/proj-1/process",
+                            headers={"Authorization": "Bearer fake-token"},
+                        )
 
         assert r.status_code == 200
         assert r.json()["explainer_provider"] == "gemini"
@@ -356,11 +357,12 @@ class TestProcessProject:
         ):
             with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
                 with patch("main._process_project", new=_fake_process):
-                    r = auth_client.post(
-                        "/api/projects/yt-1/process",
-                        headers={"Authorization": "Bearer fake-token"},
-                        json={"explainer_provider": "openrouter"},
-                    )
+                    with patch("main.update_project", return_value={"id": "yt-1"}):
+                        r = auth_client.post(
+                            "/api/projects/yt-1/process",
+                            headers={"Authorization": "Bearer fake-token"},
+                            json={"explainer_provider": "openrouter"},
+                        )
 
         assert r.status_code == 200
         assert r.json()["ok"] is True
@@ -392,14 +394,15 @@ class TestProcessProject:
         ):
             with patch("main.has_user_api_key", side_effect=lambda uid, provider="google_gemini": True):
                 with patch("main._process_project", new=_fake_process):
-                    r = auth_client.post(
-                        "/api/projects/proj-1/process",
-                        headers={"Authorization": "Bearer fake-token"},
-                        json={
-                            "explainer_provider": "openrouter",
-                            "openrouter_model": "xiaomi/mimo-v2.5",
-                        },
-                    )
+                    with patch("main.update_project", return_value={"id": "proj-1"}):
+                        r = auth_client.post(
+                            "/api/projects/proj-1/process",
+                            headers={"Authorization": "Bearer fake-token"},
+                            json={
+                                "explainer_provider": "openrouter",
+                                "openrouter_model": "xiaomi/mimo-v2.5",
+                            },
+                        )
 
         assert r.status_code == 200
         assert r.json()["explainer_provider"] == "openrouter"
@@ -456,14 +459,15 @@ class TestProcessProject:
         ):
             with patch("main.has_user_api_key", side_effect=_has_key):
                 with patch("main._process_project", new=_fake_process):
-                    r = auth_client.post(
-                        "/api/projects/proj-web/process",
-                        headers={"Authorization": "Bearer fake-token"},
-                        json={
-                            "explainer_provider": "deepseek",
-                            "deepseek_model": "deepseek-v4-flash",
-                        },
-                    )
+                    with patch("main.update_project", return_value={"id": "proj-web"}):
+                        r = auth_client.post(
+                            "/api/projects/proj-web/process",
+                            headers={"Authorization": "Bearer fake-token"},
+                            json={
+                                "explainer_provider": "deepseek",
+                                "deepseek_model": "deepseek-v4-flash",
+                            },
+                        )
 
         assert r.status_code == 200
         assert r.json()["explainer_provider"] == "deepseek"
@@ -569,11 +573,12 @@ class TestMistralApiKeys:
                     return None
 
                 with patch("main._process_project", new=_fake_process):
-                    response = auth_client.post(
-                        "/api/projects/proj-web/process",
-                        headers={"Authorization": "Bearer fake-token"},
-                        json={"explainer_provider": "openrouter"},
-                    )
+                    with patch("main.update_project", return_value={"id": "proj-web"}):
+                        response = auth_client.post(
+                            "/api/projects/proj-web/process",
+                            headers={"Authorization": "Bearer fake-token"},
+                            json={"explainer_provider": "openrouter"},
+                        )
 
         assert response.status_code == 200
 

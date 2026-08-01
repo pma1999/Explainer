@@ -96,6 +96,15 @@ export function isValidTargetLanguage(language) {
   return SUPPORTED_TARGET_LANGUAGES.includes(language);
 }
 
+/**
+ * Read-only access to the user's currently selected target language.
+ * The module keeps the mutable value private; consumers (e.g. the Repaso
+ * agent) read it through this getter so selection logic stays in one place.
+ */
+export function getTargetLanguage() {
+  return currentTargetLanguage;
+}
+
 function setTargetLanguage(language) {
   currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
   const targetLanguageSelect = $('target-language');

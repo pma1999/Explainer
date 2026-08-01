@@ -5653,3 +5653,479 @@ body.is-offline .project-card[data-pinned="true"] {
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+/* ========================================================================
+   REPASO ACTIVO — Self-assessment flashcards (on-demand, dark academic)
+   Scholarly Forge: solo tokens del tema (ink / gold / fonts).
+   ======================================================================== */
+
+/* ── Panel ── */
+#panel-repaso .panel-content {
+  padding: 40px 40px 80px;
+}
+
+.review-container {
+  max-width: 760px;
+}
+
+/* ── Header ── */
+.review-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.review-head-mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  margin-top: 2px;
+}
+
+.review-head-text {
+  min-width: 0;
+}
+
+.review-kicker {
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 4px;
+}
+
+.review-title {
+  font-family: var(--font-display-r);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.review-subtitle {
+  font-family: var(--font-ui-r);
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── Cards (stacked flashcards) ── */
+.review-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.review-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--ink-700) 0%, var(--ink-800) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 28px rgba(0, 0, 0, 0.28);
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.review-card:hover {
+  border-color: var(--gold-border);
+  transform: translateY(-2px);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 16px 36px rgba(0, 0, 0, 0.35), 0 0 24px var(--gold-glow);
+}
+
+.review-card-front {
+  padding: 22px 24px 20px;
+}
+
+.review-card-num {
+  display: inline-block;
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+
+.review-card-question {
+  font-family: var(--font-display-r);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
+}
+
+/* Reveal button */
+.review-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--gold-border);
+  border-radius: 999px;
+  color: var(--gold);
+  font-family: var(--font-ui-r);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.review-reveal:hover {
+  background: var(--gold-soft);
+  border-color: var(--gold);
+}
+
+.review-reveal:active {
+  transform: scale(0.98);
+}
+
+.review-reveal .review-reveal-chevron {
+  transition: transform 0.3s ease;
+}
+
+.review-card.revealed .review-reveal-chevron {
+  transform: rotate(180deg);
+}
+
+/* Answer accordion (grid-rows animation for a smooth reveal) */
+.review-card-answer {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.38s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+}
+
+.review-card.revealed .review-card-answer {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.review-answer-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.review-answer-text {
+  font-family: var(--font-reading);
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  margin: 0 24px;
+  padding: 18px 0 4px;
+}
+
+.review-answer-text p {
+  margin: 0 0 0.9em;
+}
+
+.review-answer-text p:last-child {
+  margin-bottom: 0;
+}
+
+.review-answer-ref {
+  margin: 0 24px;
+  padding: 10px 0 20px;
+}
+
+.review-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  border-radius: 999px;
+  color: var(--gold);
+  font-family: SFMono-Regular, Consolas, Monaco, 'Liberation Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Study note ── */
+.review-note {
+  margin-top: 28px;
+  padding: 18px 22px;
+  background: var(--ink-700);
+  border-left: 3px solid var(--gold);
+  border-radius: 10px;
+}
+
+.review-note-label {
+  font-family: var(--font-ui-r);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.review-note-text {
+  font-family: var(--font-reading);
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.review-note-text p {
+  margin: 0 0 0.8em;
+}
+
+.review-note-text p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Actions (regenerate) ── */
+.review-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+.btn-regenerate-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: var(--font-ui-r);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.btn-regenerate-review:hover:not(:disabled) {
+  color: var(--gold);
+  border-color: var(--gold-border);
+  background: var(--gold-dim);
+}
+
+/* ── Empty / invitation state ── */
+.review-empty {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 72px 24px 84px;
+  text-align: center;
+}
+
+.review-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  color: var(--gold);
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  box-shadow: 0 0 32px var(--gold-glow);
+  margin-bottom: 22px;
+}
+
+.review-empty-title {
+  font-family: var(--font-display-r);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+}
+
+.review-empty-text {
+  font-family: var(--font-ui-r);
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  margin: 0 auto 26px;
+  max-width: 380px;
+}
+
+.review-empty-hint {
+  font-family: var(--font-ui-r);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin: 18px auto 0;
+  max-width: 340px;
+}
+
+.review-empty-error {
+  max-width: 480px;
+  margin: 0 auto 20px;
+  padding: 12px 16px;
+  background: rgba(200, 60, 60, 0.1);
+  border: 1px solid rgba(200, 60, 60, 0.3);
+  border-radius: 8px;
+  color: #e07070;
+  font-family: var(--font-ui-r);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+/* ── Primary CTA ── */
+.btn-review-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 30px;
+  background: var(--gold);
+  color: #000;
+  border: none;
+  border-radius: 10px;
+  font-family: var(--font-ui-r);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 0 24px var(--gold-glow);
+  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.btn-review-primary:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4), 0 0 30px var(--gold-glow);
+}
+
+.btn-review-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-review-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── In-button spinner ── */
+.btn-review-spinner {
+  display: none;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border: 2px solid rgba(0, 0, 0, 0.25);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: reviewSpin 0.8s linear infinite;
+}
+
+.btn-regenerate-review .btn-review-spinner {
+  border-color: rgba(232, 184, 109, 0.25);
+  border-top-color: var(--gold);
+}
+
+.btn-review-primary.is-loading .btn-review-spinner,
+.btn-regenerate-review.is-loading .btn-review-spinner {
+  display: inline-block;
+}
+
+.btn-regenerate-review.is-loading .review-regen-icon {
+  display: none;
+}
+
+@keyframes reviewSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Shared view (read-only) ── */
+.review-shared-empty {
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-family: var(--font-ui-r);
+  font-size: 13.5px;
+}
+
+/* ── Focus visibility ── */
+.btn-review-primary:focus-visible,
+.btn-regenerate-review:focus-visible,
+.review-reveal:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-card-answer,
+  .review-reveal .review-reveal-chevron,
+  .review-card,
+  .btn-review-primary,
+  .btn-regenerate-review,
+  .review-reveal {
+    transition: none;
+  }
+
+  .btn-review-spinner {
+    animation-duration: 1.2s;
+  }
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  #panel-repaso .panel-content {
+    padding: 24px 16px 56px;
+  }
+
+  .review-head {
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+  }
+
+  .review-card-front {
+    padding: 18px 18px 16px;
+  }
+
+  .review-answer-text {
+    margin: 0 18px;
+  }
+
+  .review-answer-ref {
+    margin: 0 18px;
+  }
+
+  .review-empty {
+    padding: 48px 16px 60px;
+  }
+
+  .btn-review-primary {
+    width: 100%;
+  }
+
+  .review-actions {
+    justify-content: stretch;
+  }
+
+  .btn-regenerate-review {
+    justify-content: center;
+    width: 100%;
+  }
+}

@@ -105,6 +105,7 @@ from backend.agents.completeness_validator import (
 )
 from backend.agents.recorrido import run_recorrido, run_recorrido_ds, run_recorrido_or
 from backend.agents.resources import run_resources, run_resources_ds, run_resources_or
+from backend.agents.review import run_review, run_review_ds, run_review_or
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
 from backend.agents.formatter import format_explainer_content, format_explainer_content_ds, format_explainer_content_or
 from backend.agents.language_policy import normalize_target_language
@@ -183,6 +184,14 @@ class ProcessProjectRequest(BaseModel):
     deepseek_model: DeepSeekExplainerModel | None = None
     openrouter_provider: str | None = None
     openrouter_provider_only: bool = False
+
+
+class ReviewRequest(BaseModel):
+    regenerate: bool = False
+    target_language: str | None = None
+    explainer_provider: str | None = None
+    openrouter_model: str | None = None
+    deepseek_model: str | None = None
 
 
 def _resolve_explainer_model(
@@ -2095,6 +2104,32 @@ def _sanitize_resources_urls(data: dict) -> dict:
                 )
                 recurso["url"] = ""
     return data
+
+
+def _accumulate_review_usage(cumulative_usage: dict, usage_meta, *, cost_model: str) -> None:
+    """Accumulate review agent usage into a project usage dict (mirrors _update_usage)."""
+    if not usage_meta:
+        return
+    p = getattr(usage_meta, "prompt_token_count", 0) or 0
+    tp = getattr(usage_meta, "tool_use_prompt_token_count", 0) or 0
+    c = getattr(usage_meta, "candidates_token_count", 0) or 0
+    t = getattr(usage_meta, "thoughts_token_count", 0) or 0
+    tt = getattr(usage_meta, "total_token_count", 0) or 0
+    cumulative_usage["prompt_tokens"] = cumulative_usage.get("prompt_tokens", 0) + p + tp
+    cumulative_usage["tool_use_prompt_tokens"] = cumulative_usage.get("tool_use_prompt_tokens", 0) + tp
+    cumulative_usage["candidates_tokens"] = cumulative_usage.get("candidates_tokens", 0) + c
+    cumulative_usage["thoughts_tokens"] = cumulative_usage.get("thoughts_tokens", 0) + t
+    cumulative_usage["total_tokens"] = cumulative_usage.get("total_tokens", 0) + tt
+    raw_cost_usd = getattr(usage_meta, "cost_usd", None)
+    if (
+        isinstance(raw_cost_usd, (int, float))
+        and math.isfinite(raw_cost_usd)
+        and raw_cost_usd >= 0
+    ):
+        cost = round(float(raw_cost_usd), 6)
+    else:
+        cost = calculate_cost(cost_model, usage_meta)
+    cumulative_usage["total_cost"] = round(cumulative_usage.get("total_cost", 0.0) + cost, 6)
 
 
 async def _process_project(
@@ -4158,6 +4193,16 @@ async def api_process_project(
     openrouter_provider_routing = _build_openrouter_provider_routing(
         openrouter_provider, openrouter_provider_only
     )
+    # Persist the explainer config so on-demand features (e.g. review) can reuse
+    # the same provider/model that generated each part.
+    update_project(project_id, user_id, {
+        "explainer_config": {
+            "provider": explainer_provider,
+            "model": explainer_model,
+            "openrouter_model": openrouter_model,
+            "deepseek_model": deepseek_model,
+        }
+    })
     background_tasks.add_task(
         _process_project,
         project_id,
@@ -4252,6 +4297,163 @@ async def api_generate_mermaid(
         extra={"project_id": project_id, "part_id": part_id},
     )
     return {"ok": True, "mermaid": result_dict, "cached": False}
+
+
+@app.post("/api/projects/{project_id}/parts/{part_id}/review")
+async def api_part_review(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    project_id: str,
+    part_id: str,
+    payload: ReviewRequest | None = Body(default=None),
+) -> dict:
+    """Generate (or return cached) an active-review quiz for a part.
+
+    Uses the same provider/model that generated the part's explainer
+    (persisted in explainer_config), with fallback to request body fields.
+    """
+    project = get_project(project_id, user_id, include_internal=True)
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    partes_contenido: dict = dict(project.get("partes_contenido") or {})
+    part_data = partes_contenido.get(part_id)
+    if not part_data:
+        raise HTTPException(status_code=404, detail=f"Parte {part_id} no encontrada")
+
+    explainer = part_data.get("explainer")
+    if explainer is None or not isinstance(explainer, (dict, str)) or (
+        isinstance(explainer, dict) and explainer.get("error")
+    ):
+        raise HTTPException(status_code=400, detail="Esta sección aún no tiene una explicación generada")
+
+    regenerate = payload.regenerate if payload else False
+    cached = part_data.get("review")
+    if (
+        not regenerate
+        and isinstance(cached, dict)
+        and isinstance(cached.get("preguntas"), list)
+        and len(cached.get("preguntas")) > 0
+        and not cached.get("error")
+    ):
+        return {"ok": True, "cached": True, "review": cached}
+
+    # Resolver proveedor/modelo: 1º explainer_config del proyecto; 2º body; 3º 400.
+    explainer_config: dict = project.get("explainer_config") or {}
+    provider = explainer_config.get("provider") or (payload.explainer_provider if payload else None)
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No se pudo determinar el proveedor del explainer. "
+                "Reprocesa el proyecto o indícalo en la petición"
+            ),
+        )
+
+    if provider == EXPLAINER_PROVIDER_GEMINI:
+        model = explainer_config.get("model") or MODEL_AGENTS
+        provider_label = "Gemini"
+        provider_const = PROVIDER_GEMINI
+        review_agent = run_review
+    elif provider == EXPLAINER_PROVIDER_OPENROUTER:
+        model = (
+            (payload.openrouter_model if payload and payload.openrouter_model else None)
+            or explainer_config.get("openrouter_model")
+            or explainer_config.get("model")
+            or OPENROUTER_EXPLAINER_MODEL
+        )
+        provider_label = "OpenRouter"
+        provider_const = PROVIDER_OPENROUTER
+        review_agent = run_review_or
+    elif provider == EXPLAINER_PROVIDER_DEEPSEEK:
+        model = (
+            (payload.deepseek_model if payload and payload.deepseek_model else None)
+            or explainer_config.get("deepseek_model")
+            or explainer_config.get("model")
+            or DEEPSEEK_MODEL_V4_PRO
+        )
+        provider_label = "DeepSeek"
+        provider_const = PROVIDER_DEEPSEEK
+        review_agent = run_review_ds
+    else:
+        raise HTTPException(status_code=400, detail=f"Proveedor de explainer no soportado: {provider}")
+
+    try:
+        target_language_obj = normalize_target_language(payload.target_language if payload else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    target_language_code = target_language_obj.code
+
+    if not has_user_api_key(user_id, provider=provider_const):
+        logger.warning(
+            "[Review] Usuario sin API key %s configurada: %s",
+            provider_label,
+            user_id[:8] + "..." if len(user_id) > 8 else user_id,
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider},
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
+        )
+    api_key = get_user_api_key(user_id, provider=provider_const)
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
+        )
+
+    part_title = f"Parte {part_id}"
+    for parte in (project.get("segmentation") or {}).get("partes") or []:
+        if str(parte.get("numero")) == str(part_id):
+            part_title = str(parte.get("titulo") or "").strip() or part_title
+            break
+
+    try:
+        review, usage_meta = await asyncio.to_thread(
+            review_agent, api_key, explainer, part_title, target_language_code, model
+        )
+    except GeminiRateLimitError as exc:
+        logger.error(
+            "[Review] Rate limit de Gemini (429) para parte %s: %s",
+            part_id,
+            exc.message[:200],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Se ha excedido el límite de peticiones a Gemini API (429). "
+                "Espera unos minutos e inténtalo de nuevo."
+            ),
+        ) from exc
+    except GeminiError as exc:
+        logger.error(
+            "[Review] Error de Gemini para parte %s: %s",
+            part_id,
+            exc.message[:200],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+        )
+        raise HTTPException(status_code=502, detail=f"Error en Gemini API: {exc.message[:200]}") from exc
+    except Exception as exc:
+        logger.exception(
+            "[Review] Error generando repaso para parte %s: %s",
+            part_id,
+            str(exc)[:300],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+        )
+        raise HTTPException(status_code=502, detail=f"Error generando el repaso: {str(exc)[:200]}") from exc
+
+    project_usage: dict = dict(project.get("usage") or {})
+    _accumulate_review_usage(project_usage, usage_meta, cost_model=model)
+    partes_contenido[str(part_id)] = {**part_data, "review": review}
+    save_result = update_project(project_id, user_id, {"partes_contenido": partes_contenido, "usage": project_usage})
+    if save_result is None:
+        raise HTTPException(status_code=502, detail="No se pudo guardar el repaso. Inténtalo de nuevo.")
+
+    logger.info(
+        f"[Review] Repaso generado para proyecto {project_id} parte {part_id}",
+        extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+    )
+    return {"ok": True, "cached": False, "review": review}
 
 
 @app.get("/api/projects/{project_id}/events")

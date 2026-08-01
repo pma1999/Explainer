@@ -301,6 +301,33 @@ export function formatRecursosMd(data, autor, obra, partName) {
   return md.trim() + '\n';
 }
 
+export function formatReviewMd(data, autor, obra, partName) {
+  let md = `# REPASO ACTIVO — ${partName}\n\n`;
+  md += `> [!summary] Autoevaluación\n> Cinco preguntas para repasar la sección **${partName}** de la obra **${obra}** por **${autor}**.\n\n---\n\n`;
+
+  if (Array.isArray(data.preguntas) && data.preguntas.length > 0) {
+    data.preguntas.forEach((q, i) => {
+      const num = q.numero ?? i + 1;
+      md += `## Pregunta ${num}\n\n`;
+      md += `**${cleanMdText(q.pregunta)}**\n\n`;
+      md += `<details><summary>Ver respuesta</summary>\n\n`;
+      md += `${cleanMdText(q.respuesta_razonada)}\n\n`;
+      if (cleanMdText(q.referencia)) {
+        md += `> [!cite] Referencia\n> ${q.referencia.replace(/\n/g, '\n> ')}\n\n`;
+      }
+      md += `</details>\n\n---\n\n`;
+    });
+  }
+
+  if (cleanMdText(data.nota)) {
+    md += `> [!note] Nota de estudio\n> ${data.nota.replace(/\n/g, '\n> ')}\n\n`;
+  }
+
+  const d = new Date();
+  md += `**Fecha de creación:** ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}\n`;
+  return md.trim() + '\n';
+}
+
 function buildFullExportSections(autor, obra) {
   const project = state.currentProject;
   if (!project?.segmentation?.partes) return null;
@@ -329,6 +356,12 @@ function buildFullExportSections(autor, obra) {
       files.push({
         filename: 'recursos.md',
         content: formatRecursosMd(partData.resources, autor, obra, parte.titulo)
+      });
+    }
+    if (partData.review && !partData.review.error) {
+      files.push({
+        filename: 'repaso.md',
+        content: formatReviewMd(partData.review, autor, obra, parte.titulo)
       });
     }
 
@@ -423,7 +456,7 @@ export function initObsidianExport() {
     const obra = inputObra.value.trim() || 'Desconocida';
 
     const scope = document.querySelector('input[name="export-scope"]:checked')?.value || 'current';
-    const tabs = scope === 'current' ? [state.activeTab] : ['explicacion', 'recorrido', 'recursos'];
+    const tabs = scope === 'current' ? [state.activeTab] : ['explicacion', 'recorrido', 'recursos', 'repaso'];
 
     const files = [];
     if (tabs.includes('explicacion') && partData.explainer) {
@@ -442,6 +475,12 @@ export function initObsidianExport() {
       files.push({
         markdown: formatRecursosMd(partData.resources, autor, obra, partName),
         filename: 'recursos.md'
+      });
+    }
+    if (tabs.includes('repaso') && partData.review && !partData.review.error) {
+      files.push({
+        markdown: formatReviewMd(partData.review, autor, obra, partName),
+        filename: 'repaso.md'
       });
     }
 
@@ -559,9 +598,19 @@ export function initFullProjectExport() {
     const readyCount = partes.filter(p =>
       project.partes_contenido?.[String(p.numero)]?.status === 'completed'
     ).length;
+    const fileCount = partes.reduce((n, p) => {
+      const pc = project.partes_contenido?.[String(p.numero)];
+      if (pc?.status !== 'completed') return n;
+      let c = 0;
+      if (pc.explainer) c += 1;
+      if (pc.recorrido) c += 1;
+      if (pc.resources) c += 1;
+      if (pc.review && !pc.review.error) c += 1;
+      return n + c;
+    }, 0);
     summaryText.textContent = readyCount === partes.length
-      ? `${readyCount} secciones · ${readyCount * 3} archivos listos para exportar`
-      : `${readyCount} de ${partes.length} secciones listas · ${readyCount * 3} archivos`;
+      ? `${readyCount} secciones · ${fileCount} archivos listos para exportar`
+      : `${readyCount} de ${partes.length} secciones listas · ${fileCount} archivos`;
 
     sectionList.innerHTML = partes.map(parte => {
       const isReady = project.partes_contenido?.[String(parte.numero)]?.status === 'completed';

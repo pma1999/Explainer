@@ -227,6 +227,6 @@ describe('buildHash', () => {
 
 describe('VALID_TABS', () => {
   it('contains every supported tab', () => {
-    expect(VALID_TABS).toEqual(['explicacion', 'recorrido', 'recursos', 'esquema']);
+    expect(VALID_TABS).toEqual(['explicacion', 'recorrido', 'recursos', 'esquema', 'repaso']);
   });
 });
