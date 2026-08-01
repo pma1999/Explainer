@@ -7,7 +7,7 @@ import { $, show, hide, formatDate, statusLabel, formatIconForResource, escHtml,
 import { api } from './api.js';
 import { loadBackupAsync, syncProjectsToBackup } from './storage.js';
 import { isOffline } from './pwa.js';
-import { getTargetLanguage } from './landing.js';
+import { getTargetLanguage, getReviewProviderConfig } from './landing.js';
 
 /**
  * Renders markdown text to HTML using marked.js.
@@ -1148,7 +1148,7 @@ export async function generateReview(partId, opts = {}) {
     const result = await api(`/api/projects/${projectId}/parts/${partId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regenerate, target_language: getTargetLanguage() }),
+      body: JSON.stringify({ regenerate, target_language: getTargetLanguage(), ...getReviewProviderConfig() }),
     });
 
     const review = result?.review || null;

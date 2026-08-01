@@ -22,6 +22,7 @@ vi.mock('../../frontend/js/state.js', () => ({ state }));
 vi.mock('../../frontend/js/api.js', () => ({ api }));
 vi.mock('../../frontend/js/landing.js', () => ({
   getTargetLanguage: vi.fn(() => 'es-ES'),
+  getReviewProviderConfig: vi.fn(() => ({ explainer_provider: 'gemini' })),
 }));
 vi.mock('../../frontend/js/dom.js', () => ({
   $: (id) => document.getElementById(id),
@@ -126,7 +127,11 @@ describe('Repaso Activo tab (C2)', () => {
       expect(api).toHaveBeenCalledWith('/api/projects/p1/parts/1/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regenerate: false, target_language: 'es-ES' }),
+        body: JSON.stringify({
+          regenerate: false,
+          target_language: 'es-ES',
+          explainer_provider: 'gemini',
+        }),
       });
     });
 
@@ -196,7 +201,11 @@ describe('Repaso Activo tab (C2)', () => {
       expect(api).toHaveBeenCalledWith('/api/projects/p1/parts/1/review', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regenerate: true, target_language: 'es-ES' }),
+        body: JSON.stringify({
+          regenerate: true,
+          target_language: 'es-ES',
+          explainer_provider: 'gemini',
+        }),
       });
     });
     expect(confirmSpy).toHaveBeenCalledWith('Regenerar consume crédito de tu API key. ¿Continuar?');

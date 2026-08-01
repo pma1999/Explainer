@@ -105,6 +105,25 @@ export function getTargetLanguage() {
   return currentTargetLanguage;
 }
 
+/**
+ * Current provider/model selection for the Repaso agent (body fallback).
+ * The backend prefers the persisted `explainer_config` (exact provider/model
+ * used for the part's explainer); these fields are only used when the project
+ * predates that persistence (existing projects) or was processed without it.
+ * Mirrors the processPayload built on project creation (upload flow).
+ */
+export function getReviewProviderConfig() {
+  const config = { explainer_provider: currentExplainerProvider };
+  if (currentExplainerProvider === 'openrouter') {
+    config.openrouter_model = currentOpenRouterMode === 'custom'
+      ? (currentCustomOpenRouterModel || currentOpenRouterModel)
+      : currentOpenRouterModel;
+  } else if (currentExplainerProvider === 'deepseek') {
+    config.deepseek_model = currentDeepSeekModel;
+  }
+  return config;
+}
+
 function setTargetLanguage(language) {
   currentTargetLanguage = isValidTargetLanguage(language) ? language : DEFAULT_TARGET_LANGUAGE;
   const targetLanguageSelect = $('target-language');
