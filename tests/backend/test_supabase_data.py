@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from fastapi import HTTPException
 
 from backend.supabase_data import (
+    _row_to_project,
     _sanitize_project_for_shared,
     _update_reading_progress_minimal,
     apply_section_progress_rpc,
@@ -15,6 +16,7 @@ from backend.supabase_data import (
     revoke_share_token,
     get_project_by_share_token,
     set_section_read_status,
+    update_project,
     update_subsection_progress,
     update_subsection_progress_batch,
 )
@@ -197,6 +199,101 @@ class TestGetProjectByShareToken:
             mock_client.return_value.table.return_value = mock_table
             result = get_project_by_share_token("invalid-token")
         assert result is None
+
+
+class TestUpdateProject:
+    """update_project: A3 hardening — persistence failures return None instead of raising."""
+
+    def _build_mock_chain(self, execute_side_effect=None, execute_return=None):
+        """Builds table().update(payload).eq(id).eq(user_id).execute() mock chain."""
+        inner = MagicMock()
+        if execute_side_effect is not None:
+            inner.execute = MagicMock(side_effect=execute_side_effect)
+        else:
+            inner.execute = MagicMock(return_value=execute_return)
+        after_first_eq = MagicMock()
+        after_first_eq.eq.return_value = inner
+        mock_update = MagicMock()
+        mock_update.eq.return_value = after_first_eq
+        mock_table = MagicMock()
+        mock_table.update.return_value = mock_update
+        return mock_table, mock_update
+
+    def test_returns_none_when_client_raises(self):
+        """Regression: a Supabase error (e.g. missing column, network) must not raise."""
+        mock_table, _ = self._build_mock_chain(execute_side_effect=Exception("column failed_parts does not exist"))
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "processing"},
+            ):
+                result = update_project("p1", "user-uuid", {"status": "completed", "failed_parts": [1]})
+        assert result is None
+
+    def test_sends_failed_parts_and_allowed_fields_in_payload(self):
+        mock_table, mock_update = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "processing"},
+            ):
+                result = update_project("p1", "user-uuid", {"status": "completed", "failed_parts": [1, 3]})
+        assert result is not None
+        payload = mock_table.update.call_args[0][0]
+        assert payload["status"] == "completed"
+        assert payload["failed_parts"] == [1, 3]
+        assert "updated_at" in payload
+
+    def test_strips_non_allowed_fields(self):
+        mock_table, mock_update = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "processing"},
+            ):
+                update_project("p1", "user-uuid", {"status": "completed", "hacked_field": "x", "usage": {}})
+        payload = mock_table.update.call_args[0][0]
+        assert "hacked_field" not in payload
+        assert payload["status"] == "completed"
+        assert payload["usage"] == {}
+
+    def test_returns_none_when_project_not_found(self):
+        with patch("backend.supabase_data.get_project", return_value=None):
+            result = update_project("missing", "user-uuid", {"status": "completed"})
+        assert result is None
+
+    def test_row_to_project_exposes_failed_parts(self):
+        row = {
+            "id": "p1",
+            "name": "T",
+            "description": "",
+            "pdf_filename": "",
+            "user_id": "u",
+            "status": "completed",
+            "failed_parts": [1, 3],
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+        }
+        out = _row_to_project(row)
+        assert out["failed_parts"] == [1, 3]
+
+    def test_row_to_project_without_failed_parts_column(self):
+        """Safe before the migration runs (column absent → None, no crash)."""
+        row = {
+            "id": "p1",
+            "name": "T",
+            "description": "",
+            "pdf_filename": "",
+            "user_id": "u",
+            "status": "completed",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+        }
+        out = _row_to_project(row)
+        assert out["failed_parts"] is None
 
 
 class TestApiUpdateSubsectionProgress:

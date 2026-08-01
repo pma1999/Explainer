@@ -97,6 +97,7 @@ def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict
         "partes_contenido": row.get("partes_contenido") or {},
         "usage": row.get("usage") or {},
         "reading_progress": row.get("reading_progress") or {},
+        "failed_parts": row.get("failed_parts"),
         "error_message": row.get("error_message"),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
         "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
@@ -504,7 +505,18 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
     client = _client()
-    client.table("projects").update(payload).eq("id", project_id).eq("user_id", user_id).execute()
+    try:
+        client.table("projects").update(payload).eq("id", project_id).eq("user_id", user_id).execute()
+    except Exception as exc:
+        # Never let persistence failures raise into pipeline callers: A3 semantics
+        # treat a None result as a persistence failure, so callers can react
+        # (abort / mark part failed) instead of crashing a background task.
+        logger.warning(
+            "Supabase projects update failed (project_id=%s): %s",
+            project_id,
+            str(exc)[:300],
+        )
+        return None
     return get_project(project_id, user_id)
 
 
