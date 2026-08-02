@@ -64,7 +64,6 @@ from backend.gemini_model_routing import (
     MODEL_AGENTS,
     MODEL_CLASSIFIER,
     MODEL_EXPLAINER,
-    MODEL_MERMAID,
     MODEL_SEGMENTADOR,
 )
 
@@ -4256,18 +4255,18 @@ async def api_generate_mermaid(
     if cached and isinstance(cached, dict) and not cached.get("error"):
         return {"ok": True, "mermaid": cached, "cached": True}
 
-    api_key = get_user_api_key(user_id)
+    api_key = get_user_api_key(user_id, provider=PROVIDER_DEEPSEEK)
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="No hay API key de Gemini configurada. Configúrala en Ajustes.",
+            detail="No hay API key de DeepSeek configurada. Configúrala en Ajustes.",
         )
 
     explanation_text = assemble_explanation_text(explainer)
 
     try:
         result_dict, usage_meta = await asyncio.to_thread(
-            generate_mermaid, api_key, explanation_text, MODEL_MERMAID
+            generate_mermaid, api_key, explanation_text
         )
     except Exception as exc:
         err_str = str(exc)

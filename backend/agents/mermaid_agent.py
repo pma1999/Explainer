@@ -5,11 +5,8 @@ import re
 import time
 from typing import Any
 
-from google import genai
-from google.genai import types
-
-from backend.gemini_model_routing import MODEL_MERMAID
-from backend.gemini_client import gemini_retry, generate_content_with_retry
+from backend.deepseek_client import DeepSeekError, call_deepseek_chat
+from backend.deepseek_model_routing import DEEPSEEK_MODEL_V4_FLASH, max_reasoning_effort
 from backend.logging_config import get_logger
 
 logger = get_logger("backend.agents.mermaid_agent")
@@ -180,7 +177,7 @@ def _parse_response(text: str) -> dict[str, str]:
     mermaid_code = mermaid_match.group(1).strip() if mermaid_match else ""
 
     if not mermaid_code:
-        raise ValueError(
+        raise DeepSeekError(
             "No se encontró bloque de código Mermaid en la respuesta del modelo. "
             f"Respuesta recibida (primeros 500 chars): {text[:500]}"
         )
@@ -221,57 +218,59 @@ def _parse_response(text: str) -> dict[str, str]:
     }
 
 
-@gemini_retry(max_retries=5)
 def generate_mermaid(
     api_key: str,
     explanation_text: str,
-    model: str = MODEL_MERMAID,
 ) -> tuple[dict[str, Any], Any]:
-    """Run the Mermaid diagram agent and return (parsed_result, usage_metadata)."""
+    """Run the Mermaid diagram agent and return (parsed_result, usage_metadata).
+
+    Siempre usa el modelo DeepSeek directo ``deepseek-v4-flash``.
+    """
     start_time = time.time()
     logger.info(
         "Iniciando agente mermaid",
         extra={
             "explanation_length": len(explanation_text),
-            "model": model,
+            "model": DEEPSEEK_MODEL_V4_FLASH,
         },
     )
 
-    client = genai.Client(api_key=api_key)
-
     user_text = USER_TEMPLATE.format(explanation_text=explanation_text)
 
-    contents = [
-        types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=user_text)],
-        ),
-    ]
-
-    config = types.GenerateContentConfig(
-        thinking_config=types.ThinkingConfig(thinking_level="HIGH"),
-        system_instruction=[types.Part.from_text(text=SYSTEM_INSTRUCTION)],
-    )
-
-    response = generate_content_with_retry(
-        client=client,
-        model=model,
-        contents=contents,
-        config=config,
-        max_retries=5,
-        operation_context={"agent": "mermaid"},
-    )
+    try:
+        content, usage = call_deepseek_chat(
+            messages=[{"role": "user", "content": user_text}],
+            model=DEEPSEEK_MODEL_V4_FLASH,
+            system_prompt=SYSTEM_INSTRUCTION,
+            api_key=api_key,
+            response_format="text",
+            reasoning_effort=max_reasoning_effort(),
+            max_retries=5,
+        )
+    except DeepSeekError as exc:
+        logger.warning(
+            "[Mermaid] Llamada DeepSeek falló: %s",
+            str(exc)[:300],
+            extra={"model": DEEPSEEK_MODEL_V4_FLASH},
+        )
+        raise
 
     total_duration = int((time.time() - start_time) * 1000)
     logger.info(
         f"Respuesta Mermaid recibida en {total_duration}ms",
         extra={
             "total_duration_ms": total_duration,
-            "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0) if response.usage_metadata else 0,
-            "candidates_tokens": getattr(response.usage_metadata, "candidates_token_count", 0) if response.usage_metadata else 0,
-            "thoughts_tokens": getattr(response.usage_metadata, "thoughts_token_count", 0) if response.usage_metadata else 0,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "candidates_tokens": getattr(usage, "candidates_token_count", 0),
+            "thoughts_tokens": getattr(usage, "thoughts_token_count", 0),
         },
     )
 
-    result = _parse_response(response.text or "")
-    return result, response.usage_metadata
+    if not isinstance(content, str):
+        raise DeepSeekError(
+            "DeepSeek devolvió contenido no textual en el agente Mermaid: "
+            f"{type(content).__name__}"
+        )
+
+    result = _parse_response(content)
+    return result, usage
