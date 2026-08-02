@@ -1693,6 +1693,14 @@ function _renderEsquemaShell(data) {
         <div class="esquema-meta-text">${escHtml(data.synthesis_decisions)}</div>
        </div>`
     : '';
+  const regenBtn = state.isSharedView ? '' : `
+        <button type="button" class="btn-regenerate-esquema" data-part-id="${state.currentPartId}"
+          aria-label="Regenerar el esquema visual de esta sección">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3v3.4h-3.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Regenerar
+        </button>`;
   return `
     <div class="esquema-container">
       ${analysisHtml}
@@ -1700,6 +1708,7 @@ function _renderEsquemaShell(data) {
         <div class="mermaid-render-target"><div class="mermaid-loading">Renderizando diagrama…</div></div>
       </div>
       <div class="esquema-actions">
+        ${regenBtn}
         <button class="btn-download-svg" title="Descargar como SVG">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
             <path d="M10 3v10M6 9l4 4 4-4M4 15h12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1926,20 +1935,23 @@ async function _downloadPng(svgEl, partId, btn) {
   }
 }
 
-export async function generateEsquema(partId) {
+export async function generateEsquema(partId, opts = {}) {
+  const regenerate = Boolean(opts.regenerate);
   const contentEl = document.getElementById('content-esquema');
   if (!contentEl) return;
 
-  const btn = contentEl.querySelector('.btn-generate-esquema');
+  const btn = contentEl.querySelector(regenerate ? '.btn-regenerate-esquema' : '.btn-generate-esquema');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Generando…';
+    btn.textContent = regenerate ? 'Regenerando…' : 'Generando…';
   }
 
   const projectId = state.currentProjectId;
   try {
     const result = await api(`/api/projects/${projectId}/parts/${partId}/mermaid`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regenerate }),
     });
 
     // Update local state cache

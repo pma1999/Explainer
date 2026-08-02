@@ -698,6 +698,12 @@ function bootstrap() {
     if (genBtn && !genBtn.disabled) {
       const partId = parseInt(genBtn.dataset.partId, 10);
       if (!isNaN(partId)) generateEsquema(partId);
+      return;
+    }
+    const regenBtn = e.target.closest('.btn-regenerate-esquema');
+    if (regenBtn && !regenBtn.disabled) {
+      const partId = parseInt(regenBtn.dataset.partId, 10);
+      if (!isNaN(partId)) generateEsquema(partId, { regenerate: true });
     }
   });
 

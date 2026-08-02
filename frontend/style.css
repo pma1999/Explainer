@@ -5281,7 +5281,8 @@ body.is-offline .project-card[data-pinned="true"] {
 }
 
 .btn-download-svg,
-.btn-download-png {
+.btn-download-png,
+.btn-regenerate-esquema {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -5298,13 +5299,20 @@ body.is-offline .project-card[data-pinned="true"] {
 }
 
 .btn-download-svg:hover,
-.btn-download-png:hover {
+.btn-download-png:hover,
+.btn-regenerate-esquema:hover:not(:disabled) {
   background: var(--gold, #c9a84c);
   color: #000;
 }
 
+.btn-regenerate-esquema:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .btn-download-svg svg,
-.btn-download-png svg {
+.btn-download-png svg,
+.btn-regenerate-esquema svg {
   flex-shrink: 0;
 }
 

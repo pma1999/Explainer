@@ -193,6 +193,10 @@ class ReviewRequest(BaseModel):
     deepseek_model: str | None = None
 
 
+class MermaidRequest(BaseModel):
+    regenerate: bool = False
+
+
 def _resolve_explainer_model(
     explainer_provider: ExplainerProvider,
     openrouter_model: OpenRouterExplainerModel | str | None = None,
@@ -4226,8 +4230,12 @@ async def api_generate_mermaid(
     user_id: Annotated[str, Depends(get_current_user_id)],
     project_id: str,
     part_id: str,
+    payload: MermaidRequest | None = Body(default=None),
 ) -> dict:
-    """Generate (or return cached) Mermaid diagram for a completed part."""
+    """Generate (or return cached) Mermaid diagram for a completed part.
+
+    Envía ``regenerate: true`` en el body para regenerar un esquema existente.
+    """
     project = get_project(project_id, user_id, include_internal=True)
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -4251,8 +4259,14 @@ async def api_generate_mermaid(
         )
 
     # Cache hit — return immediately without calling the API
+    regenerate = payload.regenerate if payload else False
     cached = part_data.get("mermaid")
-    if cached and isinstance(cached, dict) and not cached.get("error"):
+    if (
+        not regenerate
+        and cached
+        and isinstance(cached, dict)
+        and not cached.get("error")
+    ):
         return {"ok": True, "mermaid": cached, "cached": True}
 
     api_key = get_user_api_key(user_id, provider=PROVIDER_DEEPSEEK)
