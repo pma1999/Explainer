@@ -7,12 +7,15 @@ from fastapi import HTTPException
 
 from backend.supabase_data import (
     _row_to_project,
+    _row_to_list_summary,
     _sanitize_project_for_shared,
     _update_reading_progress_minimal,
     apply_section_progress_rpc,
     apply_subsection_progress_rpc,
+    create_project,
     create_share_token,
     get_project,
+    import_projects_payload,
     revoke_share_token,
     get_project_by_share_token,
     set_section_read_status,
@@ -294,6 +297,89 @@ class TestUpdateProject:
         }
         out = _row_to_project(row)
         assert out["failed_parts"] is None
+
+    def test_content_updated_at_set_when_partes_contenido_changes(self):
+        """Content writes must advance content_updated_at (offline snapshot version)."""
+        mock_table, _ = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "completed"},
+            ):
+                update_project("p1", "user-uuid", {"partes_contenido": {"1": {"explainer": {}}}})
+        payload = mock_table.update.call_args[0][0]
+        assert "content_updated_at" in payload
+        assert payload["partes_contenido"] == {"1": {"explainer": {}}}
+
+    def test_content_updated_at_set_when_segmentation_changes(self):
+        mock_table, _ = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "completed"},
+            ):
+                update_project("p1", "user-uuid", {"segmentation": {"partes": []}})
+        payload = mock_table.update.call_args[0][0]
+        assert "content_updated_at" in payload
+
+    def test_content_updated_at_not_set_for_reading_progress(self):
+        """Progress writes must NOT advance content_updated_at (updated_at is the activity clock)."""
+        mock_table, _ = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "completed"},
+            ):
+                update_project("p1", "user-uuid", {"reading_progress": {"completed_parts": [1]}})
+        payload = mock_table.update.call_args[0][0]
+        assert "reading_progress" in payload
+        assert "content_updated_at" not in payload
+
+    def test_content_updated_at_not_set_for_status_or_error_message(self):
+        mock_table, _ = self._build_mock_chain(execute_return=None)
+        with patch("backend.supabase_data._client") as mock_client:
+            mock_client.return_value.table.return_value = mock_table
+            with patch(
+                "backend.supabase_data.get_project",
+                return_value={"id": "p1", "status": "processing"},
+            ):
+                update_project("p1", "user-uuid", {"status": "completed", "error_message": "boom"})
+        payload = mock_table.update.call_args[0][0]
+        assert payload["status"] == "completed"
+        assert "content_updated_at" not in payload
+
+    def test_row_to_project_exposes_content_updated_at(self):
+        row = {
+            "id": "p1",
+            "name": "T",
+            "description": "",
+            "pdf_filename": "",
+            "user_id": "u",
+            "status": "completed",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+            "content_updated_at": "2024-01-03T00:00:00Z",
+        }
+        out = _row_to_project(row)
+        assert out["content_updated_at"] == "2024-01-03T00:00:00Z"
+
+    def test_row_to_project_without_content_updated_at_column(self):
+        """Safe before the migration runs (column absent → None, no crash)."""
+        row = {
+            "id": "p1",
+            "name": "T",
+            "description": "",
+            "pdf_filename": "",
+            "user_id": "u",
+            "status": "completed",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+        }
+        out = _row_to_project(row)
+        assert out["content_updated_at"] is None
 
 
 class TestApiUpdateSubsectionProgress:
@@ -687,3 +773,144 @@ class TestProgressRpcHelpers:
             },
         )
         rpc_builder.execute.assert_called_once()
+
+
+class TestRowToListSummaryContentVersion:
+    """List summary exposes content_updated_at (offline snapshot version check)."""
+
+    def _row(self):
+        return {
+            "id": "p1",
+            "name": "T",
+            "description": "",
+            "pdf_filename": "a.pdf",
+            "user_id": "u",
+            "status": "completed",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-02T00:00:00Z",
+            "content_updated_at": "2024-01-03T00:00:00Z",
+        }
+
+    def test_exposes_content_updated_at(self):
+        out = _row_to_list_summary(self._row())
+        assert out["content_updated_at"] == "2024-01-03T00:00:00Z"
+
+    def test_without_content_updated_at_column(self):
+        row = self._row()
+        del row["content_updated_at"]
+        out = _row_to_list_summary(row)
+        assert out["content_updated_at"] is None
+
+
+class TestCreateProjectContentVersion:
+    """create_project must set content_updated_at alongside updated_at."""
+
+    def test_insert_payload_sets_content_updated_at(self):
+        table = MagicMock()
+        table.insert.return_value.execute.return_value = None
+        mock_client = MagicMock()
+        mock_client.table.return_value = table
+
+        with (
+            patch("backend.supabase_data._client", return_value=mock_client),
+            patch("backend.supabase_data.uuid.uuid4", return_value="proj-1"),
+            patch("backend.supabase_data._now_iso", return_value="2026-08-13T10:00:00Z"),
+        ):
+            result = create_project(
+                user_id="user-1",
+                name="Proyecto",
+                description="Desc",
+                pdf_filename="doc.pdf",
+            )
+
+        payload = table.insert.call_args[0][0]
+        assert payload["content_updated_at"] == "2026-08-13T10:00:00Z"
+        assert payload["updated_at"] == "2026-08-13T10:00:00Z"
+        assert result["content_updated_at"] == "2026-08-13T10:00:00Z"
+
+
+class TestImportProjectsPayloadContentVersion:
+    """import_projects_payload must preserve the exported updated_at as content version."""
+
+    def test_insert_payload_sets_content_updated_at(self):
+        table = MagicMock()
+        table.insert.return_value.execute.return_value = None
+        mock_client = MagicMock()
+        mock_client.table.return_value = table
+
+        payload = {
+            "projects": [
+                {
+                    "name": "P1",
+                    "pdf_filename": "a.pdf",
+                    "status": "completed",
+                    "description": "",
+                    "segmentation": {"partes": []},
+                    "partes_contenido": {},
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+        }
+        with patch("backend.supabase_data._client", return_value=mock_client):
+            result = import_projects_payload("user-1", payload)
+
+        assert result == {"imported": 1, "skipped": 0}
+        row = table.insert.call_args[0][0]
+        assert row["content_updated_at"] == "2026-01-01T00:00:00Z"
+
+    def test_insert_payload_preserves_exported_content_updated_at(self):
+        """Un export ya incluye content_updated_at: el import debe conservarlo
+        (no reemplazarlo por el reloj de actividad)."""
+        table = MagicMock()
+        table.insert.return_value.execute.return_value = None
+        mock_client = MagicMock()
+        mock_client.table.return_value = table
+
+        payload = {
+            "projects": [
+                {
+                    "name": "P1",
+                    "pdf_filename": "a.pdf",
+                    "status": "completed",
+                    "description": "",
+                    "segmentation": {"partes": []},
+                    "partes_contenido": {},
+                    "updated_at": "2026-02-01T00:00:00Z",
+                    "content_updated_at": "2026-01-15T00:00:00Z",
+                }
+            ]
+        }
+        with patch("backend.supabase_data._client", return_value=mock_client):
+            result = import_projects_payload("user-1", payload)
+
+        assert result == {"imported": 1, "skipped": 0}
+        row = table.insert.call_args[0][0]
+        assert row["content_updated_at"] == "2026-01-15T00:00:00Z"
+        assert row["updated_at"] == "2026-02-01T00:00:00Z"
+
+    def test_insert_payload_falls_back_to_created_when_no_updated_at(self):
+        table = MagicMock()
+        table.insert.return_value.execute.return_value = None
+        mock_client = MagicMock()
+        mock_client.table.return_value = table
+
+        payload = {
+            "projects": [
+                {
+                    "name": "P1",
+                    "pdf_filename": "a.pdf",
+                    "status": "completed",
+                    "description": "",
+                }
+            ]
+        }
+        with (
+            patch("backend.supabase_data._client", return_value=mock_client),
+            patch("backend.supabase_data._now_iso", return_value="2026-08-13T10:00:00Z"),
+        ):
+            result = import_projects_payload("user-1", payload)
+
+        assert result == {"imported": 1, "skipped": 0}
+        row = table.insert.call_args[0][0]
+        assert row["content_updated_at"] == "2026-08-13T10:00:00Z"
+        assert row["updated_at"] == "2026-08-13T10:00:00Z"

@@ -42,6 +42,7 @@ class TestListProjectsSummary:
                         "share_token": None,
                         "created_at": "2024-01-01T12:00:00",
                         "updated_at": "2024-01-02T12:00:00",
+                        "content_updated_at": "2024-01-02T12:00:00",
                         "list_summary": True,
                     }
                 ],
@@ -54,5 +55,6 @@ class TestListProjectsSummary:
         data = r.json()
         assert len(data) == 1
         assert data[0]["list_summary"] is True
+        assert data[0]["content_updated_at"] == "2024-01-02T12:00:00"
         assert "partes_contenido" not in data[0]
         assert "source_text" not in data[0]

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fondo del icono launcher (RC-03): tinta sólida #0D1117 (tesis visual
+     Scholarly Forge: tinta/papel + acento dorado). -->
+<resources>
+    <color name="ic_launcher_background">#0D1117</color>
+</resources>

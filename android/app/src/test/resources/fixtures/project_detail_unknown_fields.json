@@ -1,0 +1,43 @@
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "name": "Campos desconocidos",
+  "description": "Payload con campos futuros a todos los niveles.",
+  "pdf_filename": null,
+  "source_type": "youtube",
+  "source_url": "https://www.youtube.com/watch?v=sintetico",
+  "source_metadata": { "target_language": "es-ES", "future_meta": { "x": 1 } },
+  "file_uri": null,
+  "status": "processing",
+  "future_project_field": { "deep": [1, 2, 3] },
+  "segmentation": {
+    "future_seg_field": "x",
+    "partes": [
+      {
+        "numero": 1,
+        "titulo": "Parte con extras",
+        "contenido": "Contenido.",
+        "subpartes": [ { "numero": 1 } ],
+        "extension_estimada": "3 páginas",
+        "complejidad": "alta",
+        "future_part_field": true
+      }
+    ]
+  },
+  "partes_contenido": {
+    "1": {
+      "status": "completed",
+      "formatter_version": 1,
+      "formatter_usage": { "input_tokens": 100, "output_tokens": 200, "cost": 0.01 },
+      "future_agent_field": { "a": "b" },
+      "explainer": { "introduccion": "Intro.", "future_explainer_field": 42 }
+    }
+  },
+  "usage": { "total_cost": 0.0, "future_usage_field": "x" },
+  "reading_progress": { "completed_parts": [1], "future_progress_field": "y" },
+  "failed_parts": [],
+  "explainer_config": { "provider": "gemini" },
+  "error_message": null,
+  "share_token": "token-sintetico",
+  "created_at": "2026-07-27T08:00:00Z",
+  "updated_at": "2026-07-27T09:00:00Z"
+}

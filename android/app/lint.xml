@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RC-03: ObsoleteSdkInt sugiere mover mipmap-anydpi-v26 -> mipmap-anydpi
+     (minSdk 26 hace el calificador -v26 redundante), pero AGP 9 falla el
+     resource linking con "mipmap-anydpi" a secas (verificado en
+     processDebugResources: "resource mipmap/ic_launcher not found"), asi que
+     se conserva el -v26 del template estandar y se ignora ese unico issue
+     solo para esta carpeta. -->
+<lint>
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

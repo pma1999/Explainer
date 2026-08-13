@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T12: Auto Backup deshabilitado (API 23-30, android:fullBackupContent).
+     Lista de inclusión vacía = ningún dato se respalda. La sesión y los
+     snapshots viven solo en almacenamiento privado de la app y no se copian
+     a la nube ni entre dispositivos (global-constraints: Auto Backup off). -->
+<full-backup-content>
+    <!-- Sin <include>: nada se respalda. -->
+</full-backup-content>

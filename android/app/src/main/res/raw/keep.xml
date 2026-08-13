@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RC-03: los assets del icono launcher se marcan como keep para que el
+     resource shrinking nunca los ELIMINE (defensa ante futuros cambios de
+     referencias). Nota: AGP 9 renombra igualmente los ficheros fisicos en
+     release (p.ej. res/0K.xml); la resource table conserva los nombres
+     canonicos y scripts/verify_release.sh comprueba el icono por ahi. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@mipmap/ic_launcher, @mipmap/ic_launcher_round, @drawable/ic_launcher_foreground, @drawable/ic_launcher_monochrome" />

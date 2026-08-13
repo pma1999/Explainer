@@ -1,0 +1,465 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "fe4ed2aff976b119707939f077ef3521",
+    "entities": [
+      {
+        "tableName": "project_summary",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_id` TEXT NOT NULL, `project_id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT, `status` TEXT NOT NULL, `source_type` TEXT NOT NULL, `pdf_filename` TEXT, `source_url` TEXT, `part_index_json` TEXT NOT NULL, `segmentation_source_bytes` INTEGER NOT NULL, `usage_json` TEXT NOT NULL, `reading_progress_json` TEXT NOT NULL, `created_at` TEXT NOT NULL, `remote_updated_at` TEXT NOT NULL, `fetched_at` INTEGER NOT NULL, PRIMARY KEY(`owner_id`, `project_id`))",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pdfFilename",
+            "columnName": "pdf_filename",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceUrl",
+            "columnName": "source_url",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "partIndexJson",
+            "columnName": "part_index_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "segmentationSourceBytes",
+            "columnName": "segmentation_source_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usageJson",
+            "columnName": "usage_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readingProgressJson",
+            "columnName": "reading_progress_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteUpdatedAt",
+            "columnName": "remote_updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetched_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_id",
+            "project_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_project_summary_owner_updated",
+            "unique": false,
+            "columnNames": [
+              "owner_id",
+              "remote_updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_project_summary_owner_updated` ON `${TABLE_NAME}` (`owner_id`, `remote_updated_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "offline_snapshot",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_id` TEXT NOT NULL, `project_id` TEXT NOT NULL, `active_generation` TEXT NOT NULL, `manifest_version` INTEGER NOT NULL, `name` TEXT NOT NULL, `description` TEXT, `status` TEXT NOT NULL, `source_type` TEXT NOT NULL, `segmentation_json` TEXT NOT NULL, `usage_json` TEXT NOT NULL, `reading_progress_json` TEXT NOT NULL, `source_updated_at` TEXT NOT NULL, `downloaded_at` INTEGER NOT NULL, `total_bytes` INTEGER NOT NULL, PRIMARY KEY(`owner_id`, `project_id`))",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeGeneration",
+            "columnName": "active_generation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manifestVersion",
+            "columnName": "manifest_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "source_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "segmentationJson",
+            "columnName": "segmentation_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usageJson",
+            "columnName": "usage_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "readingProgressJson",
+            "columnName": "reading_progress_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceUpdatedAt",
+            "columnName": "source_updated_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "downloadedAt",
+            "columnName": "downloaded_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_id",
+            "project_id"
+          ]
+        }
+      },
+      {
+        "tableName": "offline_part",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_id` TEXT NOT NULL, `project_id` TEXT NOT NULL, `generation` TEXT NOT NULL, `part_id` INTEGER NOT NULL, `order` INTEGER NOT NULL, `title` TEXT NOT NULL, `description` TEXT NOT NULL, `status` TEXT NOT NULL, `content_json` TEXT NOT NULL, `content_bytes` INTEGER NOT NULL, PRIMARY KEY(`owner_id`, `project_id`, `generation`, `part_id`))",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partId",
+            "columnName": "part_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "order",
+            "columnName": "order",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentJson",
+            "columnName": "content_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentBytes",
+            "columnName": "content_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_id",
+            "project_id",
+            "generation",
+            "part_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_offline_part_owner_project_generation",
+            "unique": false,
+            "columnNames": [
+              "owner_id",
+              "project_id",
+              "generation"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_offline_part_owner_project_generation` ON `${TABLE_NAME}` (`owner_id`, `project_id`, `generation`)"
+          }
+        ]
+      },
+      {
+        "tableName": "download_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_id` TEXT NOT NULL, `project_id` TEXT NOT NULL, `work_id` TEXT NOT NULL, `state` TEXT NOT NULL, `downloaded_bytes` INTEGER NOT NULL, `total_bytes` INTEGER, `error_category` TEXT, `requested_at` INTEGER NOT NULL, `finished_at` INTEGER, PRIMARY KEY(`owner_id`, `project_id`))",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workId",
+            "columnName": "work_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "downloadedBytes",
+            "columnName": "downloaded_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "errorCategory",
+            "columnName": "error_category",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "requestedAt",
+            "columnName": "requested_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finished_at",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_id",
+            "project_id"
+          ]
+        }
+      },
+      {
+        "tableName": "pending_progress",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`owner_id` TEXT NOT NULL, `project_id` TEXT NOT NULL, `part_id` INTEGER NOT NULL, `tab` TEXT NOT NULL, `kind_target` TEXT NOT NULL, `desired_completed` INTEGER, `last_subsection_id` TEXT, `last_read_at` TEXT, `sync_state` TEXT NOT NULL, `attempts` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`owner_id`, `project_id`, `part_id`, `tab`, `kind_target`))",
+        "fields": [
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "projectId",
+            "columnName": "project_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partId",
+            "columnName": "part_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tab",
+            "columnName": "tab",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kindTarget",
+            "columnName": "kind_target",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "desiredCompleted",
+            "columnName": "desired_completed",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSubsectionId",
+            "columnName": "last_subsection_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastReadAt",
+            "columnName": "last_read_at",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "sync_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attempts",
+            "columnName": "attempts",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "owner_id",
+            "project_id",
+            "part_id",
+            "tab",
+            "kind_target"
+          ]
+        },
+        "indices": [
+          {
+            "name": "idx_pending_progress_owner_project_sync",
+            "unique": false,
+            "columnNames": [
+              "owner_id",
+              "project_id",
+              "sync_state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `idx_pending_progress_owner_project_sync` ON `${TABLE_NAME}` (`owner_id`, `project_id`, `sync_state`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fe4ed2aff976b119707939f077ef3521')"
+    ]
+  }
+}

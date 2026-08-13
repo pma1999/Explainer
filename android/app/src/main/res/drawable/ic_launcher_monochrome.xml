@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monocromo del icono launcher (Android 13+ themed icons, RC-03):
+     el MISMO glyph del libro como un único path sólido de dos subpaths
+     (el sistema lo tiñe con el color del tema). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,38 C44,34 33,35 26,39 L26,75 C33,71 44,71 54,76 Z M54,38 C64,34 75,35 82,39 L82,75 C75,71 64,71 54,76 Z" />
+</vector>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Explainer</string>
+
+    <!-- Copia compartida del sistema de componentes (T05). Sin slogans ni
+         texto de landing: nombres, estados y acciones utilitarias. -->
+
+    <!-- Navegación -->
+    <string name="action_back">Volver</string>
+    <string name="action_close">Cerrar</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_confirm">Confirmar</string>
+    <string name="action_retry">Reintentar</string>
+
+    <!-- Banner offline -->
+    <string name="offline_banner_text">Sin conexión — mostrando proyectos disponibles offline</string>
+
+    <!-- Panel de estado operativo -->
+    <string name="state_loading_title">Cargando</string>
+    <string name="state_loading_message">Preparando tu biblioteca…</string>
+    <string name="state_empty_title">Todavía no hay nada aquí</string>
+    <string name="state_empty_message">Crea un proyecto en la web y vuelve a sincronizar para verlo aquí.</string>
+    <string name="state_error_title">No se pudo cargar</string>
+    <string name="state_error_message">Comprueba tu conexión y vuelve a intentarlo.</string>
+    <string name="state_offline_title">Sin conexión</string>
+    <string name="state_offline_message">Estás viendo los proyectos que ya descargaste.</string>
+
+    <!-- Progreso de descarga -->
+    <string name="download_progress_exact">Descargando… %1$d%% (total exacto)</string>
+    <string name="download_progress_estimated">Descargando… ~%1$d%% (tamaño estimado)</string>
+    <string name="download_progress_indeterminate">Descargando… calculando tamaño</string>
+
+    <!-- Tabs canónicas del lector (orden web: explicacion, recorrido, recursos,
+         esquema, repaso) -->
+    <string name="tab_explicacion">Explicación</string>
+    <string name="tab_recorrido">Recorrido</string>
+    <string name="tab_recursos">Recursos</string>
+    <string name="tab_esquema">Esquema</string>
+    <string name="tab_repaso">Repaso</string>
+
+    <!-- Contenido del lector (T08): estados de contenido opcional ausente,
+         error/malformado y acciones de paridad web. Android v1 no genera
+         contenido on-demand: la copia remite a la web y a actualizar la
+         descarga (global-constraints UX). -->
+    <string name="content_missing_generate_web">Genéralo en la web y actualiza la descarga.</string>
+    <string name="content_explanation_missing_title">Explicación no disponible</string>
+    <string name="content_walkthrough_missing_title">Recorrido no disponible</string>
+    <string name="content_resources_missing_title">Recursos no disponibles</string>
+    <string name="content_diagram_missing_title">Esquema no generado</string>
+    <string name="content_review_missing_title">Repaso no generado</string>
+    <string name="content_malformed_title">Contenido no válido</string>
+    <string name="content_agent_error_title">Error en la generación</string>
+    <string name="content_link_rejected_message">Este enlace no se puede abrir.</string>
+
+    <!-- Explicación -->
+    <string name="content_explainer_conclusion_label">Conclusión</string>
+    <string name="content_explainer_connections_label">Conexiones contextuales</string>
+    <string name="content_explainer_connection_index">%1$d</string>
+
+    <!-- Recorrido -->
+    <string name="content_walkthrough_quote_type">Cita anotada</string>
+    <string name="content_walkthrough_content_type">Contenido</string>
+    <string name="content_walkthrough_step_index">%1$d</string>
+    <string name="content_walkthrough_translation_label">Traducción</string>
+    <string name="content_walkthrough_annotation_label">Anotación</string>
+    <string name="content_walkthrough_synthesis_title">Síntesis de cobertura</string>
+    <string name="content_walkthrough_sections_processed">Secciones procesadas</string>
+    <string name="content_walkthrough_scope">Alcance</string>
+    <string name="content_walkthrough_excluded">Contenido excluido</string>
+    <string name="content_walkthrough_original_language">Idioma original</string>
+    <string name="content_walkthrough_global_observations">Observaciones globales</string>
+
+    <!-- Recursos -->
+    <string name="content_resources_default_title">Mapa de Recursos</string>
+    <string name="content_resources_open">Abrir</string>
+    <string name="content_resources_integrity_label">Nota de integridad</string>
+
+    <!-- Esquema (Mermaid) -->
+    <string name="content_diagram_analysis">Análisis</string>
+    <string name="content_diagram_reading_guide">Guía de lectura</string>
+    <string name="content_diagram_synthesis_decisions">Decisiones de síntesis</string>
+    <string name="content_diagram_show_code">Ver código del diagrama</string>
+    <string name="content_diagram_hide_code">Ocultar código del diagrama</string>
+    <string name="content_diagram_copy_code">Copiar código</string>
+    <string name="content_diagram_copied">Copiado</string>
+    <string name="content_diagram_zoom_hint">Pellizca para hacer zoom y desplazarte por el diagrama</string>
+    <string name="content_diagram_render_failed">No se pudo generar el diagrama. Se muestra el código fuente.</string>
+    <string name="content_diagram_download_svg">Descargar SVG</string>
+    <string name="content_diagram_download_png">Descargar PNG</string>
+    <string name="content_diagram_download_generating">Generando…</string>
+    <string name="content_diagram_download_saved">Guardado en Descargas</string>
+    <string name="content_diagram_download_saved_document">Diagrama guardado</string>
+    <string name="content_diagram_download_failed">No se pudo guardar el diagrama</string>
+    <string name="content_diagram_export_failed">No se pudo generar la imagen del diagrama</string>
+    <string name="content_diagram_export_transport_failed">No se pudo transferir la imagen del diagrama. Inténtalo de nuevo.</string>
+
+    <!-- Repaso activo (paridad web renderReview) -->
+    <string name="content_review_kicker">Autoevaluación</string>
+    <string name="content_review_title">Repaso activo</string>
+    <string name="content_review_subtitle">Cinco preguntas para comprobar que la sección quedó bien asentada.</string>
+    <string name="content_review_question_label">Pregunta %1$d</string>
+    <string name="content_review_question_unnumbered">Pregunta</string>
+    <string name="content_review_reveal_answer">Mostrar respuesta</string>
+    <string name="content_review_hide_answer">Ocultar respuesta</string>
+    <string name="content_review_answer_label">Respuesta</string>
+    <string name="content_review_reference_label">Referencia</string>
+    <string name="content_review_note_label">Nota de estudio</string>
+</resources>

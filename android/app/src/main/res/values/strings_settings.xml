@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Copia de Ajustes y setup (T11). Los strings compartidos del sistema
+         de componentes viven en strings.xml (T05) y se reutilizan. -->
+
+    <!-- Ajustes: chrome -->
+    <string name="settings_title">Ajustes</string>
+
+    <!-- Ajustes: tema (claro/oscuro/sistema persistido en DataStore) -->
+    <string name="settings_theme_section">Tema</string>
+    <string name="settings_theme_system">Sistema</string>
+    <string name="settings_theme_light">Claro</string>
+    <string name="settings_theme_dark">Oscuro</string>
+
+    <!-- Ajustes: cuenta -->
+    <string name="settings_account_section">Cuenta</string>
+    <string name="settings_account_email_hidden">No hay identidad local guardada.</string>
+    <string name="settings_sign_out">Cerrar sesión</string>
+    <string name="settings_sign_out_confirm_title">¿Cerrar sesión?</string>
+    <string name="settings_sign_out_confirm_message">Cerrarás la sesión en este dispositivo. Tus descargas se conservan y solo se desbloquean al iniciar sesión con la misma cuenta.</string>
+    <string name="settings_sign_out_confirm_label">Cerrar sesión</string>
+
+    <!-- Ajustes: almacenamiento local (bytes lógicos por proyecto offline) -->
+    <string name="settings_storage_section">Almacenamiento local</string>
+    <string name="settings_storage_empty">No hay proyectos descargados.</string>
+    <string name="settings_storage_total">Total: %1$s</string>
+    <string name="settings_delete_project">Borrar</string>
+    <string name="settings_delete_project_confirm_title">¿Borrar la copia local de «%1$s»?</string>
+    <string name="settings_delete_project_confirm_message">Solo se borra la copia de este dispositivo. Tu proyecto en la web no se modifica.</string>
+    <string name="settings_delete_confirm_label">Borrar</string>
+    <string name="settings_delete_all">Borrar todas las descargas</string>
+    <string name="settings_delete_all_confirm_title">¿Borrar todas las descargas?</string>
+    <string name="settings_delete_all_confirm_message">Se borrarán las copias locales de todos tus proyectos en este dispositivo. Tu biblioteca en la web no se modifica.</string>
+    <string name="settings_delete_all_confirm_label">Borrar todo</string>
+
+    <!-- Setup: config inválida (nunca imprime la key, solo el nombre) -->
+    <string name="setup_error_title">Configuración incompleta</string>
+    <string name="setup_error_message">Falta o es inválida la variable %1$s. Revisa la configuración de la app e inténtalo de nuevo.</string>
+    <string name="setup_error_message_generic">La configuración de la app no es válida. Revisa las variables de entorno e inténtalo de nuevo.</string>
+    <string name="setup_error_retry">Reintentar</string>
+</resources>

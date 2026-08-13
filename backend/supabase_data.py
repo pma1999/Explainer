@@ -30,6 +30,12 @@ SOURCE_OBJECT_STATUS_NONE = "none"
 SOURCE_OBJECT_STATUS_STORED = "stored"
 SOURCE_OBJECT_STATUS_DELETED = "deleted"
 
+# Campos cuyo cambio avanza content_updated_at (versión de contenido del
+# snapshot offline de Android). Solo el contenido en sí (segmentation /
+# partes_contenido) cuenta: nombre/descripción/status/usage/reading_progress
+# no deben marcar el snapshot como "desactualizado".
+CONTENT_VERSION_FIELDS = {"segmentation", "partes_contenido"}
+
 
 def _client() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -102,6 +108,7 @@ def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict
         "error_message": row.get("error_message"),
         "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
         "updated_at": row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
+        "content_updated_at": _format_datetime_value(row.get("content_updated_at")),
     }
     if "share_token" in row:
         result["share_token"] = row.get("share_token")
@@ -120,7 +127,7 @@ def _row_to_project(row: dict[str, Any], include_internal: bool = False) -> dict
 PROJECT_LIST_SUMMARY_SELECT = (
     "id,name,description,pdf_filename,source_type,source_url,source_metadata,"
     "file_uri,status,segmentation,usage,reading_progress,error_message,"
-    "share_token,created_at,updated_at"
+    "share_token,created_at,updated_at,content_updated_at"
 )
 PROJECT_PROGRESS_SELECT = "id,segmentation,reading_progress,updated_at"
 
@@ -147,6 +154,7 @@ def _row_to_list_summary(row: dict[str, Any]) -> dict[str, Any]:
         "updated_at": row["updated_at"].isoformat()
         if hasattr(row["updated_at"], "isoformat")
         else str(row["updated_at"]),
+        "content_updated_at": _format_datetime_value(row.get("content_updated_at")),
         "list_summary": True,
     }
     if "share_token" in row:
@@ -414,6 +422,7 @@ def create_project(
         "source_object_deleted_at": None,
         "created_at": now,
         "updated_at": now,
+        "content_updated_at": now,
     }
     storage_path = None
     if source_type == "pdf" and pdf_content:
@@ -506,6 +515,8 @@ def update_project(project_id: str, user_id: str, updates: dict[str, Any]) -> Op
     }
     payload = {k: v for k, v in updates.items() if k in allowed}
     payload["updated_at"] = _now_iso()
+    if CONTENT_VERSION_FIELDS.intersection(payload):
+        payload["content_updated_at"] = _now_iso()
     client = _client()
     try:
         client.table("projects").update(payload).eq("id", project_id).eq("user_id", user_id).execute()
@@ -772,6 +783,7 @@ def import_projects_payload(user_id: str, payload: dict[str, Any]) -> dict[str, 
             "source_object_deleted_at": None,
             "created_at": project.get("created_at") or created,
             "updated_at": project.get("updated_at") or created,
+            "content_updated_at": project.get("content_updated_at") or project.get("updated_at") or created,
         }
         try:
             client.table("projects").insert(row).execute()

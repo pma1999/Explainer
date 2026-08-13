@@ -1,0 +1,73 @@
+{
+  "id": "3f2b8c1e-9a4d-4f6b-8c2e-1d5a7b9c0e3f",
+  "name": "Sintesis de prueba academica",
+  "description": "Proyecto sintetico para el snapshot offline (sin datos privados)",
+  "pdf_filename": "muestra.pdf",
+  "source_type": "pdf",
+  "source_metadata": {
+    "autor": "Ejemplo",
+    "idioma": "es"
+  },
+  "status": "completed",
+  "segmentation": {
+    "partes": [
+      { "numero": 1, "titulo": "Introduccion", "contenido": "Primera seccion del texto" },
+      { "numero": 2, "titulo": "Desarrollo", "contenido": "Segunda seccion con detalle" },
+      { "numero": 3, "titulo": "Conclusion", "contenido": "Cierre del texto" }
+    ]
+  },
+  "partes_contenido": {
+    "1": {
+      "status": "completed",
+      "explainer": {
+        "introduccion": "Texto con ñ y → para contar bytes UTF-8 exactos",
+        "desarrollo": [
+          {
+            "titulo_seccion": "Seccion A",
+            "explicacion_introductoria": "Intro A",
+            "subsecciones": [
+              { "titulo_subseccion": "Sub A1", "explicacion_detallada": "Det A1" }
+            ]
+          }
+        ],
+        "conclusion": "Conclusion A",
+        "conexiones_contextuales": []
+      },
+      "recorrido": {
+        "recorrido_anotado": [],
+        "sintesis_de_cobertura": { "secciones_procesadas": 1, "idioma_original": "es" }
+      }
+    },
+    "2": {
+      "status": "completed",
+      "explainer": { "_format": "markdown", "content": "# Markdown **bold**" },
+      "resources": {
+        "titulo_mapa": "Mapa de recursos",
+        "vision_general": "Vision general",
+        "ejes_tematicos": [],
+        "nota_de_integridad": "Nota"
+      }
+    },
+    "3": {
+      "status": "completed",
+      "review": { "preguntas": [], "nota": 8.5 },
+      "mermaid": {
+        "mermaid_code": "graph TD; A-->B",
+        "analysis": "an",
+        "reading_guide": "rg",
+        "synthesis_decisions": "sd"
+      },
+      "formatter_version": 1
+    }
+  },
+  "usage": { "total_cost": 0.5, "formatter_tokens": 1200 },
+  "reading_progress": {
+    "completed_parts": [1],
+    "completed_subsections": ["subsec-1-0-0"],
+    "last_subsection": { "part_id": 1, "subsection_id": "subsec-1-0-0", "tab": "explicacion" },
+    "last_read_at": "2026-08-01T10:00:00.123Z"
+  },
+  "failed_parts": null,
+  "created_at": "2026-07-01T09:00:00.000Z",
+  "updated_at": "2026-08-01T10:00:00.000Z"
+}

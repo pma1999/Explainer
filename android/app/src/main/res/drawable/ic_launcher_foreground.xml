@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icono launcher (RC-03): libro abierto en oro #E8B86D sobre tinta #0D1117.
+     Diseño aprobado por el orquestador (tesis visual Scholarly Forge):
+     viewport 108x108, contenido dentro de la zona central ~66dp.
+     - Página izquierda:  M54,38 C44,34 33,35 26,39 L26,75 C33,71 44,71 54,76 Z
+     - Página derecha:    M54,38 C64,34 75,35 82,39 L82,75 C75,71 64,71 54,76 Z
+     - Lomo: M54,38 L54,76 (trazo 3dp redondeado)
+     strokeLineJoin=round en las páginas (opción aprobada en el spec) redondea
+     las esquinas y evita hairline en la unión con el lomo. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Página izquierda -->
+    <path
+        android:fillColor="#E8B86D"
+        android:strokeColor="#E8B86D"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round"
+        android:pathData="M54,38 C44,34 33,35 26,39 L26,75 C33,71 44,71 54,76 Z" />
+
+    <!-- Página derecha (espejo) -->
+    <path
+        android:fillColor="#E8B86D"
+        android:strokeColor="#E8B86D"
+        android:strokeWidth="1"
+        android:strokeLineJoin="round"
+        android:pathData="M54,38 C64,34 75,35 82,39 L82,75 C75,71 64,71 54,76 Z" />
+
+    <!-- Lomo: trazo 3dp redondeado sobre la unión de ambas páginas -->
+    <path
+        android:strokeColor="#E8B86D"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M54,38 L54,76" />
+</vector>

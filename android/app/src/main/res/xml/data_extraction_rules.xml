@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- T12: Android 12+ (API 31+, android:dataExtractionRules). Sin <include> en
+     cloud-backup ni device-transfer = no se respalda ni se transfiere nada.
+     Coherente con android:allowBackup="false" y global-constraints. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Sin <include>: nada se respalda en la nube. -->
+    </cloud-backup>
+    <device-transfer>
+        <!-- Sin <include>: nada se transfiere entre dispositivos. -->
+    </device-transfer>
+</data-extraction-rules>

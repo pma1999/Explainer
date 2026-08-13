@@ -1,0 +1,149 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "name": "El Quijote (Cap. I)",
+  "description": "Detalle completo sintético para paridad",
+  "pdf_filename": "quijote_cap1.pdf",
+  "source_type": "pdf",
+  "source_url": null,
+  "source_metadata": { "target_language": "es-ES", "auto_title": true },
+  "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/sintetico",
+  "status": "completed",
+  "segmentation": {
+    "partes": [
+      { "numero": 1, "titulo": "Introducción", "contenido": "Contenido de la parte 1." },
+      { "numero": 2, "titulo": "Desarrollo", "contenido": "Contenido de la parte 2." },
+      { "numero": 3, "titulo": "Análisis", "contenido": "Contenido de la parte 3." },
+      { "numero": 4, "titulo": "Contexto", "contenido": "Contenido de la parte 4." },
+      { "numero": 5, "titulo": "Conclusión", "contenido": "Contenido de la parte 5." }
+    ]
+  },
+  "partes_contenido": {
+    "1": {
+      "status": "completed",
+      "explainer": {
+        "introduccion": "Texto introductorio en **markdown**.",
+        "desarrollo": [
+          {
+            "titulo_seccion": "Primera sección",
+            "explicacion_introductoria": "Introducción de la sección.",
+            "subsecciones": [
+              { "titulo_subseccion": "Subsección 1.1", "explicacion_detallada": "Detalle A." },
+              { "titulo_subseccion": "Subsección 1.2", "explicacion_detallada": "Detalle B." }
+            ]
+          }
+        ],
+        "conclusion": "Conclusión del explainer.",
+        "conexiones_contextuales": [
+          { "seccion_temario_relacionada": "Temario global", "descripcion_conexion": "Conexión con el temario." }
+        ]
+      },
+      "recorrido": {
+        "recorrido_anotado": [
+          {
+            "ubicacion": "pág. 12, párr. 3",
+            "tipo_entrada": "cita_anotada",
+            "cita_textual": "«Cita textual de ejemplo»",
+            "traduccion": "Traducción de ejemplo.",
+            "apuntes_traductologicos": "Apuntes de traducción.",
+            "anotacion": "Anotación del recorrido."
+          }
+        ],
+        "sintesis_de_cobertura": {
+          "secciones_procesadas": "1-5",
+          "alcance": "Capítulo completo",
+          "contenido_excluido": "Ninguno",
+          "idioma_original": "es",
+          "observaciones_globales": "Sin observaciones."
+        }
+      },
+      "resources": {
+        "titulo_mapa": "Mapa de recursos",
+        "vision_general": "Visión general.",
+        "ejes_tematicos": [
+          {
+            "nombre_eje": "Historia",
+            "recursos": [
+              {
+                "formato": "libro",
+                "titulo": "Historia de España",
+                "autor_creador": "Autor Anónimo",
+                "tipo_y_datos": "Ensayo",
+                "idioma": "es",
+                "conexion_con_texto": "Contexto histórico.",
+                "nivel_y_accesibilidad": "Intermedio",
+                "nota": "Disponible en biblioteca.",
+                "url": "https://example.com/recurso"
+              }
+            ]
+          }
+        ],
+        "nota_de_integridad": "Recursos verificados."
+      },
+      "review": {
+        "preguntas": [
+          {
+            "numero": 1,
+            "pregunta": "¿Qué es un caballero andante?",
+            "respuesta_razonada": "Respuesta razonada.",
+            "opciones": ["A", "B", "C"]
+          }
+        ],
+        "nota": "Nota de estudio."
+      },
+      "mermaid": {
+        "mermaid_code": "graph TD\n  A[Inicio] --> B[Fin]\n",
+        "code": "graph TD\n  A[Legacy] --> B[Fin]\n",
+        "analysis": "Análisis del esquema.",
+        "reading_guide": "Guía de lectura.",
+        "synthesis_decisions": "Decisiones de síntesis."
+      }
+    },
+    "2": {
+      "status": "completed",
+      "explainer": { "_format": "markdown", "content": "# Markdown\n\nContenido formateado." },
+      "recorrido": {
+        "recorrido_anotado": [],
+        "sintesis_de_cobertura": { "secciones_procesadas": "1-2" }
+      },
+      "resources": { "titulo_mapa": "Mapa 2", "ejes_tematicos": [], "nota_de_integridad": "OK" }
+    },
+    "3": {
+      "status": "processing",
+      "explainer": { "introduccion": "Intro 3.", "desarrollo": [], "conclusion": null }
+    },
+    "4": {
+      "status": "completed",
+      "explainer": {
+        "introduccion": "Intro 4.",
+        "desarrollo": [ { "titulo_seccion": "Sección 4", "subsecciones": [] } ],
+        "conclusion": "Conclusión 4.",
+        "conexiones_contextuales": [
+          { "seccion_temario_relacionada": "Tema X", "descripcion_conexion": "Conexión X" }
+        ]
+      }
+    },
+    "5": {
+      "status": "failed",
+      "explainer": { "error": "El proveedor no respondió" }
+    }
+  },
+  "usage": {
+    "total_cost": 0.42,
+    "formatter_tokens": 1200,
+    "formatter_cost": 0.1,
+    "mermaid_tokens": 0,
+    "explainer_provider": "gemini"
+  },
+  "reading_progress": {
+    "completed_parts": [1, 2],
+    "completed_subsections": ["subsec-1-0-0", "subsec-1-0-1"],
+    "last_subsection": { "part_id": 1, "subsection_id": "subsec-1-0-1", "tab": "explicacion" },
+    "last_read_at": "2026-08-01T10:00:00.123Z"
+  },
+  "failed_parts": [],
+  "explainer_config": { "provider": "gemini", "model": "gemini-2.5-flash" },
+  "error_message": null,
+  "share_token": null,
+  "created_at": "2026-07-30T08:00:00Z",
+  "updated_at": "2026-08-01T10:00:00Z"
+}

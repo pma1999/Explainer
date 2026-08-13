@@ -1,0 +1,56 @@
+[
+  {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "name": "El Quijote (Cap. I)",
+    "description": "Capítulo primero, sintético para paridad",
+    "pdf_filename": "quijote_cap1.pdf",
+    "source_type": "pdf",
+    "source_url": null,
+    "source_metadata": { "target_language": "es-ES", "auto_title": true },
+    "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/sintetico",
+    "status": "completed",
+    "segmentation": {
+      "partes": [
+        { "numero": 1, "titulo": "Introducción", "contenido": "Texto del capítulo..." }
+      ]
+    },
+    "usage": {
+      "total_cost": 0.42,
+      "formatter_tokens": 1200,
+      "formatter_cost": 0.1,
+      "mermaid_tokens": 0,
+      "explainer_provider": "gemini"
+    },
+    "reading_progress": {
+      "completed_parts": [1],
+      "completed_subsections": ["subsec-1-0-0"],
+      "last_subsection": { "part_id": 1, "subsection_id": "subsec-1-0-0", "tab": "explicacion" },
+      "last_read_at": "2026-08-01T10:00:00Z"
+    },
+    "error_message": null,
+    "share_token": null,
+    "created_at": "2026-07-30T08:00:00Z",
+    "updated_at": "2026-08-01T10:00:00Z",
+    "list_summary": true,
+    "future_field": { "nested": true }
+  },
+  {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "Cien años de soledad",
+    "description": null,
+    "pdf_filename": null,
+    "source_type": "web",
+    "source_url": "https://example.com/articulo",
+    "source_metadata": {},
+    "file_uri": null,
+    "status": "archived",
+    "segmentation": { "partes": [] },
+    "usage": {},
+    "reading_progress": {},
+    "error_message": null,
+    "share_token": null,
+    "created_at": "2026-07-29T08:00:00Z",
+    "updated_at": "2026-07-29T09:00:00Z",
+    "list_summary": true
+  }
+]

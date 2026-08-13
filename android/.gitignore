@@ -1,0 +1,33 @@
+# --- Gradle ---
+.gradle/
+build/
+# El jar del wrapper SÍ se versiona (necesario para reproducir el bootstrap).
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Configuración local: NUNCA versionar (env/props con valores reales) ---
+local.properties
+explainer.properties
+keystore.properties
+signing.properties
+
+# --- Keystores y credenciales de firma ---
+*.jks
+*.keystore
+*.p12
+*.pk8
+
+# --- IDE ---
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+# --- Kotlin ---
+.kotlin/
+.klib/
+
+# --- Sistema ---
+.DS_Store
+Thumbs.db

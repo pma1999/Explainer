@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Copia del lector offline de cinco pestañas (T10). Toda la copy del
+         reader vive aquí; los strings compartidos del sistema de componentes
+         y del contenido (T05/T08) se reutilizan sin duplicar. -->
+
+    <!-- Estados de la ruta/lector -->
+    <string name="reader_loading_message">Preparando el lector…</string>
+    <string name="reader_invalid_project_title">Proyecto no válido</string>
+    <string name="reader_invalid_project_message">No se pudo abrir este proyecto.</string>
+    <string name="reader_missing_snapshot_title">Proyecto no descargado</string>
+    <string name="reader_missing_snapshot_message">Descarga este proyecto desde la biblioteca para leerlo sin conexión.</string>
+
+    <!-- Selector de partes (sheet en compact, pane en medium/expanded) -->
+    <string name="reader_part_selector_title">Secciones del proyecto</string>
+    <string name="reader_part_selector_open">Elegir sección</string>
+    <string name="reader_part_bar">P%1$d · %2$s</string>
+    <!-- Posición de la parte dentro del proyecto (píldora compacta) -->
+    <string name="reader_part_position">%1$d/%2$d</string>
+
+    <!-- Estados de parte (nunca solo color) -->
+    <string name="reader_part_status_pending">Pendiente</string>
+    <string name="reader_part_status_processing">Generándose…</string>
+    <string name="reader_part_status_completed">Completada</string>
+    <string name="reader_part_status_failed">Error</string>
+
+    <!-- Estados de contenido de la parte seleccionada -->
+    <string name="reader_part_loading_title">Cargando la sección…</string>
+    <string name="reader_part_processing_title">Esta sección se está generando…</string>
+    <string name="reader_part_processing_message">Vuelve más tarde o actualiza la descarga para ver el contenido nuevo.</string>
+    <string name="reader_part_failed_title">Error en esta sección</string>
+    <string name="reader_part_failed_message">La generación falló. Genérala en la web y actualiza la descarga.</string>
+    <string name="reader_part_missing_title">Sección no disponible</string>
+    <string name="reader_part_missing_message">Esta sección no está en la descarga. Actualiza el proyecto desde la biblioteca.</string>
+    <string name="reader_part_load_error_title">No se pudo leer la sección</string>
+    <string name="reader_part_load_error_message">Hubo un problema al leer el contenido guardado.</string>
+    <string name="reader_project_empty_title">Este proyecto no tiene secciones todavía</string>
+    <string name="reader_project_empty_message">Genéralo en la web y actualiza la descarga.</string>
+
+    <!-- Descripción de sección (`segmentation.partes[].contenido`) -->
+    <string name="reader_description_label">Sobre esta sección</string>
+    <string name="reader_description_expand">Ver más</string>
+    <string name="reader_description_collapse">Ver menos</string>
+
+    <!-- Barra de lectura: anterior/siguiente, contador y estado leído -->
+    <string name="reader_prev">Anterior</string>
+    <string name="reader_next">Siguiente</string>
+    <string name="reader_section_counter">Sección %1$d de %2$d</string>
+    <string name="reader_mark_read">Marcar como leída</string>
+    <string name="reader_mark_unread">Marcar como no leída</string>
+
+    <!-- Banner de actualización posible -->
+    <string name="reader_update_possible">Puede haber cambios en la versión web. Actualiza la descarga desde la biblioteca.</string>
+
+    <!-- Generación in-app de esquema (Mermaid) y repaso (T14): estados
+         Generating/Failed, errores por razón y acciones. La copy es
+         accionable y breve; nunca expone detalles técnicos del servidor. -->
+    <string name="generation_generating_diagram">Generando esquema…</string>
+    <string name="generation_generating_review">Generando repaso…</string>
+    <string name="generation_generating_note">Puede tardar entre 30 y 60 segundos. Puedes seguir usando la app.</string>
+    <string name="generation_error_diagram_title">No se pudo generar el esquema</string>
+    <string name="generation_error_review_title">No se pudo generar el repaso</string>
+    <string name="generation_failure_offline">Sin conexión o el servicio no está disponible ahora. Comprueba tu red y vuelve a intentarlo.</string>
+    <string name="generation_failure_auth">Tu sesión caducó. Inicia sesión de nuevo para generar contenido.</string>
+    <string name="generation_failure_permission">No se puede generar todavía: el proyecto no está completo o falta la clave de API. Revísala en Ajustes de la web.</string>
+    <string name="generation_failure_not_found">Este proyecto o sección ya no existe. Actualiza la descarga desde la biblioteca.</string>
+    <string name="generation_failure_rate_limited">Se alcanzó el límite de peticiones. Espera un momento y vuelve a intentarlo.</string>
+    <string name="generation_failure_invalid">El contenido generado no es válido. Inténtalo de nuevo.</string>
+    <string name="generation_failure_unknown">No se pudo generar el contenido. Inténtalo de nuevo.</string>
+    <string name="generation_retry">Reintentar</string>
+    <string name="generation_regenerate_diagram">Regenerar esquema</string>
+    <string name="generation_regenerate_review">Regenerar repaso</string>
+    <string name="generation_generate_diagram">Generar esquema</string>
+    <string name="generation_generate_review">Repasar esta sección</string>
+    <string name="generation_back_to_content">Volver al contenido</string>
+    <string name="generation_missing_diagram_message">Genera un esquema visual de esta sección para estudiarlo y repasarlo desde aquí.</string>
+    <string name="generation_missing_review_message">Genera cinco preguntas para comprobar que esta sección quedó bien asentada.</string>
+</resources>

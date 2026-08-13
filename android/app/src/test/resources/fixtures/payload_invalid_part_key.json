@@ -1,0 +1,24 @@
+{
+  "id": "44444444-4444-4444-8444-444444444444",
+  "name": "Part key inválida",
+  "description": null,
+  "pdf_filename": null,
+  "source_type": "pdf",
+  "source_url": null,
+  "source_metadata": {},
+  "file_uri": null,
+  "status": "completed",
+  "segmentation": {
+    "partes": [ { "numero": 1, "titulo": "P", "contenido": "C" } ]
+  },
+  "partes_contenido": {
+    "abc": { "status": "completed" },
+    "1": { "status": "completed" }
+  },
+  "usage": {},
+  "reading_progress": {},
+  "error_message": null,
+  "share_token": null,
+  "created_at": "2026-07-01T00:00:00Z",
+  "updated_at": "2026-07-01T00:00:00Z"
+}

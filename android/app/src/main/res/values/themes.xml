@@ -1,0 +1,10 @@
+<resources>
+    <!-- Tema del sistema (sin AppCompat): Compose dibuja todo el UI.
+         T13: ventana oscura de tinta (#0d1117, identidad "Scholarly Forge")
+         desde el primer frame; el default de la app es DARK y así no se
+         destella papel claro durante el arranque. Compose pinta encima con
+         el tema activo (claro/oscuro/sistema) en cuanto compone. -->
+    <style name="Theme.Explainer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0D1117</item>
+    </style>
+</resources>
