@@ -57,8 +57,9 @@ export async function api(path, options = {}) {
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Error desconocido' }));
-    throw new Error(err.detail || 'Error en el servidor');
+    const err = await res.json().catch(() => null);
+    const detail = err && err.detail ? err.detail : 'Error desconocido';
+    throw new Error(`${res.status}: ${detail}`);
   }
 
   return res.json();
