@@ -38,6 +38,8 @@ from google.genai import types
 from backend.logging_config import get_logger
 from backend.deepseek_client import DeepSeekError, call_deepseek_chat
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
+from backend.codex_client import CodexError, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -585,6 +587,58 @@ async def _format_text_ds(
     return await asyncio.to_thread(_format_text_ds_sync, api_key, text, context, target_language)
 
 
+async def _format_text_codex(
+    user_id: str,
+    text: str,
+    context: str = "",
+    target_language: str = "es-ES",
+) -> tuple[str, Any]:
+    """Format one text block via Codex (app-server; corrutina, sin to_thread)."""
+    if not text or not text.strip():
+        return text, None
+
+    user_message = _build_formatter_user_message(text, context)
+
+    try:
+        content, usage = await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": user_message}],
+            model=CODEX_MODEL,
+            system_prompt=build_formatter_system_prompt(target_language),
+            response_format="json_object",
+            temperature=0.1,
+        )
+    except CodexError as exc:
+        logger.warning(
+            f"Formatter Codex call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"Formatter Codex call failed, keeping original text: {exc}",
+            extra={"context_preview": context[:80], "error": str(exc)[:200]},
+        )
+        return text, None
+
+    if not isinstance(content, dict):
+        logger.warning(
+            "Formatter Codex returned non-object JSON, keeping original text",
+            extra={"context_preview": context[:80], "content_type": type(content).__name__},
+        )
+        return text, usage
+
+    parsed = _extract_formatted_markdown(content)
+    if parsed is not None:
+        return parsed, usage
+
+    logger.warning(
+        "Formatter Codex JSON parse failed or empty markdown field, keeping original text",
+        extra={"context_preview": context[:80], "response_preview": str(content)[:200]},
+    )
+    return text, usage
+
+
 async def format_explainer_content(
     api_key: str,
     explainer_data: dict[str, Any],
@@ -726,5 +780,57 @@ async def format_explainer_content_ds(
         total_input=total_input,
         total_candidates=total_candidates,
         total_thoughts=total_thoughts,
+    )
+    return result, usage_summary
+
+
+async def format_explainer_content_codex(
+    user_id: str,
+    explainer_data: dict[str, Any],
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Format all prose fields via Codex (app-server) in parallel.
+
+    Same schema and fail-safe semantics as ``format_explainer_content``.
+    Corrutina async: cada campo se espera directo vía `call_codex_chat`
+    (nunca `asyncio.to_thread`); el `gather` no se acota más que la variante
+    `_ds` (el semáforo por proceso del app-server serializa los excesos).
+    """
+    start_time = time.time()
+    result = copy.deepcopy(explainer_data)
+    field_tasks = _collect_formatter_field_tasks(result)
+
+    if not field_tasks:
+        return result, _empty_formatter_usage()
+
+    coros = [
+        _format_text_codex(user_id, text, ctx, target_language)
+        for _, text, ctx in field_tasks
+    ]
+    gathered = await asyncio.gather(*coros, return_exceptions=True)
+
+    result, usages, token_totals = await _apply_parallel_formatter_results(
+        result,
+        field_tasks,
+        gathered,
+        provider_label="codex",
+        start_time=start_time,
+    )
+    total_input, total_candidates, total_thoughts = token_totals
+    usage_summary = _build_formatter_usage_summary(
+        model=CODEX_MODEL,
+        usages=usages,
+        total_input=total_input,
+        total_candidates=total_candidates,
+        total_thoughts=total_thoughts,
+    )
+    # RC-01: cada campo formateado es un turno Codex (`quota_requests=1` por
+    # CodexUsage). El resumen conserva el total de peticiones de cuota (turnos
+    # paralelos incluidos) para que los callers las acumulen en
+    # `codex_quota_requests` sin añadir coste USD.
+    usage_summary["quota_requests"] = sum(
+        getattr(usage, "quota_requests", 0) or 0
+        for usage in usages
+        if usage is not None
     )
     return result, usage_summary

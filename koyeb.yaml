@@ -6,6 +6,20 @@
 # - Autoscaling: Automatically scales up when needed
 # - Region: Frankfurt (fra) - close to Supabase EU regions
 # - Port: 8000 (Koyeb free tier health check requirement)
+#
+# Impacto del proveedor Codex / ChatGPT (T08) - SOLO documental, sin cambios funcionales:
+# - La imagen incluye el binario standalone `codex` (musl, /usr/local/bin/codex, pin 0.147.0),
+#   sin Node. El app-server de Codex se lanza por tenant via CODEX_BIN_PATH.
+# - Presupuesto de memoria (instancia nano 512MB): Python + uvicorn ~200 MB, mas hasta
+#   CODEX_MAX_PROCESSES=3 procesos `codex app-server` (~80-150 MB RSS cada uno segun carga).
+#   Si se observan OOM, bajar CODEX_MAX_PROCESSES (env de Koyeb, sin tocar este archivo).
+# - Env de ajuste (opcionales, con defaults en el backend): CODEX_MAX_PROCESSES=3,
+#   CODEX_PER_PROCESS_MAX_CONCURRENCY=5, CODEX_IDLE_TTL_SECONDS=600,
+#   CODEX_REQUEST_TIMEOUT_SECONDS=900, CODEX_LINK_TIMEOUT_SECONDS=600,
+#   CODEX_SPAWN_WAIT_SECONDS=60, CODEX_BIN_PATH=/usr/local/bin/codex.
+# - El vinculo ChatGPT (auth.json cifrado) vive en Supabase (user_provider_connections),
+#   por lo que sobrevive a cold starts de scale-to-zero: al reactivar la app se restaura
+#   desde la base de datos, no desde el disco local del contenedor.
 
 name: explainer
 region: fra

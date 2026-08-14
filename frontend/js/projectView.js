@@ -491,15 +491,25 @@ export function updateUsageUI(usage) {
   const candidates = usage.candidates_tokens || 0;
   const thoughts = usage.thoughts_tokens || 0;
   const total = usage.total_tokens || 0;
+  const codexQuota = usage.codex_quota_requests || 0;
 
-  if ($('mini-total-cost')) $('mini-total-cost').textContent = `$${cost.toFixed(2)}`;
-  if ($('usage-total-cost')) $('usage-total-cost').textContent = `$${cost.toFixed(2)}`;
+  // Codex quota display: honest "Incluido" instead of a made-up dollar figure.
+  const costLabel = codexQuota > 0 ? 'Incluido' : `$${cost.toFixed(2)}`;
+  if ($('mini-total-cost')) $('mini-total-cost').textContent = costLabel;
+  if ($('usage-total-cost')) $('usage-total-cost').textContent = costLabel;
   if ($('usage-prompt-tokens')) $('usage-prompt-tokens').textContent = prompt.toLocaleString();
   if ($('usage-output-tokens')) $('usage-output-tokens').textContent = candidates.toLocaleString();
   if ($('usage-thought-tokens')) $('usage-thought-tokens').textContent = thoughts.toLocaleString();
   if ($('usage-total-tokens')) $('usage-total-tokens').textContent = total.toLocaleString();
 
   if ($('proc-cost-badge')) $('proc-cost-badge').textContent = `$${cost.toFixed(4)}`;
+
+  // Codex quota row — only visible when the project consumed ChatGPT quota
+  if ($('usage-codex-quota')) {
+    $('usage-codex-quota').textContent = `Cuota ChatGPT: ${codexQuota.toLocaleString()} peticiones`;
+  }
+  const quotaRow = $('usage-codex-quota-row');
+  if (quotaRow) quotaRow.style.display = codexQuota > 0 ? '' : 'none';
 
   // Formatter cost row (only visible when formatter has been applied)
   const fmtCost = usage.formatter_cost || 0;

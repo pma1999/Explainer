@@ -7,7 +7,7 @@ import { $, show, hide, formatBytes, toast } from './dom.js';
 import { api } from './api.js';
 import { createCombobox } from './components/openrouter-combobox.js';
 import { invalidateProjectsCache, loadBackupAsync, mergeProjects, syncProjectsToBackup } from './storage.js';
-import { updateApiKeyUI, showSettings } from './auth.js';
+import { updateApiKeyUI, showSettings, unlinkCodexAccount } from './auth.js';
 
 let selectedFile = null;
 let currentSourceType = 'pdf';
@@ -77,7 +77,8 @@ export function isValidWebUrl(url) {
 export function isExplainerProviderSupportedForSource(sourceType, provider) {
   if (provider === 'openrouter' && sourceType === 'youtube') return false;
   if (provider === 'deepseek' && sourceType === 'youtube') return false;
-  return provider === 'gemini' || provider === 'openrouter' || provider === 'deepseek';
+  if (provider === 'codex' && sourceType === 'youtube') return false;
+  return provider === 'gemini' || provider === 'openrouter' || provider === 'deepseek' || provider === 'codex';
 }
 
 export function isValidOpenRouterModel(model) {
@@ -283,12 +284,13 @@ export function restoreModelSelector() {
   if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
 
   // --- explainerProvider ---
-  const validProviders = ['gemini', 'openrouter', 'deepseek'];
+  const validProviders = ['gemini', 'openrouter', 'deepseek', 'codex'];
   let provider = validProviders.includes(saved.explainerProvider) ? saved.explainerProvider : 'gemini';
 
   // Key-availability fallback (primary key only — submit-time validates full set)
   if (provider === 'openrouter' && !state.hasOpenRouterKey) provider = 'gemini';
   if (provider === 'deepseek' && !state.hasDeepSeekKey) provider = 'gemini';
+  if (provider === 'codex' && !state.hasCodexLink) provider = 'gemini';
   // Source-type fallback (default source is 'pdf'; re-checked after source switches)
   if (!isExplainerProviderSupportedForSource(currentSourceType, provider)) provider = 'gemini';
   currentExplainerProvider = provider;
@@ -343,6 +345,7 @@ export function validateExplainerProviderSelection({
   hasMistralKey,
   hasDeepSeekKey = false,
   hasTavilyKey = false,
+  hasCodexLink = false,
 }) {
   if (!isExplainerProviderSupportedForSource(sourceType, provider)) {
     return 'Los vídeos de YouTube solo son compatibles con Gemini.';
@@ -374,6 +377,14 @@ export function validateExplainerProviderSelection({
 
   if (provider === 'deepseek' && sourceType === 'pdf' && !hasMistralKey) {
     return 'Necesitas configurar tu API key de Mistral para usar OCR nativo en PDFs con DeepSeek.';
+  }
+
+  if (provider === 'codex' && !hasCodexLink) {
+    return 'Vincula tu cuenta ChatGPT en Ajustes para usar Codex.';
+  }
+
+  if (provider === 'codex' && sourceType === 'pdf' && !hasMistralKey) {
+    return 'Necesitas configurar tu API key de Mistral para usar OCR en PDFs con Codex.';
   }
 
   return null;
@@ -420,6 +431,16 @@ function buildExplainerProviderHint(sourceType, provider) {
       return `La explicación usará ${modelLabel} directamente en DeepSeek con razonamiento máximo. Segmentación, recorrido, recursos y formateo usarán DeepSeek V4 Flash; recursos verificará con Tavily.`;
     }
     return `${modelLabel} está disponible para PDF y web, pero primero necesitas guardar tus API keys de DeepSeek y Tavily.`;
+  }
+
+  if (provider === 'codex') {
+    if (sourceType === 'pdf' && !state.hasMistralKey) {
+      return 'Para PDFs con Codex necesitas guardar también tu API key de Mistral para el OCR nativo.';
+    }
+    if (!state.hasCodexLink) {
+      return 'Usa GPT-5.6 Luna con la cuota de tu plan ChatGPT. Primero vincula tu cuenta ChatGPT en Ajustes.';
+    }
+    return 'Usa GPT-5.6 Luna con la cuota de tu plan ChatGPT. Segmentación, recorrido, recursos y formateo seguirán usando Codex.';
   }
 
   return 'La explicación usará Gemini. Segmentación, recorrido, recursos y formateo seguirán usando Gemini.';
@@ -497,6 +518,7 @@ export function initLanding() {
   const providerGemini = $('explainer-provider-gemini');
   const providerOpenRouter = $('explainer-provider-openrouter');
   const providerDeepSeek = $('explainer-provider-deepseek');
+  const providerCodex = $('explainer-provider-codex');
   const modelPro = $('openrouter-model-pro');
   const modelStandard = $('openrouter-model-standard');
   const modelDeepseek = $('openrouter-model-deepseek');
@@ -512,6 +534,9 @@ export function initLanding() {
   const deepseekModelPro = $('deepseek-model-pro');
   const deepseekModelFlash = $('deepseek-model-flash');
   const deepseekModelPanel = $('deepseek-model-panel');
+  const codexModelPanel = $('codex-model-panel');
+  const codexPanelBtnLink = $('codex-panel-btn-link');
+  const codexPanelBtnUnlink = $('codex-panel-btn-unlink');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
 
@@ -576,26 +601,35 @@ export function initLanding() {
   function syncExplainerProviderUI() {
     const openRouterSupported = isExplainerProviderSupportedForSource(currentSourceType, 'openrouter');
     const deepSeekSupported = isExplainerProviderSupportedForSource(currentSourceType, 'deepseek');
+    const codexSupported = isExplainerProviderSupportedForSource(currentSourceType, 'codex');
     if (!openRouterSupported && currentExplainerProvider === 'openrouter') {
       currentExplainerProvider = 'gemini';
     }
     if (!deepSeekSupported && currentExplainerProvider === 'deepseek') {
       currentExplainerProvider = 'gemini';
     }
+    if (!codexSupported && currentExplainerProvider === 'codex') {
+      currentExplainerProvider = 'gemini';
+    }
 
     providerGemini.checked = currentExplainerProvider === 'gemini';
     providerOpenRouter.checked = currentExplainerProvider === 'openrouter';
     providerDeepSeek.checked = currentExplainerProvider === 'deepseek';
+    providerCodex.checked = currentExplainerProvider === 'codex';
     providerOpenRouter.disabled = !openRouterSupported;
     providerDeepSeek.disabled = !deepSeekSupported;
+    providerCodex.disabled = !codexSupported;
 
     $('provider-card-gemini').classList.toggle('selected', currentExplainerProvider === 'gemini');
     $('provider-card-openrouter').classList.toggle('selected', currentExplainerProvider === 'openrouter');
     $('provider-card-deepseek').classList.toggle('selected', currentExplainerProvider === 'deepseek');
+    $('provider-card-codex').classList.toggle('selected', currentExplainerProvider === 'codex');
     $('provider-card-openrouter').classList.toggle('disabled', !openRouterSupported);
     $('provider-card-deepseek').classList.toggle('disabled', !deepSeekSupported);
+    $('provider-card-codex').classList.toggle('disabled', !codexSupported);
     modelPanel.classList.toggle('hidden', currentExplainerProvider !== 'openrouter' || !openRouterSupported);
     deepseekModelPanel.classList.toggle('hidden', currentExplainerProvider !== 'deepseek' || !deepSeekSupported);
+    codexModelPanel.classList.toggle('hidden', currentExplainerProvider !== 'codex' || !codexSupported);
     modelPro.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO_PRO && currentOpenRouterMode === 'preset';
     modelStandard.checked = currentOpenRouterModel === OPENROUTER_MODEL_MIMO && currentOpenRouterMode === 'preset';
     modelDeepseek.checked = currentOpenRouterModel === OPENROUTER_MODEL_DEEPSEEK_V4_FLASH && currentOpenRouterMode === 'preset';
@@ -837,6 +871,15 @@ export function initLanding() {
     providerDeepSeek.addEventListener('change', () => {
       if (providerDeepSeek.checked) setExplainerProvider('deepseek');
     });
+    providerCodex.addEventListener('change', () => {
+      if (providerCodex.checked) setExplainerProvider('codex');
+    });
+    if (codexPanelBtnLink) {
+      codexPanelBtnLink.addEventListener('click', showSettings);
+    }
+    if (codexPanelBtnUnlink) {
+      codexPanelBtnUnlink.addEventListener('click', unlinkCodexAccount);
+    }
     modelPro.addEventListener('change', () => {
       if (modelPro.checked) setOpenRouterModel(OPENROUTER_MODEL_MIMO_PRO);
     });
@@ -1068,6 +1111,7 @@ async function handleUpload() {
     hasMistralKey: state.hasMistralKey,
     hasDeepSeekKey: state.hasDeepSeekKey,
     hasTavilyKey: state.hasTavilyKey,
+    hasCodexLink: state.hasCodexLink,
   });
   if (providerValidationError) {
     providerError.textContent = providerValidationError;

@@ -893,6 +893,7 @@ PROVIDER_OPENROUTER = "openrouter"
 PROVIDER_MISTRAL = "mistral"
 PROVIDER_DEEPSEEK = "deepseek"
 PROVIDER_TAVILY = "tavily"
+PROVIDER_CODEX = "codex"
 
 
 def has_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:
@@ -995,6 +996,118 @@ def delete_user_api_key(user_id: str, provider: str = PROVIDER_GEMINI) -> bool:
         return False
 
 
+# ========== User Provider Connections (Codex / ChatGPT OAuth link) ==========
+# Contrato congelado para T02/T04/T07 (global-constraints.md §Persistence).
+# Una fila por usuario en `user_provider_connections` (PK user_id, provider='codex').
+# El caller SIEMPRE cifra antes de persistir: encrypted_credentials =
+# encrypt_user_api_key(json.dumps(auth_json), user_id); estas funciones aceptan el
+# blob tal cual y nunca escriben ni loguean credenciales en texto plano.
+
+
+def get_user_provider_connection(user_id: str) -> Optional[dict]:
+    """
+    Get the stored provider connection row (full row, blob still encrypted).
+
+    Args:
+        user_id: UUID of the user
+
+    Returns:
+        Row dict (including encrypted_credentials) or None if not found.
+        Supabase errors are logged and return None (safe fallback, pattern of
+        has_user_api_key); decryption is the caller's job.
+    """
+    client = _client()
+    try:
+        r = (
+            client.table("user_provider_connections")
+            .select("*")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not r or not r.data:
+            return None
+        row = r.data[0] if isinstance(r.data, list) else r.data
+        return dict(row)
+    except Exception as e:
+        logger.error(
+            f"[get_user_provider_connection] Error for user {user_id[:8]}...: {type(e).__name__}: {e}"
+        )
+        return None
+
+
+def upsert_user_provider_connection(
+    user_id: str,
+    *,
+    status: str,
+    encrypted_credentials: Optional[str] = None,
+    login_id: Optional[str] = None,
+    plan_type: Optional[str] = None,
+    last_error: Optional[str] = None,
+) -> None:
+    """
+    Upsert the user's provider connection row (PK: user_id), refreshing updated_at.
+
+    Contrato de cifrado (documentado): el caller cifra antes de llamar.
+    `encrypted_credentials` debe ser encrypt_user_api_key(json.dumps(auth_json), user_id);
+    esta función acepta el blob tal cual y nunca cifra ni escribe texto plano.
+
+    Errores de Supabase se propagan al caller (caso crítico documentado: un vínculo
+    marcado como persistido sin estarlo rompería el flujo OAuth; patrón de
+    set_user_api_key, que tampoco traga excepciones).
+
+    Args:
+        user_id: UUID of the user
+        status: one of 'none' | 'pending' | 'linked' | 'failed' (DB CHECK)
+        encrypted_credentials: Fernet blob, opaco para esta función
+        login_id: device-code login identifier (not a secret)
+        plan_type: raw ChatGPT plan type (not a secret)
+        last_error: safe user-facing message only (no credentials)
+    """
+    client = _client()
+    row = {
+        "user_id": user_id,
+        "provider": PROVIDER_CODEX,
+        "status": status,
+        "encrypted_credentials": encrypted_credentials,
+        "login_id": login_id,
+        "plan_type": plan_type,
+        "last_error": last_error,
+        "updated_at": _now_iso(),
+    }
+    client.table("user_provider_connections").upsert(row, on_conflict="user_id").execute()
+
+
+def delete_user_provider_connection(user_id: str) -> bool:
+    """
+    Delete the user's provider connection row. Idempotent.
+
+    Args:
+        user_id: UUID of the user
+
+    Returns:
+        True if deleted, False if not found (or Supabase error, logged).
+    """
+    client = _client()
+    try:
+        existing = (
+            client.table("user_provider_connections")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if not existing or not existing.data:
+            return False
+        client.table("user_provider_connections").delete().eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        logger.error(
+            f"[delete_user_provider_connection] Error for user {user_id[:8]}...: {type(e).__name__}: {e}"
+        )
+        return False
+
+
 def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     """
     Get API key status for all providers (safe for returning to frontend).
@@ -1005,6 +1118,7 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     Adds has_mistral_key / mistral_updated_at for Mistral.
     Adds has_deepseek_key / deepseek_updated_at for DeepSeek.
     Adds has_tavily_key / tavily_updated_at for Tavily.
+    Adds has_codex_link / codex_status / codex_plan_type / codex_updated_at for Codex.
     """
     client = _client()
     gemini_data: dict = {}
@@ -1012,6 +1126,7 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
     mistral_data: dict = {}
     deepseek_data: dict = {}
     tavily_data: dict = {}
+    codex_conn: dict = {}
 
     try:
         rows = (
@@ -1032,6 +1147,15 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
                     deepseek_data = row
                 elif row.get("provider") == PROVIDER_TAVILY:
                     tavily_data = row
+        conn = (
+            client.table("user_provider_connections")
+            .select("status, plan_type, updated_at")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if conn and conn.data:
+            codex_conn = conn.data[0] if isinstance(conn.data, list) else conn.data
     except Exception as e:
         logger.error(f"[API Key Status] Error for user {user_id[:8]}...: {type(e).__name__}: {e}")
 
@@ -1052,4 +1176,9 @@ def get_user_api_key_status(user_id: str) -> dict[str, Any]:
         # Tavily Search
         "has_tavily_key": bool(tavily_data),
         "tavily_updated_at": tavily_data.get("updated_at") or None,
+        # Codex / ChatGPT provider connection
+        "has_codex_link": codex_conn.get("status") == "linked",
+        "codex_status": codex_conn.get("status") or "none",
+        "codex_plan_type": codex_conn.get("plan_type") or None,
+        "codex_updated_at": codex_conn.get("updated_at") or None,
     }

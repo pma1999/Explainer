@@ -8,6 +8,8 @@ from typing import Any
 from backend.gemini_model_routing import MODEL_CLASSIFIER, TEMPERATURE_PAGE_CLASSIFIER
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.codex_client import CodexError, CodexUsage, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.deepseek_client import DeepSeekError, call_deepseek_chat
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
@@ -469,6 +471,69 @@ def run_page_classifier_ds(
             "duration_ms": duration_ms,
             "prompt_tokens": getattr(usage, "prompt_token_count", 0),
             "model": model,
+        },
+    )
+    return content_pages, usage, content
+
+
+async def run_page_classifier_codex(
+    api_key: str,
+    source_text: str,
+    total_pages: int,
+    model: str = CODEX_MODEL,
+) -> tuple[frozenset[int], CodexUsage, dict[str, Any]]:
+    """Classify PDF pages via Codex using precomputed OCR text.
+
+    Espejo posicional de `run_page_classifier_ds` sobre `call_codex_chat`
+    (T05): el parámetro `api_key` recibe el `user_id` del proveedor Codex.
+    """
+    start_time = time.time()
+    logger.info(
+        "Iniciando clasificador de páginas Codex",
+        extra={
+            "total_pages": total_pages,
+            "model": model,
+            "source_chars": len(source_text),
+            "user_id": api_key[:8],
+        },
+    )
+
+    content, usage = await call_codex_chat(
+        user_id=api_key,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Clasifica las páginas de este documento en contenido sustantivo "
+                    "y páginas accesorias, siguiendo las instrucciones del sistema.\n\n"
+                    "<documento_ocr>\n"
+                    f"{source_text}\n"
+                    "</documento_ocr>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
+        response_format="json_object",
+        temperature=TEMPERATURE_PAGE_CLASSIFIER,
+    )
+    if not isinstance(content, dict):
+        raise CodexError("El clasificador Codex no devolvió un objeto JSON.")
+
+    content_pages = _parse_classifier_result(content, total_pages)
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Clasificador Codex completado: %d/%d páginas de contenido en %dms",
+        len(content_pages),
+        total_pages,
+        duration_ms,
+        extra={
+            "content_pages_count": len(content_pages),
+            "total_pages": total_pages,
+            "duration_ms": duration_ms,
+            "prompt_tokens": usage.prompt_token_count,
+            "model": model,
+            "user_id": api_key[:8],
         },
     )
     return content_pages, usage, content

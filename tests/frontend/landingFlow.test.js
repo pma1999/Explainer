@@ -12,6 +12,9 @@ const state = {
   hasMistralKey: false,
   hasDeepSeekKey: false,
   hasTavilyKey: false,
+  hasCodexLink: false,
+  codexLinkStatus: 'loading',
+  codexPlanType: null,
   user: { id: 'user-1', email: 'test@example.com' },
 };
 
@@ -22,6 +25,7 @@ const mergeProjects = vi.fn((serverProjects, localProjects) => [...serverProject
 const syncProjectsToBackup = vi.fn(async () => ({ ok: true }));
 const updateApiKeyUI = vi.fn();
 const showSettings = vi.fn();
+const unlinkCodexAccount = vi.fn();
 const toast = vi.fn();
 
 vi.mock('../../frontend/js/state.js', () => ({ state }));
@@ -42,6 +46,7 @@ vi.mock('../../frontend/js/storage.js', () => ({
 vi.mock('../../frontend/js/auth.js', () => ({
   updateApiKeyUI,
   showSettings,
+  unlinkCodexAccount,
 }));
 
 function renderLandingDom() {
@@ -62,6 +67,7 @@ function renderLandingDom() {
     <input id="explainer-provider-gemini" type="radio" name="provider" checked />
     <input id="explainer-provider-openrouter" type="radio" name="provider" />
     <input id="explainer-provider-deepseek" type="radio" name="provider" />
+    <input id="explainer-provider-codex" type="radio" name="provider" />
     <input id="openrouter-model-pro" type="radio" name="openrouter-model" />
     <input id="openrouter-model-standard" type="radio" name="openrouter-model" />
     <input id="openrouter-model-deepseek" type="radio" name="openrouter-model" />
@@ -95,6 +101,13 @@ function renderLandingDom() {
     <input id="deepseek-model-pro" type="radio" name="deepseek-model" />
     <input id="deepseek-model-flash" type="radio" name="deepseek-model" />
     <div id="deepseek-model-panel" class="hidden"></div>
+    <div id="codex-model-panel" class="hidden">
+      <p id="codex-panel-link-status">
+        <span id="codex-panel-link-text"></span>
+        <button type="button" id="codex-panel-btn-link">Vincular cuenta ChatGPT</button>
+        <button type="button" id="codex-panel-btn-unlink">Desvincular</button>
+      </p>
+    </div>
     <div id="explainer-provider-hint"></div>
     <div id="explainer-provider-error" class="hidden"></div>
     <button id="tab-pdf" type="button"></button>
@@ -106,6 +119,7 @@ function renderLandingDom() {
     <div id="provider-card-gemini"><span id="provider-card-gemini-status"></span></div>
     <div id="provider-card-openrouter"><span id="provider-card-openrouter-status"></span></div>
     <div id="provider-card-deepseek"><span id="provider-card-deepseek-status"></span></div>
+    <div id="provider-card-codex"><span id="provider-card-codex-status"></span></div>
     <div id="openrouter-model-card-pro"></div>
     <div id="openrouter-model-card-standard"></div>
     <div id="openrouter-model-card-deepseek"></div>
@@ -149,6 +163,9 @@ describe('landing.js project creation flow', () => {
     state.hasMistralKey = false;
     state.hasDeepSeekKey = false;
     state.hasTavilyKey = false;
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'loading';
+    state.codexPlanType = null;
     state.user = { id: 'user-1', email: 'test@example.com' };
 
     renderLandingDom();
@@ -1270,6 +1287,185 @@ describe('landing.js project creation flow', () => {
       expect(summaryEl.classList.contains('hidden')).toBe(false);
       expect(summaryEl.textContent).toMatch(/Modelo \(agregado\)/);
       expect(summaryEl.textContent).not.toMatch(/Proveedor exacto/);
+    });
+  });
+
+  describe('codex provider (ChatGPT)', () => {
+    const SELECTOR_KEY = 'explainer.modelSelector.v1';
+
+    it('selecting codex shows the codex sub-panel, hides other panels and persists the provider', async () => {
+      state.hasCodexLink = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      expect(document.getElementById('codex-model-panel').classList.contains('hidden')).toBe(false);
+      expect(document.getElementById('openrouter-model-panel').classList.contains('hidden')).toBe(true);
+      expect(document.getElementById('deepseek-model-panel').classList.contains('hidden')).toBe(true);
+      expect(document.getElementById('explainer-provider-codex').checked).toBe(true);
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.explainerProvider).toBe('codex');
+    });
+
+    it('disables the codex radio on YouTube and falls back to gemini', async () => {
+      state.hasCodexLink = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      // Select codex first (web/pdf default)
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+      expect(document.getElementById('explainer-provider-codex').checked).toBe(true);
+
+      // Switch to YouTube: codex is not supported → disabled + provider resets to gemini
+      document.getElementById('tab-youtube').click();
+
+      expect(document.getElementById('explainer-provider-codex').disabled).toBe(true);
+      expect(document.getElementById('provider-card-codex').classList.contains('disabled')).toBe(true);
+      expect(document.getElementById('explainer-provider-gemini').checked).toBe(true);
+      expect(document.getElementById('codex-model-panel').classList.contains('hidden')).toBe(true);
+    });
+
+    it('blocks submit when codex is selected without a linked ChatGPT account (frozen message + opens settings)', async () => {
+      state.hasCodexLink = false;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Test codex sin vínculo';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(document.getElementById('explainer-provider-error').textContent)
+        .toBe('Vincula tu cuenta ChatGPT en Ajustes para usar Codex.');
+      expect(showSettings).toHaveBeenCalled();
+      expect(api).not.toHaveBeenCalled();
+    });
+
+    it('blocks submit for codex + PDF without a Mistral key (frozen message)', async () => {
+      state.hasCodexLink = true;
+      state.hasMistralKey = false;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      // Simulate a real PDF selection so the upload button is enabled (the
+      // provider validation runs before the file check inside handleUpload).
+      const fileInput = document.getElementById('file-input');
+      const file = new File(['pdf-content'], 'doc.pdf', { type: 'application/pdf' });
+      Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('project-name').value = 'Test codex pdf';
+      document.getElementById('project-name').dispatchEvent(new Event('input', { bubbles: true }));
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(document.getElementById('explainer-provider-error').textContent)
+        .toBe('Necesitas configurar tu API key de Mistral para usar OCR en PDFs con Codex.');
+      expect(api).not.toHaveBeenCalled();
+    });
+
+    it('submits codex with no extra payload fields when linked and source is web', async () => {
+      state.hasCodexLink = true;
+      api
+        .mockResolvedValueOnce({ id: 'project-1', name: 'Codex web', description: '' })
+        .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Codex web';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(api).toHaveBeenNthCalledWith(
+        2,
+        '/api/projects/project-1/process',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            explainer_provider: 'codex',
+            target_language: 'es-ES',
+          }),
+        }),
+      );
+    });
+
+    it('restores a saved codex selection when the ChatGPT account is linked', async () => {
+      state.hasCodexLink = true;
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'codex',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-codex').checked).toBe(true);
+      expect(document.getElementById('provider-card-codex').classList.contains('selected')).toBe(true);
+      expect(document.getElementById('codex-model-panel').classList.contains('hidden')).toBe(false);
+    });
+
+    it('falls back to gemini when the saved codex selection has no ChatGPT link', async () => {
+      state.hasCodexLink = false;
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'codex',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+      }));
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      expect(document.getElementById('explainer-provider-gemini').checked).toBe(true);
+      expect(document.getElementById('explainer-provider-codex').checked).toBe(false);
+      expect(document.getElementById('codex-model-panel').classList.contains('hidden')).toBe(true);
+    });
+
+    it('opens Ajustes from the sub-panel "Vincular cuenta ChatGPT" button', async () => {
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('codex-panel-btn-link').click();
+      expect(showSettings).toHaveBeenCalled();
+    });
+
+    it('unlinks the ChatGPT account from the sub-panel "Desvincular" button', async () => {
+      state.hasCodexLink = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('codex-panel-btn-unlink').click();
+      expect(unlinkCodexAccount).toHaveBeenCalled();
     });
   });
 });

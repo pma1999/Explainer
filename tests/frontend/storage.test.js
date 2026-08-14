@@ -11,14 +11,62 @@ import {
   syncProjectsToBackup,
   getCachedApiKeyStatus,
   setCachedApiKeyStatus,
+  getCachedCodexLinkStatus,
+  setCachedCodexLinkStatus,
   getFirstIncompletePart,
   getResumeTarget,
 } from '../../frontend/js/storage.js';
-import { API_KEY_CACHE_KEY_PREFIX } from '../../frontend/js/state.js';
+import { API_KEY_CACHE_KEY_PREFIX, API_KEY_CACHE_TTL_MS, CODEX_LINK_CACHE_KEY_PREFIX } from '../../frontend/js/state.js';
 
 describe('storage.js', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  describe('getCachedCodexLinkStatus / setCachedCodexLinkStatus', () => {
+    it('round-trips the codex link status payload', () => {
+      setCachedCodexLinkStatus('user-1', {
+        hasCodexLink: true,
+        codexStatus: 'linked',
+        codexPlanType: 'plus',
+      });
+      const cached = getCachedCodexLinkStatus('user-1');
+      expect(cached).not.toBeNull();
+      expect(cached.hasCodexLink).toBe(true);
+      expect(cached.codexStatus).toBe('linked');
+      expect(cached.codexPlanType).toBe('plus');
+    });
+
+    it('stores under the explainer.codexLinkStatus.v1 prefix', () => {
+      setCachedCodexLinkStatus('user-1', {
+        hasCodexLink: false,
+        codexStatus: 'none',
+        codexPlanType: null,
+      });
+      expect(localStorage.getItem(CODEX_LINK_CACHE_KEY_PREFIX + 'user-1')).not.toBeNull();
+    });
+
+    it('returns null for a stale cache entry', () => {
+      localStorage.setItem(CODEX_LINK_CACHE_KEY_PREFIX + 'user-1', JSON.stringify({
+        hasCodexLink: true,
+        codexStatus: 'linked',
+        codexPlanType: 'plus',
+        updatedAt: new Date(Date.now() - API_KEY_CACHE_TTL_MS - 60_000).toISOString(),
+      }));
+      expect(getCachedCodexLinkStatus('user-1')).toBeNull();
+    });
+
+    it('returns null for missing userId or corrupt JSON', () => {
+      expect(getCachedCodexLinkStatus(null)).toBeNull();
+      expect(getCachedCodexLinkStatus(undefined)).toBeNull();
+      localStorage.setItem(CODEX_LINK_CACHE_KEY_PREFIX + 'user-1', '{bad json!');
+      expect(getCachedCodexLinkStatus('user-1')).toBeNull();
+    });
+
+    it('is a no-op without userId', () => {
+      expect(() => setCachedCodexLinkStatus(null, { hasCodexLink: true, codexStatus: 'linked', codexPlanType: null })).not.toThrow();
+      expect(getCachedCodexLinkStatus(null)).toBeNull();
+    });
   });
 
   describe('getLocalBackupKey', () => {

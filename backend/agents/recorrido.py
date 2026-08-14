@@ -10,6 +10,8 @@ from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_RECORRIDO_REFUERZO_XML, build_language_policy_xml
 from backend.deepseek_client import DeepSeekError, call_deepseek_chat
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
+from backend.codex_client import CodexError, CodexUsage, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -606,6 +608,68 @@ def run_recorrido_ds(
     total_duration = int((time.time() - start_time) * 1000)
     logger.info(
         "Recorrido DeepSeek completado: %d entradas en %dms",
+        len(content.get("recorrido_anotado", [])),
+        total_duration,
+        extra={
+            "num_entradas": len(content.get("recorrido_anotado", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return content, usage
+
+
+async def run_recorrido_codex(
+    user_id: str,
+    source_text: str,
+    identificacion: str,
+    model: str = CODEX_MODEL,
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], CodexUsage]:
+    """Run the Recorrido Anotado agent via Codex (app-server) on inline OCR/text.
+
+    Corrutina async: se espera directo (nunca en `asyncio.to_thread`). Espejo
+    posicional de `run_recorrido_ds` con `user_id` en la posición de `api_key`.
+    """
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente recorrido Codex",
+        extra={
+            "user_id_prefix": user_id[:8],
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = await call_codex_chat(
+        user_id=user_id,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>"
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=build_recorrido_openrouter_system_instruction(target_language),
+        response_format="json_object",
+    )
+    if not isinstance(content, dict):
+        raise CodexError("El recorrido Codex no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Recorrido Codex completado: %d entradas en %dms",
         len(content.get("recorrido_anotado", [])),
         total_duration,
         extra={

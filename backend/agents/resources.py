@@ -10,6 +10,8 @@ from backend.logging_config import get_logger
 from backend.agents.language_policy import CASTELLANO_ESPANIA_RESOURCES_XML, build_language_policy_xml
 from backend.deepseek_client import DeepSeekError, call_deepseek_chat
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
+from backend.codex_client import CodexError, CodexUsage, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
 from backend.openrouter_model_routing import (
     OPENROUTER_MODEL_AUXILIARY,
@@ -288,6 +290,55 @@ def build_resources_openrouter_system_instruction(target_language: str = "es-ES"
 
 def build_resources_deepseek_system_instruction(target_language: str = "es-ES") -> str:
     return build_resources_system_instruction(target_language) + DEEPSEEK_CONTRACT_SUFFIX
+
+
+CODEX_CONTRACT_SUFFIX = """
+
+<codex_web_search_policy>
+En esta ejecución NO dispones de búsqueda web ni de herramientas: recomienda
+desde tu conocimiento, sin búsqueda web. Aplica el protocolo anti-confabulación
+con el máximo rigor: solo incluye recursos que conoces con alta confianza y
+nunca inventes títulos, autores, años ni URLs.
+</codex_web_search_policy>
+
+<codex_source_contract>
+La fuente se entrega como texto inline completo ya delimitado para esta parte.
+No recortes el contenido por longitud de contexto.
+</codex_source_contract>
+
+<codex_json_contract>
+Devuelve exclusivamente un objeto JSON raíz con esta estructura:
+{
+  "titulo_mapa": "string",
+  "vision_general": "string",
+  "ejes_tematicos": [
+    {
+      "nombre_eje": "string",
+      "recursos": [
+        {
+          "formato": "libro_texto_articulo | documental_pelicula_serie | sitio_web_recurso_digital | podcast_audio | curso_conferencia_material_educativo",
+          "titulo": "string",
+          "autor_creador": "string",
+          "tipo_y_datos": "string",
+          "idioma": "string",
+          "conexion_con_texto": "string",
+          "nivel_y_accesibilidad": "string",
+          "nota": "string",
+          "url": "solo si conoces con alta confianza una URL directa y verificada de tu conocimiento; si no, cadena vacía. Nunca inventes URLs."
+        }
+      ]
+    }
+  ],
+  "nota_de_integridad": "string"
+}
+No devuelvas un array raíz ni texto fuera del JSON.
+</codex_json_contract>"""
+
+
+def build_resources_codex_system_instruction(target_language: str = "es-ES") -> str:
+    """Resources prompt para Codex: sin búsqueda web ni herramientas en v1
+    (recomienda desde el conocimiento del modelo)."""
+    return build_resources_system_instruction(target_language) + CODEX_CONTRACT_SUFFIX
 
 
 OPENROUTER_SYSTEM_INSTRUCTION = build_resources_openrouter_system_instruction("es-ES")
@@ -724,6 +775,85 @@ def run_resources_ds(
             "prompt_tokens": getattr(usage, "prompt_token_count", 0),
             "completion_tokens": getattr(usage, "candidates_token_count", 0),
             "server_tool_use": getattr(usage, "server_tool_use", {}),
+            "model": model,
+        },
+    )
+    return content, usage
+
+
+async def run_resources_codex(
+    user_id: str,
+    source_text: str,
+    identificacion: str,
+    model: str = CODEX_MODEL,
+    target_language: str = "es-ES",
+) -> tuple[dict[str, Any], CodexUsage]:
+    """Run the Resources agent via Codex (app-server), SIN búsqueda web en v1.
+
+    Corrutina async: se espera directo (nunca en `asyncio.to_thread`). Espejo
+    posicional de `run_resources_ds` con `user_id` en la posición de
+    `api_key`, sin Tavily ni tools: recomienda desde el conocimiento del
+    modelo (riesgo R-RESOURCES del plan: frescura dependiente del modelo).
+    """
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente resources Codex (sin búsqueda web)",
+        extra={
+            "user_id_prefix": user_id[:8],
+            "identificacion_length": len(identificacion),
+            "identificacion_preview": identificacion[:150] + "..." if len(identificacion) > 150 else identificacion,
+            "uses_web_search": False,
+            "source_chars": len(source_text),
+            "model": model,
+        },
+    )
+
+    content, usage = await call_codex_chat(
+        user_id=user_id,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "<fuente_de_la_parte>\n"
+                    f"{source_text}\n"
+                    "</fuente_de_la_parte>\n\n"
+                    "Genera un mapa de recursos externos para la siguiente parte del texto:\n\n"
+                    "<identificacion>\n"
+                    f"{identificacion}\n"
+                    "</identificacion>\n\n"
+                    "Recomienda desde tu conocimiento, sin búsqueda web: los mejores "
+                    "recursos que conozcas con alta confianza (libros, artículos, "
+                    "documentales, podcasts, sitios web, cursos) para profundizar en "
+                    "los temas de esta sección. Organiza por ejes temáticos. Solo "
+                    "incluye recursos verificables con alta confianza; nunca inventes "
+                    "títulos, autores ni URLs."
+                ),
+            }
+        ],
+        model=model,
+        system_prompt=build_resources_codex_system_instruction(target_language),
+        response_format="json_object",
+    )
+    if not isinstance(content, dict):
+        raise CodexError("Resources Codex no devolvió un objeto JSON.")
+
+    total_duration = int((time.time() - start_time) * 1000)
+    total_recursos = sum(
+        len(eje.get("recursos", []))
+        for eje in content.get("ejes_tematicos", [])
+        if isinstance(eje, dict)
+    )
+    logger.info(
+        "Resources Codex completado: %d ejes, %d recursos en %dms",
+        len(content.get("ejes_tematicos", [])),
+        total_recursos,
+        total_duration,
+        extra={
+            "num_ejes": len(content.get("ejes_tematicos", [])),
+            "total_recursos": total_recursos,
+            "total_duration_ms": total_duration,
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
             "model": model,
         },
     )

@@ -8,6 +8,8 @@ from backend.gemini_model_routing import MODEL_SEGMENTADOR, TEMPERATURE_SEGMENTA
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger, LogContext
 from backend.agents.language_policy import CASTELLANO_ESPANIA_XML, build_language_policy_xml
+from backend.codex_client import CodexError, CodexUsage, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.deepseek_client import DeepSeekError, call_deepseek_chat, call_deepseek_chat_full
 from backend.deepseek_model_routing import DEEPSEEK_MODEL_AUXILIARY, max_reasoning_effort
 from backend.openrouter_client import OpenRouterError, call_openrouter_chat
@@ -1397,3 +1399,88 @@ def run_segmentador_ds(
         },
     )
     return content, result.usage, messages
+
+
+async def run_segmentador_codex(
+    api_key: str,
+    source_text: str,
+    description: str,
+    source_kind: str = "pdf",
+    model: str = CODEX_MODEL,
+    target_language: str = "es-ES",
+    *,
+    conversation: list[dict[str, Any]] | None = None,
+    correction: str | None = None,
+) -> tuple[dict[str, Any], CodexUsage, list[dict[str, Any]]]:
+    """Run/continue the Segmentador Codex conversation on inline OCR/text.
+
+    Espejo posicional de `run_segmentador_ds` sobre `call_codex_chat` (T05):
+    el parámetro `api_key` recibe el `user_id` del proveedor Codex. Devuelve
+    ``(content, usage, conversation)``. Para un retry (corrección por
+    cobertura), pasa la ``conversation`` de la llamada anterior más el texto de
+    ``correction``: el system prompt y el primer user message (con la fuente
+    completa) se mantienen byte-idénticos y solo se añade el turno correctivo
+    más el turno `assistant` anterior.
+    """
+    start_time = time.time()
+    json_contract = _openrouter_segmentador_json_contract(source_kind)
+    system_prompt = _openrouter_segmentador_system_instruction(source_kind, target_language)
+    is_retry = conversation is not None
+
+    logger.info(
+        "Iniciando agente segmentador Codex",
+        extra={
+            "description_length": len(description) if description else 0,
+            "has_custom_description": bool(description and description.strip()),
+            "source_kind": source_kind,
+            "source_chars": len(source_text),
+            "model": model,
+            "is_retry": is_retry,
+            "user_id": api_key[:8],
+        },
+    )
+
+    if not is_retry:
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": _build_segmentador_ds_user_message(source_text, description, json_contract),
+            }
+        ]
+    else:
+        messages = list(conversation or [])
+        correction_text = (correction or "").strip() or (
+            "La segmentación anterior no es válida. Regenera el objeto JSON completo corrigiéndola."
+        )
+        messages.append({"role": "user", "content": correction_text})
+
+    content, usage = await call_codex_chat(
+        user_id=api_key,
+        messages=messages,
+        system_prompt=system_prompt,
+        model=model,
+        response_format="json_object",
+        temperature=TEMPERATURE_SEGMENTADOR,
+    )
+    if not isinstance(content, dict):
+        raise CodexError("El segmentador Codex no devolvió un objeto JSON.")
+    # Replay del turno assistant (re-serializado del payload parseado) para que
+    # un retry posterior conserve el prefijo system + user0.
+    messages.append({"role": "assistant", "content": json.dumps(content, ensure_ascii=False)})
+
+    total_duration = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Segmentación Codex completada: %d partes en %dms",
+        len(content.get("partes", [])),
+        total_duration,
+        extra={
+            "num_partes": len(content.get("partes", [])),
+            "total_duration_ms": total_duration,
+            "prompt_tokens": usage.prompt_token_count,
+            "completion_tokens": usage.candidates_token_count,
+            "model": model,
+            "is_retry": is_retry,
+            "user_id": api_key[:8],
+        },
+    )
+    return content, usage, messages

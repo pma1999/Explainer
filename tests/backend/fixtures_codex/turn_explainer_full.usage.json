@@ -1,0 +1,19 @@
+{
+  "total": {
+    "inputTokens": 1200,
+    "cachedInputTokens": 0,
+    "cacheWriteInputTokens": 0,
+    "outputTokens": 340,
+    "reasoningOutputTokens": 0,
+    "totalTokens": 1540
+  },
+  "last": {
+    "inputTokens": 1200,
+    "cachedInputTokens": 0,
+    "cacheWriteInputTokens": 0,
+    "outputTokens": 340,
+    "reasoningOutputTokens": 0,
+    "totalTokens": 1540
+  },
+  "modelContextWindow": 100000
+}

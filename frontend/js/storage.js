@@ -10,6 +10,7 @@ import {
   MISTRAL_KEY_CACHE_KEY_PREFIX,
   DEEPSEEK_KEY_CACHE_KEY_PREFIX,
   TAVILY_KEY_CACHE_KEY_PREFIX,
+  CODEX_LINK_CACHE_KEY_PREFIX,
   API_KEY_CACHE_TTL_MS,
 } from './state.js';
 import { api } from './api.js';
@@ -212,6 +213,42 @@ export function setCachedTavilyKeyStatus(userId, hasKey) {
   try {
     localStorage.setItem(TAVILY_KEY_CACHE_KEY_PREFIX + userId, JSON.stringify({
       hasKey: Boolean(hasKey),
+      updatedAt: new Date().toISOString(),
+    }));
+  } catch (_) {}
+}
+
+const CODEX_STATUSES = ['none', 'pending', 'linked', 'failed'];
+
+/**
+ * Read the cached codex (ChatGPT) link status for a user.
+ * Returns `{ hasCodexLink, codexStatus, codexPlanType }` or null when absent/stale.
+ */
+export function getCachedCodexLinkStatus(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(CODEX_LINK_CACHE_KEY_PREFIX + userId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const age = Date.now() - (parsed.updatedAt ? new Date(parsed.updatedAt).getTime() : 0);
+    if (age > API_KEY_CACHE_TTL_MS) return null;
+    return {
+      hasCodexLink: parsed.hasCodexLink === true,
+      codexStatus: CODEX_STATUSES.includes(parsed.codexStatus) ? parsed.codexStatus : 'none',
+      codexPlanType: typeof parsed.codexPlanType === 'string' ? parsed.codexPlanType : null,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+export function setCachedCodexLinkStatus(userId, { hasCodexLink, codexStatus, codexPlanType }) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(CODEX_LINK_CACHE_KEY_PREFIX + userId, JSON.stringify({
+      hasCodexLink: Boolean(hasCodexLink),
+      codexStatus: CODEX_STATUSES.includes(codexStatus) ? codexStatus : 'none',
+      codexPlanType: typeof codexPlanType === 'string' && codexPlanType ? codexPlanType : null,
       updatedAt: new Date().toISOString(),
     }));
   } catch (_) {}

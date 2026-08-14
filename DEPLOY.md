@@ -227,6 +227,103 @@ curl https://tu-app.koyeb.app/api/settings/api-key/status
 
 ---
 
+## Proveedor Codex / ChatGPT
+
+Explainer puede usar Codex (ChatGPT) como proveedor del explainer. El contenedor incluye el
+binario standalone `codex` (build musl estático, **sin Node/npm/Rust** en runtime) instalado en
+`/usr/local/bin/codex`, pineado a la versión `0.147.0`.
+
+### Actualización del binario codex
+
+1. **Bump de versión**: comprueba la versión actual con `npm view @openai/codex dist-tags --json`
+   (busca el dist-tag de plataforma, p.ej. `linux-x64`).
+2. **Re-descargar el tarball** del dist-tag de plataforma (el paquete `@openai/codex-linux-x64`
+   es un alias npm; el tarball real vive en `@openai/codex`):
+
+   ```bash
+   VERSION=0.147.0-linux-x64   # ajustar a la version objetivo
+   curl -fsSL -o /tmp/codex.tgz "https://registry.npmjs.org/@openai/codex/-/codex-${VERSION}.tgz"
+   ```
+
+3. **Actualizar el sha256** del tarball:
+
+   ```bash
+   sha256sum /tmp/codex.tgz
+   ```
+
+   Sustituye el hash literal en el `RUN` del `Dockerfile` (comentario + `echo ... | sha256sum -c -`)
+   y aquí abajo. Hash del tarball `codex-0.147.0-linux-x64.tgz` verificado el 2026-08-14:
+
+   ```
+   c969740cf8297e4c31905cd551efeb2c99af5080c12c236bdf825598b250139a
+   ```
+
+4. **Rebuild + verificación**:
+
+   ```bash
+   docker build -t explainer-codex-test .
+   docker run --rm explainer-codex-test codex --version
+   ```
+
+   Debe imprimir `codex-cli <version>`. Si el layout del tarball cambió, inspecciónalo con
+   `tar tzf /tmp/codex.tgz` y ajusta la ruta `package/vendor/x86_64-unknown-linux-musl/bin/codex`.
+
+### Variables de entorno CODEX_*
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `CODEX_BIN_PATH` | `/usr/local/bin/codex` | Ruta del binario codex (los tests apuntan al fake app-server) |
+| `CODEX_MAX_PROCESSES` | `3` | Máximo de procesos `codex app-server` vivos (uno por usuario) |
+| `CODEX_PER_PROCESS_MAX_CONCURRENCY` | `5` | Peticiones simultáneas por proceso |
+| `CODEX_IDLE_TTL_SECONDS` | `600` | Evicción por inactividad de un proceso |
+| `CODEX_REQUEST_TIMEOUT_SECONDS` | `900` | Timeout de una petición JSON-RPC |
+| `CODEX_LINK_TIMEOUT_SECONDS` | `600` | Timeout global del vínculo device-code |
+| `CODEX_SPAWN_WAIT_SECONDS` | `60` | Espera por un slot del semáforo de procesos |
+
+`CODEX_HOME` no se configura globalmente: se fija por tenant a `/tmp/codex/<user_id>` (modo
+0700) en el backend.
+
+### Presupuesto de memoria (instancia nano 512 MB)
+
+| Componente | Estimación |
+|---|---|
+| Python + uvicorn + app | ~200 MB |
+| Proceso `codex app-server` (por tenant, máx. `CODEX_MAX_PROCESSES=3`) | ~80-150 MB RSS c/u según carga |
+| **Total pico estimado (3 procesos)** | ~440-650 MB |
+
+Con `CODEX_MAX_PROCESSES=3` el pico puede rozar el límite de 512 MB. Si se observan OOM en
+Koyeb, baja `CODEX_MAX_PROCESSES` a 2 o 1 vía env (sin tocar `koyeb.yaml`, que documenta pero
+no fija estos valores). El binario musl no requiere Node ni Rust en runtime.
+
+### Logs del app-server
+
+El stderr de cada proceso `codex app-server` se vuelca a un fichero acotado y truncado en cada
+spawn:
+
+```
+/tmp/codex/<user_id>/app-server.stderr.log
+```
+
+Nunca se vierte automáticamente a los logs de la aplicación (no contiene credenciales; el
+contenido de `auth.json` nunca se loguea). Consulta este fichero dentro del contenedor para
+diagnosticar fallos de spawn o de transporte JSON-RPC.
+
+### Comportamiento en scale-to-zero
+
+- Los procesos `codex app-server` son **efímeros**: con scale-to-zero (Koyeb nano) el
+  contenedor y sus procesos desaparecen tras ~5 min de inactividad y se recrean en el próximo
+  cold start (5-15 s).
+- El **vínculo ChatGPT sobrevive a cold starts**: el `auth.json` cifrado vive en Supabase
+  (`user_provider_connections.encrypted_credentials`), no en el disco local del contenedor.
+  Al reactivar la app se restaura antes del primer spawn del tenant.
+- Evicción idle: dentro de un contenedor vivo, un proceso sin peticiones se evicta tras
+  `CODEX_IDLE_TTL_SECONDS` (600 s) liberando memoria; el siguiente uso lo vuelve a lanzar.
+- Si el contenedor se reinicia con un vínculo `pending` en vuelo (login device-code a medio
+  completar), tras un grace de 60 s el backend lo marca `failed` y el usuario debe reiniciar
+  el vínculo.
+
+---
+
 ## Despliegue a Vercel (Frontend)
 
 ### Paso 1: Instalar Vercel CLI

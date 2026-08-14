@@ -21,9 +21,203 @@ import {
   setCachedDeepSeekKeyStatus,
   getCachedTavilyKeyStatus,
   setCachedTavilyKeyStatus,
+  getCachedCodexLinkStatus,
+  setCachedCodexLinkStatus,
   invalidateProjectsCache,
 } from './storage.js';
 import { getPreferOffline, setPreferOffline } from './pwa.js';
+
+const CODEX_POLL_INTERVAL_MS = 3000;
+const CODEX_POLL_MAX_MS = 10 * 60 * 1000;
+let _codexPollTimer = null;
+let _codexPollEndsAt = 0;
+let _codexLastError = null;
+
+function _stopCodexPolling() {
+  if (_codexPollTimer !== null) {
+    clearInterval(_codexPollTimer);
+    _codexPollTimer = null;
+  }
+}
+
+function _startCodexPolling() {
+  _stopCodexPolling();
+  _codexPollTimer = setInterval(_pollCodexLinkStatus, CODEX_POLL_INTERVAL_MS);
+}
+
+function _cacheCodexLinkState(userId) {
+  setCachedCodexLinkStatus(userId, {
+    hasCodexLink: state.hasCodexLink,
+    codexStatus: state.codexLinkStatus,
+    codexPlanType: state.codexPlanType,
+  });
+}
+
+async function _pollCodexLinkStatus() {
+  if (Date.now() > _codexPollEndsAt) {
+    _stopCodexPolling();
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'failed';
+    _codexLastError = 'El vínculo caducó. Vuelve a iniciarlo.';
+    _cacheCodexLinkState(state.user?.id);
+    updateApiKeyUI();
+    return;
+  }
+
+  let data;
+  try {
+    data = await api('/api/settings/codex-link/status');
+  } catch (_) {
+    // Transient network failure: keep polling until the deadline.
+    return;
+  }
+
+  if (data.codex_status === 'linked') {
+    _stopCodexPolling();
+    state.hasCodexLink = true;
+    state.codexLinkStatus = 'linked';
+    state.codexPlanType = typeof data.codex_plan_type === 'string' && data.codex_plan_type ? data.codex_plan_type : null;
+    _codexLastError = null;
+    _cacheCodexLinkState(state.user?.id);
+    hide($('codex-device-panel'));
+    updateApiKeyUI();
+    toast('Cuenta ChatGPT vinculada', 'success');
+  } else if (data.codex_status === 'failed') {
+    _stopCodexPolling();
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'failed';
+    _codexLastError = typeof data.last_error === 'string' && data.last_error
+      ? data.last_error
+      : 'El vínculo falló. Vuelve a iniciarlo.';
+    _cacheCodexLinkState(state.user?.id);
+    hide($('codex-device-panel'));
+    updateApiKeyUI();
+  } else if (data.codex_status === 'none') {
+    // The pending flow no longer exists server-side (e.g. cancelled elsewhere).
+    _stopCodexPolling();
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'none';
+    _codexLastError = null;
+    _cacheCodexLinkState(state.user?.id);
+    hide($('codex-device-panel'));
+    updateApiKeyUI();
+  }
+  // 'pending' → keep polling
+}
+
+export async function startCodexLink() {
+  _stopCodexPolling();
+  const btn = $('btn-start-codex-link');
+  const spinner = btn ? btn.querySelector('.spinner') : null;
+  const btnText = btn ? btn.querySelector('.btn-text') : null;
+  const errEl = $('codex-link-error');
+  if (errEl) {
+    errEl.textContent = '';
+    hide(errEl);
+  }
+  if (btn) btn.disabled = true;
+  if (spinner) show(spinner);
+  if (btnText) btnText.textContent = 'Iniciando…';
+
+  try {
+    const data = await api('/api/settings/codex-link/start', { method: 'POST' });
+
+    const urlEl = $('codex-verification-url');
+    if (urlEl) {
+      urlEl.href = data.verification_url || '';
+      urlEl.textContent = data.verification_url || '';
+    }
+    const codeInput = $('codex-user-code');
+    if (codeInput) codeInput.value = data.user_code || '';
+
+    const expiresInMs = Number.isFinite(Number(data.expires_in)) && Number(data.expires_in) > 0
+      ? Number(data.expires_in) * 1000
+      : CODEX_POLL_MAX_MS;
+    _codexPollEndsAt = Date.now() + Math.min(expiresInMs, CODEX_POLL_MAX_MS);
+
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'pending';
+    _codexLastError = null;
+    _cacheCodexLinkState(state.user?.id);
+    show($('codex-device-panel'));
+    updateApiKeyUI();
+    _startCodexPolling();
+    toast('Completa el vínculo en la web de ChatGPT', 'success');
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message;
+      show(errEl);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    if (spinner) hide(spinner);
+    if (btnText) btnText.textContent = 'Vincular cuenta ChatGPT';
+  }
+}
+
+export async function cancelCodexLink() {
+  const errEl = $('codex-link-error');
+  try {
+    await api('/api/settings/codex-link/cancel', { method: 'POST' });
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message;
+      show(errEl);
+    }
+    return;
+  }
+  _stopCodexPolling();
+  state.hasCodexLink = false;
+  state.codexLinkStatus = 'none';
+  _codexLastError = null;
+  _cacheCodexLinkState(state.user?.id);
+  hide($('codex-device-panel'));
+  updateApiKeyUI();
+  toast('Vínculo cancelado', 'success');
+}
+
+export async function unlinkCodexAccount() {
+  if (!confirm('¿Desvincular tu cuenta de ChatGPT?')) return;
+  const errEl = $('codex-link-error');
+  if (errEl) {
+    errEl.textContent = '';
+    hide(errEl);
+  }
+  try {
+    await api('/api/settings/codex-link', { method: 'DELETE' });
+    _stopCodexPolling();
+    state.hasCodexLink = false;
+    state.codexLinkStatus = 'none';
+    state.codexPlanType = null;
+    _codexLastError = null;
+    _cacheCodexLinkState(state.user?.id);
+    updateApiKeyUI();
+    toast('Cuenta ChatGPT desvinculada', 'success');
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message;
+      show(errEl);
+    }
+  }
+}
+
+async function copyCodexUserCode() {
+  const codeInput = $('codex-user-code');
+  const code = codeInput ? codeInput.value : '';
+  const btn = $('btn-copy-codex-code');
+  const btnText = btn ? btn.querySelector('.btn-text') : null;
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    if (btnText) btnText.textContent = '¡Copiado!';
+    toast('Código copiado', 'success');
+    setTimeout(() => {
+      if (btnText) btnText.textContent = 'Copiar';
+    }, 1500);
+  } catch (_) {
+    toast('No se pudo copiar el código', 'error');
+  }
+}
 
 export async function refreshApiKeyStatus() {
   const userId = state.user?.id;
@@ -70,6 +264,16 @@ export async function refreshApiKeyStatus() {
     state.tavilyKeyStatus = 'loading';
   }
 
+  const cachedCodex = getCachedCodexLinkStatus(userId);
+  if (cachedCodex !== null) {
+    state.hasCodexLink = cachedCodex.hasCodexLink;
+    state.codexLinkStatus = cachedCodex.codexStatus;
+    state.codexPlanType = cachedCodex.codexPlanType;
+  } else {
+    state.codexLinkStatus = 'loading';
+    state.codexPlanType = null;
+  }
+
   updateApiKeyUI();
 
   try {
@@ -94,12 +298,26 @@ export async function refreshApiKeyStatus() {
     state.hasTavilyKey = Boolean(status.has_tavily_key);
     state.tavilyKeyStatus = state.hasTavilyKey ? 'has' : 'none';
     setCachedTavilyKeyStatus(userId, state.hasTavilyKey);
+
+    state.hasCodexLink = Boolean(status.has_codex_link);
+    const codexStatuses = ['none', 'pending', 'linked', 'failed'];
+    state.codexLinkStatus = codexStatuses.includes(status.codex_status)
+      ? status.codex_status
+      : (state.hasCodexLink ? 'linked' : 'none');
+    state.codexPlanType = typeof status.codex_plan_type === 'string' && status.codex_plan_type
+      ? status.codex_plan_type
+      : null;
+    _cacheCodexLinkState(userId);
   } catch (_) {
     if (cached === null && state.apiKeyStatus === 'loading') state.apiKeyStatus = 'none';
     if (cachedOR === null && state.openRouterKeyStatus === 'loading') state.openRouterKeyStatus = 'none';
     if (cachedMistral === null && state.mistralKeyStatus === 'loading') state.mistralKeyStatus = 'none';
     if (cachedDeepSeek === null && state.deepSeekKeyStatus === 'loading') state.deepSeekKeyStatus = 'none';
     if (cachedTavily === null && state.tavilyKeyStatus === 'loading') state.tavilyKeyStatus = 'none';
+    if (cachedCodex === null && state.codexLinkStatus === 'loading') {
+      state.codexLinkStatus = 'none';
+      state.hasCodexLink = false;
+    }
   }
 
   updateApiKeyUI();
@@ -437,6 +655,17 @@ export function initSettings() {
     }
   });
 
+  // ---- Codex (ChatGPT) link ----
+
+  const codexStartBtn = $('btn-start-codex-link');
+  if (codexStartBtn) codexStartBtn.addEventListener('click', startCodexLink);
+  const codexCancelBtn = $('btn-cancel-codex-link');
+  if (codexCancelBtn) codexCancelBtn.addEventListener('click', cancelCodexLink);
+  const codexUnlinkBtn = $('btn-unlink-codex');
+  if (codexUnlinkBtn) codexUnlinkBtn.addEventListener('click', unlinkCodexAccount);
+  const codexCopyBtn = $('btn-copy-codex-code');
+  if (codexCopyBtn) codexCopyBtn.addEventListener('click', copyCodexUserCode);
+
   syncPreferOfflineSwitchUI();
 }
 
@@ -444,6 +673,12 @@ export function showSettings() {
   $('settings-email').textContent = state.user?.email || '—';
   updateApiKeyUI();
   syncPreferOfflineSwitchUI();
+  // Resume a pending device-code flow with a fresh 10-minute window when the
+  // modal is reopened (polling was stopped when the settings closed).
+  if (state.codexLinkStatus === 'pending' && _codexPollTimer === null) {
+    _codexPollEndsAt = Date.now() + CODEX_POLL_MAX_MS;
+    _startCodexPolling();
+  }
   show($('modal-settings'));
 }
 
@@ -591,6 +826,7 @@ export function initAuth(onNavigateFromRoute, onInitLanding) {
 }
 
 export function hideSettings() {
+  _stopCodexPolling();
   hide($('modal-settings'));
   $('api-key-error').textContent = '';
   $('api-key-success').textContent = '';
@@ -607,6 +843,8 @@ export function hideSettings() {
   $('tavily-key-error').textContent = '';
   $('tavily-key-success').textContent = '';
   $('tavily-key-input').value = '';
+  $('codex-link-error').textContent = '';
+  hide($('codex-link-error'));
 }
 
 export function updateApiKeyUI() {
@@ -699,5 +937,98 @@ export function updateApiKeyUI() {
     show($('tavily-key-not-set'));
     hide($('tavily-key-set'));
     $('btn-delete-tavily-key').style.display = 'none';
+  }
+
+  // Codex (ChatGPT) link UI — settings section
+  const codexStatus = state.codexLinkStatus;
+  const codexSetText = $('codex-link-set-text');
+  const codexFailedText = $('codex-link-failed-text');
+
+  if (codexStatus === 'linked') {
+    show($('codex-link-set'));
+    hide($('codex-link-not-set'));
+    hide($('codex-link-pending'));
+    hide($('codex-link-failed'));
+    if (codexSetText) {
+      codexSetText.textContent = state.codexPlanType
+        ? `Cuenta ChatGPT vinculada · plan ${state.codexPlanType}. Codex (GPT-5.6 Luna) queda disponible con la cuota incluida de tu plan.`
+        : 'Cuenta ChatGPT vinculada. Codex (GPT-5.6 Luna) queda disponible con la cuota incluida de tu plan.';
+    }
+    $('btn-start-codex-link').style.display = 'none';
+    $('btn-unlink-codex').style.display = 'inline-block';
+    hide($('codex-device-panel'));
+  } else if (codexStatus === 'pending') {
+    show($('codex-link-pending'));
+    hide($('codex-link-not-set'));
+    hide($('codex-link-set'));
+    hide($('codex-link-failed'));
+    $('btn-start-codex-link').style.display = 'none';
+    $('btn-unlink-codex').style.display = 'none';
+    // The device panel stays visible while the flow is in flight.
+  } else if (codexStatus === 'failed') {
+    show($('codex-link-failed'));
+    hide($('codex-link-not-set'));
+    hide($('codex-link-pending'));
+    hide($('codex-link-set'));
+    if (codexFailedText) {
+      codexFailedText.textContent = _codexLastError || 'El vínculo falló. Vuelve a iniciarlo.';
+    }
+    $('btn-start-codex-link').style.display = 'inline-block';
+    $('btn-unlink-codex').style.display = 'none';
+    hide($('codex-device-panel'));
+  } else if (codexStatus === 'loading') {
+    hide($('codex-link-not-set'));
+    hide($('codex-link-pending'));
+    hide($('codex-link-set'));
+    hide($('codex-link-failed'));
+    $('btn-start-codex-link').style.display = 'none';
+    $('btn-unlink-codex').style.display = 'none';
+  } else {
+    show($('codex-link-not-set'));
+    hide($('codex-link-pending'));
+    hide($('codex-link-set'));
+    hide($('codex-link-failed'));
+    $('btn-start-codex-link').style.display = 'inline-block';
+    $('btn-unlink-codex').style.display = 'none';
+    hide($('codex-device-panel'));
+  }
+
+  // Codex card status point (selector) + inline sub-panel link status
+  const codexStatusEl = $('provider-card-codex-status');
+  if (codexStatusEl) {
+    if (codexStatus === 'loading') {
+      codexStatusEl.textContent = '';
+    } else if (codexStatus === 'linked') {
+      codexStatusEl.textContent = state.codexPlanType ? `Vinculada · ${state.codexPlanType}` : 'Vinculada';
+    } else if (codexStatus === 'pending') {
+      codexStatusEl.textContent = 'Vínculo pendiente — complétalo en Ajustes';
+    } else {
+      codexStatusEl.textContent = 'No vinculada — vincúlala en Ajustes';
+    }
+  }
+  const codexCard = $('provider-card-codex');
+  if (codexCard) {
+    codexCard.classList.toggle('needs-key', codexStatus !== 'loading' && codexStatus !== 'linked');
+  }
+
+  const codexPanelLinkText = $('codex-panel-link-text');
+  if (codexPanelLinkText) {
+    if (codexStatus === 'loading') {
+      codexPanelLinkText.textContent = '';
+    } else if (codexStatus === 'linked') {
+      codexPanelLinkText.textContent = state.codexPlanType ? `Vinculada · ${state.codexPlanType}` : 'Vinculada';
+    } else if (codexStatus === 'pending') {
+      codexPanelLinkText.textContent = 'Vínculo pendiente — complétalo en Ajustes';
+    } else {
+      codexPanelLinkText.textContent = 'No vinculada';
+    }
+  }
+  const codexPanelBtnLink = $('codex-panel-btn-link');
+  if (codexPanelBtnLink) {
+    codexPanelBtnLink.style.display = codexStatus === 'linked' ? 'none' : 'inline-block';
+  }
+  const codexPanelBtnUnlink = $('codex-panel-btn-unlink');
+  if (codexPanelBtnUnlink) {
+    codexPanelBtnUnlink.style.display = codexStatus === 'linked' ? 'inline-block' : 'none';
   }
 }

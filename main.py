@@ -8,10 +8,12 @@ import json
 import math
 import os
 import re
+import shutil
 import time
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, AsyncGenerator, Literal
 from urllib.parse import quote, urlparse
@@ -57,6 +59,8 @@ from backend.supabase_data import (
     SOURCE_OBJECT_STATUS_STORED,
 )
 from backend.crypto import mask_api_key
+from backend import supabase_data
+from backend.crypto import encrypt_user_api_key
 from backend.sse_manager import sse_manager, send_event
 from backend.rate_limit import api_key_rate_limit, project_create_rate_limit
 from backend.pricing import calculate_cost
@@ -68,8 +72,19 @@ from backend.gemini_model_routing import (
 )
 
 from backend.gemini_client import upload_file_with_retry, GeminiError, GeminiRateLimitError
-from backend.agents.segmentador import DEFAULT_DESCRIPTION, run_segmentador, run_segmentador_ds, run_segmentador_or
-from backend.agents.page_classifier import run_page_classifier, run_page_classifier_ds, run_page_classifier_or
+from backend.agents.segmentador import (
+    DEFAULT_DESCRIPTION,
+    run_segmentador,
+    run_segmentador_ds,
+    run_segmentador_or,
+    run_segmentador_codex,
+)
+from backend.agents.page_classifier import (
+    run_page_classifier,
+    run_page_classifier_ds,
+    run_page_classifier_or,
+    run_page_classifier_codex,
+)
 from backend.segmentation_page_coverage import (
     MAX_PAGE_COVERAGE_ATTEMPTS,
     SEGMENTATION_PAGE_COVERAGE_USER_MESSAGE,
@@ -93,6 +108,10 @@ from backend.agents.explainer_deepseek import (
     run_explainer_ds_validated as run_explainer_ds,
     run_subpart_explainer_ds_validated as run_subpart_explainer_ds,
 )
+from backend.agents.explainer_codex import (
+    run_explainer_codex_validated as run_explainer_codex,
+    run_subpart_explainer_codex_validated as run_subpart_explainer_codex,
+)
 from backend.agents.completeness_validator import (
     COMPLETENESS_VALIDATOR_MODEL,
     DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL,
@@ -102,12 +121,19 @@ from backend.agents.completeness_validator import (
     ExplainerValidationContext,
     ExplainerValidationError,
 )
-from backend.agents.recorrido import run_recorrido, run_recorrido_ds, run_recorrido_or
-from backend.agents.resources import run_resources, run_resources_ds, run_resources_or
-from backend.agents.review import run_review, run_review_ds, run_review_or
+from backend.agents.recorrido import run_recorrido, run_recorrido_ds, run_recorrido_or, run_recorrido_codex
+from backend.agents.resources import run_resources, run_resources_ds, run_resources_or, run_resources_codex
+from backend.agents.review import run_review, run_review_ds, run_review_or, run_review_codex
 from backend.agents.mermaid_agent import generate_mermaid, assemble_explanation_text
-from backend.agents.formatter import format_explainer_content, format_explainer_content_ds, format_explainer_content_or
+from backend.agents.formatter import (
+    format_explainer_content,
+    format_explainer_content_ds,
+    format_explainer_content_or,
+    format_explainer_content_codex,
+)
 from backend.agents.language_policy import normalize_target_language
+from backend.codex_client import CodexError, CodexRateLimitError, CodexAuthError
+from backend.codex_model_routing import CODEX_MODEL
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
@@ -151,13 +177,14 @@ logger = get_logger("main")
 # Max concurrent parts in the agent phase (prep + explainer/recorrido/resources); formatters run outside this limit.
 MAX_CONCURRENT_PARTS = 5
 
-ExplainerProvider = Literal["gemini", "openrouter", "deepseek"]
+ExplainerProvider = Literal["gemini", "openrouter", "deepseek", "codex"]
 OpenRouterExplainerModel = str
 DeepSeekExplainerModel = Literal["deepseek-v4-pro", "deepseek-v4-flash"]
 
 EXPLAINER_PROVIDER_GEMINI: ExplainerProvider = "gemini"
 EXPLAINER_PROVIDER_OPENROUTER: ExplainerProvider = "openrouter"
 EXPLAINER_PROVIDER_DEEPSEEK: ExplainerProvider = "deepseek"
+EXPLAINER_PROVIDER_CODEX: ExplainerProvider = "codex"
 OPENROUTER_EXPLAINER_MODELS: frozenset[str] = frozenset(
     {
         "xiaomi/mimo-v2.5-pro",
@@ -222,6 +249,9 @@ def _resolve_explainer_model(
                 raise ValueError(f"Modelo DeepSeek no soportado: {model}")
             return model
         return DEEPSEEK_MODEL_V4_PRO
+    if explainer_provider == EXPLAINER_PROVIDER_CODEX:
+        # Modelo único fijo para Codex (cuota ChatGPT), sin parámetros extra.
+        return CODEX_MODEL
     return MODEL_AGENTS
 
 
@@ -303,6 +333,12 @@ async def lifespan(app: FastAPI):
     finally:
         executor.shutdown(wait=False)
         logger.info("[Shutdown] Cerrando aplicación y ThreadPoolExecutor")
+        # T04: cierra los timeouts de vínculo pendientes y evacúa los procesos
+        # del app-server (persiste auth.json cifrado de usuarios linked y
+        # limpia sus CODEX_HOME). Nunca lanza excepción.
+        _cancel_codex_link_timeout_tasks()
+        codex_manager, _, _ = _codex_runtime()
+        await codex_manager.shutdown()
 
 
 app = FastAPI(title="Explainer API", lifespan=lifespan)
@@ -506,6 +542,493 @@ async def api_delete_tavily_key(
     """Delete user's Tavily API key."""
     delete_user_api_key(user_id, provider=PROVIDER_TAVILY)
     logger.info("[API Key] User %s... deleted Tavily key", user_id[:8])
+    return {"ok": True}
+
+
+# ---- Codex / ChatGPT link (device-code OAuth) ----
+#
+# Ciclo de vida (global-constraints.md §Link endpoints):
+# none → pending(+login_id) → linked | failed; linked → none (desvincular).
+# El login en vuelo se conoce solo en este proceso (`_codex_pending_logins`);
+# tras un reinicio del servidor ese registro se vacía y una fila `pending`
+# sin login en vuelo es un cold start: caduca tras un grace de 60 s.
+
+CODEX_LINK_TIMEOUT_SECONDS = float(
+    os.environ.get("CODEX_LINK_TIMEOUT_SECONDS", "600")
+)
+_CODEX_COLD_START_GRACE_SECONDS = 60.0
+_CODEX_LINK_SERVER_TIMEOUT_SECONDS = 15.0
+_CODEX_LINK_HANDLER_TIMEOUT_SECONDS = 30.0
+
+CODEX_LINK_COLD_START_ERROR_MESSAGE = (
+    "El vínculo caducó por un reinicio del servidor. Vuelve a iniciarlo."
+)
+CODEX_LINK_TIMEOUT_ERROR_MESSAGE = "El vínculo expiró. Vuelve a iniciarlo."
+CODEX_LINK_INCOMPLETE_ERROR_MESSAGE = (
+    "El vínculo no se pudo completar. Vuelve a iniciarlo."
+)
+CODEX_LINK_REQUIRED_ERROR_MESSAGE = (
+    "Vincula tu cuenta ChatGPT en Ajustes para usar Codex (GPT-5.6 Luna)."
+)
+
+# Validación UUID estricta antes de usar user_id en paths (anti path traversal).
+_CODEX_USER_ID_RE = re.compile(r"[0-9a-fA-F-]{36}")
+
+# Carga perezosa del runtime del app-server (T02): `backend.codex_app_server`
+# lee su configuración de env en el import y congela el singleton
+# `codex_manager` con esos valores. Importarlo al cargar main.py rompería la
+# configuración de entorno de los tests de T02 (que fijan el env antes de su
+# propio import del módulo). El primer acceso real (un endpoint o el shutdown
+# del lifespan) ocurre después de esa fijación; el import cacheado por
+# sys.modules hace que repetir la llamada sea casi gratuito.
+def _codex_runtime() -> tuple:
+    """Import perezoso del runtime del app-server (T02).
+
+    Returns:
+        (codex_manager, CodexAppServerError, CodexSpawnError)
+    """
+    from backend.codex_app_server import (
+        CodexAppServerError,
+        CodexSpawnError,
+        codex_manager,
+    )
+
+    _register_codex_login_completed_handler(codex_manager)
+    return codex_manager, CodexAppServerError, CodexSpawnError
+
+# user_id -> (login_id, deadline monotónica): logins device-code en vuelo.
+_codex_pending_logins: dict[str, tuple[str, float]] = {}
+# user_id -> primera observación de cold start (monotónica): inicio del grace.
+_codex_cold_start_seen: dict[str, float] = {}
+# user_id -> tarea de timeout del vínculo.
+_codex_link_timeout_tasks: dict[str, asyncio.Task] = {}
+
+
+def _codex_home_dir(user_id: str) -> Path:
+    """CODEX_HOME del tenant con validación UUID estricta (anti path traversal)."""
+    if not _CODEX_USER_ID_RE.fullmatch(user_id):
+        raise ValueError(f"user_id inválido para Codex: {user_id[:8]}...")
+    return Path(os.environ.get("CODEX_HOME_ROOT") or "/tmp/codex") / user_id
+
+
+def _codex_schedule_timeout(user_id: str, login_id: str) -> None:
+    """(Re)programa el timeout del vínculo; cancela cualquier tarea previa."""
+    previous = _codex_link_timeout_tasks.pop(user_id, None)
+    if previous is not None and not previous.done():
+        previous.cancel()
+    task = asyncio.create_task(_codex_link_timeout_task(user_id, login_id))
+    _codex_link_timeout_tasks[user_id] = task
+
+    def _discard(t: asyncio.Task, uid: str = user_id) -> None:
+        if _codex_link_timeout_tasks.get(uid) is t:
+            _codex_link_timeout_tasks.pop(uid, None)
+
+    task.add_done_callback(_discard)
+
+
+def _codex_clear_link_state(user_id: str) -> None:
+    """Limpia el estado en memoria del vínculo (completed/cancel/delete)."""
+    _codex_pending_logins.pop(user_id, None)
+    _codex_cold_start_seen.pop(user_id, None)
+    task = _codex_link_timeout_tasks.pop(user_id, None)
+    if task is not None and not task.done():
+        task.cancel()
+
+
+def _cancel_codex_link_timeout_tasks() -> None:
+    """Cancela los timeouts de vínculo pendientes (shutdown del lifespan)."""
+    for user_id, task in list(_codex_link_timeout_tasks.items()):
+        if not task.done():
+            task.cancel()
+    _codex_link_timeout_tasks.clear()
+
+
+async def _codex_cancel_pending_login(user_id: str, login_id: str) -> None:
+    """`account/login/cancel` best-effort con timeout propio: un fallo nunca
+    rompe el flujo local (cancel/delete/timeout siguen aunque el server falle)."""
+    codex_manager, _, _ = _codex_runtime()
+    try:
+        app_server = await asyncio.wait_for(
+            codex_manager.acquire(user_id),
+            timeout=_CODEX_LINK_SERVER_TIMEOUT_SECONDS,
+        )
+        await app_server.request(
+            "account/login/cancel",
+            {"loginId": login_id},
+            timeout=_CODEX_LINK_SERVER_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Codex Link] login/cancel best-effort falló (user %s): %s",
+            user_id[:8],
+            type(exc).__name__,
+        )
+
+
+async def _codex_link_timeout_task(user_id: str, login_id: str) -> None:
+    """Timeout global del vínculo (`CODEX_LINK_TIMEOUT_SECONDS`): fila → `failed`
+    y cancel en el server. No bloquea el loop ni la reader-task."""
+    try:
+        await asyncio.sleep(CODEX_LINK_TIMEOUT_SECONDS)
+        entry = _codex_pending_logins.get(user_id)
+        if entry is None or entry[0] != login_id:
+            return  # completado, cancelado o reemplazado antes del timeout
+        _codex_pending_logins.pop(user_id, None)
+        await _codex_cancel_pending_login(user_id, login_id)
+        try:
+            await asyncio.to_thread(
+                supabase_data.upsert_user_provider_connection,
+                user_id,
+                status="failed",
+                last_error=CODEX_LINK_TIMEOUT_ERROR_MESSAGE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Codex Link] No se pudo marcar failed por timeout (user %s): %s",
+                user_id[:8],
+                type(exc).__name__,
+            )
+    except asyncio.CancelledError:
+        raise
+
+
+async def _codex_read_auth_json(user_id: str) -> str | None:
+    """Lee `<CODEX_HOME>/auth.json` con reintento acotado (el app-server lo
+    escribe antes de emitir `account/login/completed`). Nunca se loguea."""
+    path = _codex_home_dir(user_id) / "auth.json"
+    for _ in range(5):
+        try:
+            return await asyncio.to_thread(path.read_text, encoding="utf-8")
+        except OSError:
+            await asyncio.sleep(0.2)
+    return None
+
+
+async def _codex_persist_login_completed(user_id: str, params: dict) -> None:
+    """Persiste `auth.json` cifrado + planType best-effort al completar el login."""
+    notified_login_id = params.get("loginId")
+    entry = _codex_pending_logins.get(user_id)
+    if entry is None or entry[0] != notified_login_id:
+        logger.debug(
+            "[Codex Link] login/completed sin login en vuelo o id distinto (user %s)",
+            user_id[:8],
+        )
+        return
+    auth_json = await _codex_read_auth_json(user_id)
+    if auth_json is None:
+        logger.warning(
+            "[Codex Link] login/completed sin auth.json en disco (user %s)",
+            user_id[:8],
+        )
+        try:
+            await asyncio.to_thread(
+                supabase_data.upsert_user_provider_connection,
+                user_id,
+                status="failed",
+                last_error=CODEX_LINK_INCOMPLETE_ERROR_MESSAGE,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Codex Link] No se pudo marcar failed (user %s): %s",
+                user_id[:8],
+                type(exc).__name__,
+            )
+        _codex_clear_link_state(user_id)
+        return
+    # planType best-effort vía account/read (valor crudo, sin allowlist de
+    # planes); fallback a la propia notificación si el server no lo reporta.
+    plan_type = None
+    codex_manager, _, _ = _codex_runtime()
+    try:
+        app_server = await codex_manager.acquire(user_id)
+        read_result = await app_server.request(
+            "account/read", {}, timeout=_CODEX_LINK_SERVER_TIMEOUT_SECONDS
+        )
+        if isinstance(read_result, dict):
+            plan_type = read_result.get("planType")
+    except Exception:
+        plan_type = None
+    if not plan_type:
+        plan_type = params.get("planType")
+    encrypted = await asyncio.to_thread(encrypt_user_api_key, auth_json, user_id)
+    await asyncio.to_thread(
+        supabase_data.upsert_user_provider_connection,
+        user_id,
+        status="linked",
+        encrypted_credentials=encrypted,
+        plan_type=plan_type,
+    )
+    _codex_clear_link_state(user_id)
+    logger.info("[Codex Link] Vínculo de ChatGPT completado (user %s)", user_id[:8])
+
+
+async def _codex_handle_login_completed(user_id: str, params: Any) -> None:
+    """Handler de `account/login/completed` con timeout propio: nunca bloquea
+    la reader-task del app-server."""
+    try:
+        await asyncio.wait_for(
+            _codex_persist_login_completed(
+                user_id, params if isinstance(params, dict) else {}
+            ),
+            timeout=_CODEX_LINK_HANDLER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[Codex Link] Handler de login/completed agotó su timeout (user %s)",
+            user_id[:8],
+        )
+
+
+def _register_codex_login_completed_handler(manager) -> None:
+    """Registro idempotente del handler, robusto a `importlib.reload(main)`.
+
+    La marca de registro es un atributo estable sobre la propia función
+    handler (`_codex_login_completed_handler_registered`), no un booleano
+    global ni la identidad del objeto: si el módulo se recarga, el manager
+    conserva el handler del módulo anterior (que ya lleva la marca) mientras
+    la función actual es otro objeto; la comprobación por marca lo detecta y
+    no se registra un segundo handler para `account/login/completed`.
+    """
+    for handler in manager._notification_handlers.get(
+        "account/login/completed", []
+    ):
+        if getattr(handler, "_codex_login_completed_handler_registered", False):
+            return
+    _codex_handle_login_completed._codex_login_completed_handler_registered = True
+    manager.add_notification_handler(
+        "account/login/completed", _codex_handle_login_completed
+    )
+
+
+async def _resolve_pending_codex_link(
+    user_id: str, row: dict
+) -> tuple[str, str | None]:
+    """Estado honesto de una fila `pending`.
+
+    Devuelve (status, last_error). Un `failed` aquí significa que la
+    notificación ya no puede llegar: o el plazo venció sin limpiar, o el
+    proceso del tenant fue recreado sin login en vuelo (cold start) y el
+    grace de 60 s se agotó. El caller persiste el cambio y lo devuelve.
+    """
+    login_id = row.get("login_id")
+    entry = _codex_pending_logins.get(user_id)
+    now = time.monotonic()
+    if entry is not None and entry[0] == login_id:
+        if now < entry[1]:
+            return "pending", None  # login en vuelo en ESTE proceso
+        # Plazo vencido sin que el task de timeout lo marcara (p.ej. tras un
+        # reinicio del servidor): limpiar y marcar failed aquí.
+        _codex_pending_logins.pop(user_id, None)
+        return "failed", CODEX_LINK_TIMEOUT_ERROR_MESSAGE
+    # Sin login en vuelo: cold start. Grace desde la primera observación.
+    first_seen = _codex_cold_start_seen.setdefault(user_id, now)
+    if now - first_seen < _CODEX_COLD_START_GRACE_SECONDS:
+        return "pending", None
+    _codex_cold_start_seen.pop(user_id, None)
+    return "failed", CODEX_LINK_COLD_START_ERROR_MESSAGE
+
+
+@app.post("/api/settings/codex-link/start")
+@api_key_rate_limit
+async def api_codex_link_start(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Inicia el flujo device-code para vincular la cuenta ChatGPT."""
+    row = supabase_data.get_user_provider_connection(user_id)
+    status = (row or {}).get("status") or "none"
+    if status == "linked":
+        raise HTTPException(
+            status_code=400, detail="Tu cuenta ChatGPT ya está vinculada."
+        )
+    if status == "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ya hay un vínculo de ChatGPT en curso. "
+                "Cancela el vínculo actual o espera a que termine."
+            ),
+        )
+    codex_manager, CodexSpawnError, CodexAppServerError = _codex_runtime()
+    try:
+        app_server = await codex_manager.acquire(user_id)
+    except CodexSpawnError:
+        logger.warning(
+            "[Codex Link] No se pudo lanzar el app-server (user %s)", user_id[:8]
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo iniciar el vínculo: el servicio de Codex no está "
+                "disponible en este momento. Inténtalo de nuevo en unos minutos."
+            ),
+        ) from None
+    try:
+        result = await app_server.request(
+            "account/login/start", {"type": "chatgptDeviceCode"}
+        )
+    except CodexAppServerError as exc:
+        logger.warning(
+            "[Codex Link] account/login/start falló (user %s): %s",
+            user_id[:8],
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No se pudo iniciar el vínculo con tu cuenta ChatGPT. "
+                "Inténtalo de nuevo en unos momentos."
+            ),
+        ) from None
+    if not isinstance(result, dict):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El servicio de Codex devolvió una respuesta inválida. "
+                "Inténtalo de nuevo en unos momentos."
+            ),
+        )
+    login_id = result.get("loginId")
+    verification_url = result.get("verificationUrl")
+    user_code = result.get("userCode")
+    if not login_id or not verification_url or not user_code:
+        logger.warning(
+            "[Codex Link] account/login/start sin device-code completo (user %s)",
+            user_id[:8],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El servicio de Codex devolvió una respuesta inválida. "
+                "Inténtalo de nuevo en unos momentos."
+            ),
+        )
+    expires_in = int(result.get("expiresIn") or CODEX_LINK_TIMEOUT_SECONDS)
+    # Registrar el login en vuelo ANTES de persistir para que una notificación
+    # temprana no se pierda; la fila `pending` se guarda antes de responder.
+    _codex_pending_logins[user_id] = (
+        login_id,
+        time.monotonic() + CODEX_LINK_TIMEOUT_SECONDS,
+    )
+    _codex_cold_start_seen.pop(user_id, None)
+    _codex_schedule_timeout(user_id, login_id)
+    try:
+        supabase_data.upsert_user_provider_connection(
+            user_id, status="pending", login_id=login_id
+        )
+    except Exception:
+        # Sin fila `pending` el vínculo no puede completarse de forma segura.
+        _codex_clear_link_state(user_id)
+        raise
+    logger.info("[Codex Link] Vínculo iniciado (user %s)", user_id[:8])
+    return {
+        "ok": True,
+        "verification_url": verification_url,
+        "user_code": user_code,
+        "login_id": login_id,
+        "expires_in": expires_in,
+    }
+
+
+@app.get("/api/settings/codex-link/status")
+@api_key_rate_limit
+async def api_codex_link_status(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Estado del vínculo de ChatGPT desde la fila persistida."""
+    row = supabase_data.get_user_provider_connection(user_id)
+    if not row:
+        return {
+            "ok": True,
+            "codex_status": "none",
+            "codex_plan_type": None,
+            "last_error": None,
+        }
+    status = row.get("status") or "none"
+    last_error = row.get("last_error")
+    if status == "pending":
+        resolved, resolved_error = await _resolve_pending_codex_link(user_id, row)
+        if resolved != "pending":
+            status = resolved
+            last_error = resolved_error
+            try:
+                supabase_data.upsert_user_provider_connection(
+                    user_id, status="failed", last_error=resolved_error
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Codex Link] No se pudo persistir failed (user %s): %s",
+                    user_id[:8],
+                    type(exc).__name__,
+                )
+    return {
+        "ok": True,
+        "codex_status": status,
+        "codex_plan_type": row.get("plan_type"),
+        "last_error": last_error,
+    }
+
+
+@app.post("/api/settings/codex-link/cancel")
+@api_key_rate_limit
+async def api_codex_link_cancel(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Cancela un vínculo pendiente. Idempotente; el cancel en el server es
+    best-effort y nunca bloquea el paso de la fila a `none`."""
+    row = supabase_data.get_user_provider_connection(user_id)
+    if not row or row.get("status") != "pending":
+        return {"ok": True}
+    login_id = row.get("login_id")
+    if login_id:
+        await _codex_cancel_pending_login(user_id, login_id)
+    supabase_data.upsert_user_provider_connection(user_id, status="none")
+    _codex_clear_link_state(user_id)
+    logger.info("[Codex Link] Vínculo cancelado (user %s)", user_id[:8])
+    return {"ok": True}
+
+
+@app.delete("/api/settings/codex-link")
+@api_key_rate_limit
+async def api_codex_link_delete(
+    request: Request,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    """Desvincula la cuenta ChatGPT. Idempotente; un logout fallido no impide
+    el borrado local (fila, proceso y CODEX_HOME)."""
+    row = supabase_data.get_user_provider_connection(user_id)
+    codex_manager, _, _ = _codex_runtime()
+    if row and row.get("status") == "linked":
+        try:
+            app_server = await asyncio.wait_for(
+                codex_manager.acquire(user_id),
+                timeout=_CODEX_LINK_SERVER_TIMEOUT_SECONDS,
+            )
+            await app_server.request(
+                "account/logout", {}, timeout=_CODEX_LINK_SERVER_TIMEOUT_SECONDS
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Codex Link] logout best-effort falló (user %s): %s",
+                user_id[:8],
+                type(exc).__name__,
+            )
+    # Borrar la fila ANTES de evacuar: el snapshot de evicción no re-persiste
+    # credenciales de un vínculo ya eliminado.
+    supabase_data.delete_user_provider_connection(user_id)
+    _codex_clear_link_state(user_id)
+    await codex_manager.evict(user_id)
+    try:
+        await asyncio.to_thread(shutil.rmtree, _codex_home_dir(user_id), True)
+    except Exception as exc:
+        logger.warning(
+            "[Codex Link] No se pudo limpiar CODEX_HOME (user %s): %s",
+            user_id[:8],
+            type(exc).__name__,
+        )
+    logger.info("[Codex Link] Vínculo eliminado (user %s)", user_id[:8])
     return {"ok": True}
 
 
@@ -1969,6 +2492,7 @@ async def _format_and_finalize_part(
     target_language: str = "es-ES",
     use_deepseek: bool = False,
     deepseek_api_key: str = "",
+    use_codex: bool = False,
 ) -> None:
     """Background task: format explainer content then persist and notify.
 
@@ -1991,6 +2515,11 @@ async def _format_and_finalize_part(
             elif use_openrouter:
                 formatted, fmt_usage = await format_explainer_content_or(
                     openrouter_api_key, explainer_data, target_language
+                )
+            elif use_codex:
+                # Corrutina async: `user_id` en la posición de la API key.
+                formatted, fmt_usage = await format_explainer_content_codex(
+                    user_id, explainer_data, target_language
                 )
             else:
                 formatted, fmt_usage = await format_explainer_content(api_key, explainer_data, target_language)
@@ -2133,6 +2662,12 @@ def _accumulate_review_usage(cumulative_usage: dict, usage_meta, *, cost_model: 
     else:
         cost = calculate_cost(cost_model, usage_meta)
     cumulative_usage["total_cost"] = round(cumulative_usage.get("total_cost", 0.0) + cost, 6)
+    # CodexUsage (cuota ChatGPT): 1 petición por llamada, coste 0. Los demás
+    # usage_meta no exponen `quota_requests` y suman 0.
+    cumulative_usage["codex_quota_requests"] = (
+        cumulative_usage.get("codex_quota_requests", 0)
+        + getattr(usage_meta, "quota_requests", 0)
+    )
 
 
 async def _process_project(
@@ -2166,7 +2701,10 @@ async def _process_project(
     target_language_obj = normalize_target_language(target_language)
     target_language_code = target_language_obj.code
     use_deepseek_explainer = explainer_provider == EXPLAINER_PROVIDER_DEEPSEEK
-    use_text_provider_explainer = use_openrouter_explainer or use_deepseek_explainer
+    use_codex_explainer = explainer_provider == EXPLAINER_PROVIDER_CODEX
+    use_text_provider_explainer = (
+        use_openrouter_explainer or use_deepseek_explainer or use_codex_explainer
+    )
     try:
         explainer_model = _resolve_explainer_model(
             explainer_provider,
@@ -2182,6 +2720,8 @@ async def _process_project(
         if use_openrouter_explainer
         else DEEPSEEK_MODEL_AUXILIARY
         if use_deepseek_explainer
+        else CODEX_MODEL
+        if use_codex_explainer
         else MODEL_CLASSIFIER
     )
     segmentation_model = (
@@ -2189,6 +2729,8 @@ async def _process_project(
         if use_openrouter_explainer
         else DEEPSEEK_MODEL_AUXILIARY
         if use_deepseek_explainer
+        else CODEX_MODEL
+        if use_codex_explainer
         else MODEL_SEGMENTADOR
     )
     auxiliary_agents_model = (
@@ -2196,6 +2738,8 @@ async def _process_project(
         if use_openrouter_explainer
         else DEEPSEEK_MODEL_AUXILIARY
         if use_deepseek_explainer
+        else CODEX_MODEL
+        if use_codex_explainer
         else MODEL_AGENTS
     )
     validator_model = (
@@ -2203,6 +2747,8 @@ async def _process_project(
         if use_openrouter_explainer
         else DEEPSEEK_COMPLETENESS_VALIDATOR_MODEL
         if use_deepseek_explainer
+        else CODEX_MODEL
+        if use_codex_explainer
         else COMPLETENESS_VALIDATOR_MODEL
     )
 
@@ -2239,6 +2785,7 @@ async def _process_project(
             )
             use_openrouter_explainer = False
             use_deepseek_explainer = False
+            use_codex_explainer = False
             use_text_provider_explainer = False
             explainer_provider = EXPLAINER_PROVIDER_GEMINI
             explainer_model = MODEL_AGENTS
@@ -2249,7 +2796,11 @@ async def _process_project(
 
         # Get user's API keys (BYOK) from Supabase.
         api_key = get_user_api_key(user_id, provider=PROVIDER_GEMINI) or ""
-        requires_gemini_key = not use_deepseek_explainer
+        requires_gemini_key = (
+            use_openrouter_explainer
+            or (not use_deepseek_explainer and not use_codex_explainer)
+            or source_type == "youtube"
+        )
         if requires_gemini_key and not api_key:
             logger.error(f"[Process] API key Gemini no configurada para user: {user_id[:8]}...")
             await send_event(project_id, {"type": "error", "message": "No hay API key de Gemini configurada. Configúrala en Ajustes."})
@@ -2337,6 +2888,24 @@ async def _process_project(
                 )
                 update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
                 return
+        elif use_codex_explainer:
+            # Codex no usa keys BYOK de OpenRouter/DeepSeek/Tavily (cuota ChatGPT);
+            # solo Mistral para el OCR nativo de PDFs (mismo patrón que DeepSeek).
+            mistral_api_key = get_user_api_key(user_id, provider=PROVIDER_MISTRAL) or ""
+            if source_type == "pdf" and not mistral_api_key:
+                logger.error(f"[Process] API key Mistral no configurada para PDF con Codex: {user_id[:8]}...")
+                await send_event(
+                    project_id,
+                    {
+                        "type": "error",
+                        "message": (
+                            "No hay API key de Mistral configurada. "
+                            "Guárdala en Ajustes para usar OCR nativo en PDFs con Codex."
+                        ),
+                    },
+                )
+                update_project(project_id, user_id, {"status": "error", "error_message": "API key Mistral no configurada"})
+                return
 
         active_key_for_log = (
             openrouter_api_key
@@ -2367,6 +2936,8 @@ async def _process_project(
             "formatter_model": (
                 OPENROUTER_MODEL_AUXILIARY
                 if use_openrouter_explainer
+                else CODEX_MODEL
+                if use_codex_explainer
                 else DEEPSEEK_MODEL_AUXILIARY
                 if use_deepseek_explainer
                 else MODEL_AGENTS
@@ -2379,6 +2950,7 @@ async def _process_project(
             "thoughts_tokens": 0,
             "total_tokens": 0,
             "total_cost": 0.0,
+            "codex_quota_requests": 0,
         }
         if use_openrouter_explainer:
             cumulative_usage["openrouter_pdf_parser_engine"] = OPENROUTER_PDF_PARSER_ENGINE
@@ -2404,7 +2976,12 @@ async def _process_project(
             cumulative_usage["thoughts_tokens"] += t
             cumulative_usage["total_tokens"] += tt
             raw_cost_usd = getattr(usage_meta, "cost_usd", None)
-            if (
+            meta_cost_source = getattr(usage_meta, "cost_source", None)
+            if meta_cost_source == "chatgpt_quota":
+                # CodexUsage (cuota ChatGPT): nunca coste USD; fuente honesta en el log.
+                cost = 0.0
+                cost_source = "chatgpt_quota"
+            elif (
                 isinstance(raw_cost_usd, (int, float))
                 and math.isfinite(raw_cost_usd)
                 and raw_cost_usd >= 0
@@ -2415,6 +2992,7 @@ async def _process_project(
                 cost = calculate_cost(cost_model, usage_meta)
                 cost_source = "estimated_pricing"
             cumulative_usage["total_cost"] += cost
+            cumulative_usage["codex_quota_requests"] += getattr(usage_meta, "quota_requests", 0)
 
             logger.debug(
                 f"[Process] Uso de tokens actualizado - fase: {phase}",
@@ -2675,6 +3253,17 @@ async def _process_project(
                         openrouter_full_source_text,
                         pdf_total_pages,
                     )
+                elif use_codex_explainer:
+                    if not mistral_pdf_context or not openrouter_full_source_text:
+                        raise PdfOcrError(
+                            "OCR Mistral no disponible para el clasificador Codex."
+                        )
+                    # Corrutina async: `user_id` en la posición de la key.
+                    content_page_set, clf_usage, _clf_raw = await run_page_classifier_codex(
+                        user_id,
+                        openrouter_full_source_text,
+                        pdf_total_pages,
+                    )
                 else:
                     content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
                         run_page_classifier,
@@ -2787,27 +3376,51 @@ async def _process_project(
                         source_kind,
                         target_language=target_language_code,
                     )
-                elif seg_attempt == 0:
-                    segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
-                        run_segmentador_ds,
-                        deepseek_api_key,
-                        segmentador_source_text,
-                        content_pages_prefix + base_desc,
-                        source_kind,
-                        target_language=target_language_code,
-                    )
+                elif use_deepseek_explainer:
+                    if seg_attempt == 0:
+                        segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
+                            run_segmentador_ds,
+                            deepseek_api_key,
+                            segmentador_source_text,
+                            content_pages_prefix + base_desc,
+                            source_kind,
+                            target_language=target_language_code,
+                        )
+                    else:
+                        # Retry: continúa la conversación; no se reenvía la fuente (cache hit).
+                        segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
+                            run_segmentador_ds,
+                            deepseek_api_key,
+                            segmentador_source_text,
+                            base_desc,
+                            source_kind,
+                            target_language=target_language_code,
+                            conversation=seg_ds_conversation,
+                            correction=correction_suffix,
+                        )
                 else:
-                    # Retry: continúa la conversación; no se reenvía la fuente (cache hit).
-                    segmentation, usage_meta, seg_ds_conversation = await asyncio.to_thread(
-                        run_segmentador_ds,
-                        deepseek_api_key,
-                        segmentador_source_text,
-                        base_desc,
-                        source_kind,
-                        target_language=target_language_code,
-                        conversation=seg_ds_conversation,
-                        correction=correction_suffix,
-                    )
+                    # Codex: corrutina async, se espera directo (nunca to_thread).
+                    # Espejo posicional de `run_segmentador_ds` con `user_id` en
+                    # la posición de `api_key`; los reintentos continúan la
+                    # conversación (mismo patrón que DeepSeek).
+                    if seg_attempt == 0:
+                        segmentation, usage_meta, seg_ds_conversation = await run_segmentador_codex(
+                            user_id,
+                            segmentador_source_text,
+                            content_pages_prefix + base_desc,
+                            source_kind,
+                            target_language=target_language_code,
+                        )
+                    else:
+                        segmentation, usage_meta, seg_ds_conversation = await run_segmentador_codex(
+                            user_id,
+                            segmentador_source_text,
+                            base_desc,
+                            source_kind,
+                            target_language=target_language_code,
+                            conversation=seg_ds_conversation,
+                            correction=correction_suffix,
+                        )
             else:
                 segmentation, usage_meta = await asyncio.to_thread(
                     run_segmentador,
@@ -3332,15 +3945,26 @@ async def _process_project(
                 use_text_canonical = use_text_provider_explainer and is_pdf_source and mistral_pdf_context is not None
                 use_text_direct = use_text_provider_explainer and not use_text_canonical and segment_temp_path is not None
                 use_text_provider_part = use_text_canonical or use_text_direct
-                text_provider_api_key = openrouter_api_key if use_openrouter_explainer else deepseek_api_key
+                text_provider_api_key = (
+                    openrouter_api_key
+                    if use_openrouter_explainer
+                    else deepseek_api_key
+                    if use_deepseek_explainer
+                    else user_id
+                )
                 text_provider_explainer_fn = (
                     functools.partial(run_explainer_or, provider_routing=openrouter_provider_routing)
-                    if use_openrouter_explainer else run_explainer_ds
+                    if use_openrouter_explainer
+                    else run_explainer_ds
+                    if use_deepseek_explainer
+                    else run_explainer_codex
                 )
                 text_provider_subpart_fn = (
                     functools.partial(run_subpart_explainer_or, provider_routing=openrouter_provider_routing)
                     if use_openrouter_explainer
                     else run_subpart_explainer_ds
+                    if use_deepseek_explainer
+                    else run_subpart_explainer_codex
                 )
                 if is_pdf_source:
                     enriched_validation_contexts: list[ExplainerValidationContext] = []
@@ -3378,6 +4002,22 @@ async def _process_project(
                         validation_context = subpart_validation_contexts[idx]
                         if use_text_provider_part:
                             if use_text_canonical:
+                                if use_codex_explainer:
+                                    # Corrutina async: se espera directo en el
+                                    # gather, con los mismos argumentos
+                                    # posicionales que el wrapper to_thread.
+                                    return run_subpart_explainer_codex(
+                                        mistral_pdf_context.source_pdf_path,
+                                        sp_prompt,
+                                        explainer_model,
+                                        "application/pdf",
+                                        user_id,
+                                        user_id,
+                                        mistral_pdf_context.cache_entry,
+                                        tuple(openrouter_page_scopes[idx]),
+                                        validation_context=validation_context,
+                                        target_language=target_language_code,
+                                    )
                                 return asyncio.to_thread(
                                     _call_agent_with_optional_validation_context,
                                     text_provider_subpart_fn,
@@ -3389,6 +4029,17 @@ async def _process_project(
                                     text_provider_api_key,
                                     mistral_pdf_context.cache_entry,
                                     tuple(openrouter_page_scopes[idx]),
+                                    validation_context=validation_context,
+                                    target_language=target_language_code,
+                                )
+                            if use_codex_explainer:
+                                return run_subpart_explainer_codex(
+                                    segment_temp_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    agent_mime_type,
+                                    user_id,
+                                    user_id,
                                     validation_context=validation_context,
                                     target_language=target_language_code,
                                 )
@@ -3428,39 +4079,71 @@ async def _process_project(
                             raise RuntimeError(
                                 "Las páginas del provider textual no coinciden con el número de subprompts generados."
                             )
-                        parallel_explainer = [
-                            asyncio.to_thread(
-                                _call_agent_with_optional_validation_context,
-                                text_provider_explainer_fn,
-                                mistral_pdf_context.source_pdf_path,
-                                sp_prompt,
-                                explainer_model,
-                                "application/pdf",
-                                text_provider_api_key,
-                                text_provider_api_key,
-                                mistral_pdf_context.cache_entry,
-                                page_scope,
-                                validation_context=subpart_validation_contexts[idx],
-                                target_language=target_language_code,
-                            )
-                            for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
-                        ]
+                        if use_codex_explainer:
+                            parallel_explainer = [
+                                run_explainer_codex(
+                                    mistral_pdf_context.source_pdf_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    "application/pdf",
+                                    user_id,
+                                    user_id,
+                                    mistral_pdf_context.cache_entry,
+                                    page_scope,
+                                    validation_context=subpart_validation_contexts[idx],
+                                    target_language=target_language_code,
+                                )
+                                for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
+                            ]
+                        else:
+                            parallel_explainer = [
+                                asyncio.to_thread(
+                                    _call_agent_with_optional_validation_context,
+                                    text_provider_explainer_fn,
+                                    mistral_pdf_context.source_pdf_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    "application/pdf",
+                                    text_provider_api_key,
+                                    text_provider_api_key,
+                                    mistral_pdf_context.cache_entry,
+                                    page_scope,
+                                    validation_context=subpart_validation_contexts[idx],
+                                    target_language=target_language_code,
+                                )
+                                for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
+                            ]
                     else:
-                        parallel_explainer = [
-                            asyncio.to_thread(
-                                _call_agent_with_optional_validation_context,
-                                text_provider_explainer_fn,
-                                segment_temp_path,
-                                sp_prompt,
-                                explainer_model,
-                                agent_mime_type,
-                                text_provider_api_key,
-                                text_provider_api_key,
-                                validation_context=subpart_validation_contexts[idx],
-                                target_language=target_language_code,
-                            )
-                            for idx, sp_prompt in enumerate(subpart_prompts)
-                        ]
+                        if use_codex_explainer:
+                            parallel_explainer = [
+                                run_explainer_codex(
+                                    segment_temp_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    agent_mime_type,
+                                    user_id,
+                                    user_id,
+                                    validation_context=subpart_validation_contexts[idx],
+                                    target_language=target_language_code,
+                                )
+                                for idx, sp_prompt in enumerate(subpart_prompts)
+                            ]
+                        else:
+                            parallel_explainer = [
+                                asyncio.to_thread(
+                                    _call_agent_with_optional_validation_context,
+                                    text_provider_explainer_fn,
+                                    segment_temp_path,
+                                    sp_prompt,
+                                    explainer_model,
+                                    agent_mime_type,
+                                    text_provider_api_key,
+                                    text_provider_api_key,
+                                    validation_context=subpart_validation_contexts[idx],
+                                    target_language=target_language_code,
+                                )
+                                for idx, sp_prompt in enumerate(subpart_prompts)
+                            ]
                 else:
                     explainer_fn = run_explainer
                     parallel_explainer = [
@@ -3504,6 +4187,21 @@ async def _process_project(
                         run_resources_ds,
                         deepseek_api_key,
                         tavily_api_key,
+                        openrouter_part_source_text,
+                        agent_prompt,
+                        target_language=target_language_code,
+                    )
+                elif use_codex_explainer:
+                    # Corrutinas async: `user_id` en la posición de la key, sin
+                    # Tavily ni búsqueda web en v1; se esperan directo en el gather.
+                    recorrido_task = run_recorrido_codex(
+                        user_id,
+                        openrouter_part_source_text,
+                        agent_prompt,
+                        target_language=target_language_code,
+                    )
+                    resources_task = run_resources_codex(
+                        user_id,
                         openrouter_part_source_text,
                         agent_prompt,
                         target_language=target_language_code,
@@ -3564,6 +4262,11 @@ async def _process_project(
                     # Both Gemini and OpenRouter now return the same structured shape.
                     if subpart_results and not isinstance(subpart_results[0], Exception):
                         assembled_explainer = _unpack_explainer_result(subpart_results[0])[0]
+                    elif use_codex_explainer and subpart_results and isinstance(subpart_results[0], Exception):
+                        # Codex: el error tipado (p.ej. CodexRateLimitError) lleva
+                        # el mensaje UX congelado; llega a `_format_and_finalize_part`
+                        # vía el dict de error → part_failed + SSE sin stack.
+                        assembled_explainer = {"error": str(subpart_results[0])}
                     else:
                         assembled_explainer = {"error": "All explainer calls failed"}
 
@@ -3658,6 +4361,7 @@ async def _process_project(
                     target_language=target_language_code,
                     use_deepseek=use_deepseek_explainer,
                     deepseek_api_key=deepseek_api_key,
+                    use_codex=use_codex_explainer,
                 )
             )
             return formatter_task, local_segment_pdf_paths, local_temp_paths
@@ -3683,17 +4387,24 @@ async def _process_project(
         # Aggregate formatter costs from partes_contenido (all tasks finished → no race).
         total_fmt_input = total_fmt_output = 0
         total_fmt_cost = 0.0
+        total_fmt_quota = 0
         for pdata in partes_contenido.values():
             fu = pdata.get("formatter_usage") or {}
             total_fmt_input  += fu.get("input_tokens", 0)
             total_fmt_output += fu.get("output_tokens", 0)
             total_fmt_cost   += fu.get("cost", 0.0)
+            total_fmt_quota  += fu.get("quota_requests", 0)
 
-        if total_fmt_cost > 0:
+        if total_fmt_cost > 0 or total_fmt_quota > 0:
             cumulative_usage["formatter_tokens"] = total_fmt_input + total_fmt_output
             cumulative_usage["formatter_cost"]   = round(total_fmt_cost, 6)
             cumulative_usage["total_cost"]       = round(
                 cumulative_usage["total_cost"] + total_fmt_cost, 6
+            )
+            # RC-01: peticiones de cuota de los turnos del formatter Codex
+            # (coste 0); se suman una sola vez, tras esperar a los formatters.
+            cumulative_usage["codex_quota_requests"] = (
+                cumulative_usage.get("codex_quota_requests", 0) + total_fmt_quota
             )
             usage_result = update_project(project_id, user_id, {"usage": cumulative_usage})
             if usage_result is None:
@@ -3705,6 +4416,7 @@ async def _process_project(
                 extra={
                     "formatter_tokens": total_fmt_input + total_fmt_output,
                     "formatter_cost": round(total_fmt_cost, 6),
+                    "formatter_quota_requests": total_fmt_quota,
                     "cumulative_cost": round(cumulative_usage["total_cost"], 6),
                 },
             )
@@ -3944,8 +4656,14 @@ async def api_reformat_project(
     project_usage = project.get("usage") or {}
     use_openrouter = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_OPENROUTER
     use_deepseek = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_DEEPSEEK
+    use_codex = project_usage.get("explainer_provider") == EXPLAINER_PROVIDER_CODEX
 
-    if use_openrouter:
+    if use_codex:
+        # Sin API key BYOK: el formatter corre con la cuenta vinculada. Si el
+        # vínculo caducó, el error tipado del agente se descarta por parte
+        # (gather return_exceptions) y se loguea; no se bloquea el reformat.
+        api_key = ""
+    elif use_openrouter:
         api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
         if not api_key:
             raise HTTPException(
@@ -3984,7 +4702,10 @@ async def api_reformat_project(
             and isinstance(explainer, dict)
             and "error" not in explainer
         ):
-            if use_deepseek:
+            if use_codex:
+                # Corrutina async: `user_id` en la posición de la API key.
+                formatted, fmt_usage = await format_explainer_content_codex(user_id, explainer, reformat_target_language)
+            elif use_deepseek:
                 formatted, fmt_usage = await format_explainer_content_ds(api_key, explainer, reformat_target_language)
             elif use_openrouter:
                 formatted, fmt_usage = await format_explainer_content_or(api_key, explainer, reformat_target_language)
@@ -4024,6 +4745,7 @@ async def api_reformat_project(
     reformatted = 0
     total_fmt_input = total_fmt_output = 0
     total_fmt_cost = 0.0
+    total_fmt_quota = 0
     for r in results:
         if isinstance(r, Exception):
             logger.warning(
@@ -4037,13 +4759,15 @@ async def api_reformat_project(
         total_fmt_input  += fu.get("input_tokens", 0)
         total_fmt_output += fu.get("output_tokens", 0)
         total_fmt_cost   += fu.get("cost", 0.0)
+        total_fmt_quota  += fu.get("quota_requests", 0)
         reformatted += 1
 
     if reformatted > 0:
         update_project(project_id, user_id, {"partes_contenido": partes_contenido})
 
-    # Update project-level usage with formatter costs.
-    if total_fmt_cost > 0:
+    # Update project-level usage with formatter costs. Codex (cuota ChatGPT)
+    # acumula los conteos con coste USD 0: `use_codex` fuerza la acumulación.
+    if total_fmt_cost > 0 or use_codex:
         project_usage: dict = dict(project.get("usage") or {})
         project_usage["formatter_tokens"] = (
             project_usage.get("formatter_tokens", 0) + total_fmt_input + total_fmt_output
@@ -4054,6 +4778,12 @@ async def api_reformat_project(
         project_usage["total_cost"] = round(
             project_usage.get("total_cost", 0.0) + total_fmt_cost, 6
         )
+        # RC-01: peticiones de cuota de los turnos del formatter Codex (coste
+        # 0); se suman una sola vez a la cuota previa del proyecto.
+        if total_fmt_quota > 0:
+            project_usage["codex_quota_requests"] = (
+                project_usage.get("codex_quota_requests", 0) + total_fmt_quota
+            )
         update_project(project_id, user_id, {"usage": project_usage})
 
     elapsed_ms = int((time.time() - reformat_start) * 1000)
@@ -4138,7 +4868,7 @@ async def api_process_project(
 
     source_type = project.get("source_type", "pdf")
     requires_gemini_key = (
-        explainer_provider != EXPLAINER_PROVIDER_DEEPSEEK
+        explainer_provider in (EXPLAINER_PROVIDER_GEMINI, EXPLAINER_PROVIDER_OPENROUTER)
         or source_type == "youtube"
     )
     if requires_gemini_key and not has_user_api_key(user_id, provider=PROVIDER_GEMINI):
@@ -4178,6 +4908,22 @@ async def api_process_project(
             raise HTTPException(
                 status_code=400,
                 detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con DeepSeek.",
+            )
+    elif explainer_provider == EXPLAINER_PROVIDER_CODEX and source_type != "youtube":
+        # YouTube always falls back to Gemini automatically — skip Codex link
+        # checks for that source type (la key Gemini la cubre `requires_gemini_key`).
+        connection = supabase_data.get_user_provider_connection(user_id)
+        if not connection or connection.get("status") != "linked":
+            logger.warning(f"[API] Usuario sin vínculo ChatGPT para Codex: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail=CODEX_LINK_REQUIRED_ERROR_MESSAGE,
+            )
+        if source_type == "pdf" and not has_user_api_key(user_id, provider=PROVIDER_MISTRAL):
+            logger.warning(f"[API] Usuario sin API key Mistral configurada para PDF con Codex: {user_id[:8]}...")
+            raise HTTPException(
+                status_code=400,
+                detail="No hay API key de Mistral configurada. Guárdala en Ajustes para usar OCR nativo en PDFs con Codex.",
             )
 
     logger.info(
@@ -4387,6 +5133,11 @@ async def api_part_review(
         provider_label = "DeepSeek"
         provider_const = PROVIDER_DEEPSEEK
         review_agent = run_review_ds
+    elif provider == EXPLAINER_PROVIDER_CODEX:
+        model = explainer_config.get("model") or CODEX_MODEL
+        provider_label = "Codex"
+        provider_const = None
+        review_agent = run_review_codex
     else:
         raise HTTPException(status_code=400, detail=f"Proveedor de explainer no soportado: {provider}")
 
@@ -4396,23 +5147,35 @@ async def api_part_review(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     target_language_code = target_language_obj.code
 
-    if not has_user_api_key(user_id, provider=provider_const):
-        logger.warning(
-            "[Review] Usuario sin API key %s configurada: %s",
-            provider_label,
-            user_id[:8] + "..." if len(user_id) > 8 else user_id,
-            extra={"project_id": project_id, "part_id": part_id, "provider": provider},
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
-        )
-    api_key = get_user_api_key(user_id, provider=provider_const)
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
-        )
+    if provider == EXPLAINER_PROVIDER_CODEX:
+        # Gate de vínculo (mismo mensaje que el pre-check de /process): la
+        # cuenta ChatGPT debe estar `linked`, no hay API key BYOK.
+        connection = supabase_data.get_user_provider_connection(user_id)
+        if not connection or connection.get("status") != "linked":
+            logger.warning(
+                "[Review] Usuario sin vínculo ChatGPT para Codex: %s",
+                user_id[:8] + "..." if len(user_id) > 8 else user_id,
+                extra={"project_id": project_id, "part_id": part_id, "provider": provider},
+            )
+            raise HTTPException(status_code=400, detail=CODEX_LINK_REQUIRED_ERROR_MESSAGE)
+    else:
+        if not has_user_api_key(user_id, provider=provider_const):
+            logger.warning(
+                "[Review] Usuario sin API key %s configurada: %s",
+                provider_label,
+                user_id[:8] + "..." if len(user_id) > 8 else user_id,
+                extra={"project_id": project_id, "part_id": part_id, "provider": provider},
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
+            )
+        api_key = get_user_api_key(user_id, provider=provider_const)
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No hay API key de {provider_label} configurada. Configúrala en Ajustes.",
+            )
 
     part_title = f"Parte {part_id}"
     for parte in (project.get("segmentation") or {}).get("partes") or []:
@@ -4421,9 +5184,39 @@ async def api_part_review(
             break
 
     try:
-        review, usage_meta = await asyncio.to_thread(
-            review_agent, api_key, explainer, part_title, target_language_code, model
+        if provider == EXPLAINER_PROVIDER_CODEX:
+            # Corrutina async: `user_id` en la posición de la key.
+            review, usage_meta = await review_agent(
+                user_id, explainer, part_title, target_language_code, model
+            )
+        else:
+            review, usage_meta = await asyncio.to_thread(
+                review_agent, api_key, explainer, part_title, target_language_code, model
+            )
+    except CodexRateLimitError as exc:
+        logger.error(
+            "[Review] Rate limit de Codex (429) para parte %s: %s",
+            part_id,
+            exc.message[:200],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
         )
+        raise HTTPException(status_code=429, detail=exc.message) from exc
+    except CodexAuthError as exc:
+        logger.error(
+            "[Review] Cuenta ChatGPT desvinculada para parte %s: %s",
+            part_id,
+            exc.message[:200],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+        )
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except CodexError as exc:
+        logger.error(
+            "[Review] Error de Codex para parte %s: %s",
+            part_id,
+            exc.message[:200],
+            extra={"project_id": project_id, "part_id": part_id, "provider": provider, "model": model},
+        )
+        raise HTTPException(status_code=502, detail=f"Error en Codex API: {exc.message[:200]}") from exc
     except GeminiRateLimitError as exc:
         logger.error(
             "[Review] Rate limit de Gemini (429) para parte %s: %s",

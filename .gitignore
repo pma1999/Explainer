@@ -83,4 +83,4 @@ dummy2.txt
 
 *.pdf
 .mcp.json
-.codex/
+.codex/.venv-win

@@ -265,6 +265,14 @@
                 </span>
                 <span class="provider-card-status" id="provider-card-deepseek-status" aria-hidden="false"></span>
               </label>
+              <label class="provider-card" id="provider-card-codex" for="explainer-provider-codex">
+                <input type="radio" name="explainer-provider" id="explainer-provider-codex" value="codex" />
+                <span class="provider-card-main">
+                  <span class="provider-card-title">ChatGPT (Codex)</span>
+                  <span class="provider-card-sub">GPT-5.6 Luna — incluida en tu plan ChatGPT</span>
+                </span>
+                <span class="provider-card-status" id="provider-card-codex-status" aria-hidden="false"></span>
+              </label>
             </div>
             <div class="openrouter-model-panel hidden" id="openrouter-model-panel">
               <label class="form-label">Modelo OpenRouter</label>
@@ -349,6 +357,22 @@
                   </span>
                 </label>
               </div>
+            </div>
+            <div class="openrouter-model-panel hidden" id="codex-model-panel">
+              <label class="form-label">Modelo Codex (ChatGPT)</label>
+              <div class="provider-grid openrouter-model-grid" id="codex-model-group">
+                <div class="provider-card" id="codex-model-card-luna">
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">GPT-5.6 Luna</span>
+                    <span class="provider-card-sub">Modelo fijo — incluido en tu plan ChatGPT.</span>
+                  </span>
+                </div>
+              </div>
+              <p class="codex-panel-link-status" id="codex-panel-link-status">
+                <span id="codex-panel-link-text"></span>
+                <button type="button" class="btn-primary btn-sm" id="codex-panel-btn-link" style="display:none">Vincular cuenta ChatGPT</button>
+                <button type="button" class="btn-danger btn-sm" id="codex-panel-btn-unlink" style="display:none">Desvincular</button>
+              </p>
             </div>
             <p class="input-hint" id="explainer-provider-hint" aria-live="polite">
               La explicación usará Gemini. Segmentación, recorrido, recursos y formateo siguen funcionando con Gemini.
@@ -721,6 +745,11 @@
             <div class="usage-formatter-row" id="usage-formatter-row" style="display:none">
               <span class="usage-label">Formateo (Flash Lite)</span>
               <span class="usage-value usage-formatter-cost" id="usage-formatter-cost">$0.0000</span>
+            </div>
+            <!-- Codex quota row — only visible when codex_quota_requests > 0 -->
+            <div class="usage-formatter-row" id="usage-codex-quota-row" style="display:none">
+              <span class="usage-label">Cuota ChatGPT</span>
+              <span class="usage-value" id="usage-codex-quota">0 peticiones</span>
             </div>
           </div>
 
@@ -1128,6 +1157,61 @@
             <p class="form-error" id="mistral-key-error"></p>
             <p class="form-success" id="mistral-key-success"></p>
           </form>
+        </div>
+
+        <div class="settings-section">
+          <h4 class="settings-section-title">Cuenta ChatGPT (Codex) <span class="settings-badge-optional">Opcional</span></h4>
+          <p class="settings-description">
+            Vincula tu cuenta de ChatGPT para usar <strong>GPT-5.6 Luna</strong> con la cuota incluida
+            de tu plan ChatGPT. El código de verificación se completa en la web de ChatGPT; no
+            necesitas API keys adicionales.
+          </p>
+
+          <div id="codex-link-not-set" class="api-key-status hidden">
+            <div class="status-badge status-neutral">No vinculada</div>
+            <p class="status-text">Codex (GPT-5.6 Luna) no estará disponible hasta vincular tu cuenta de ChatGPT.</p>
+          </div>
+
+          <div id="codex-link-pending" class="api-key-status hidden">
+            <div class="status-badge status-warning">Vínculo pendiente</div>
+            <p class="status-text">Completa el código de verificación en la web de ChatGPT para terminar el vínculo.</p>
+          </div>
+
+          <div id="codex-link-set" class="api-key-status hidden">
+            <div class="status-badge status-success">✓ Vinculada</div>
+            <p class="status-text" id="codex-link-set-text">Codex (GPT-5.6 Luna) queda disponible con la cuota de tu plan ChatGPT.</p>
+          </div>
+
+          <div id="codex-link-failed" class="api-key-status hidden">
+            <div class="status-badge status-error">Vínculo fallido</div>
+            <p class="status-text" id="codex-link-failed-text">El vínculo falló. Vuelve a iniciarlo.</p>
+          </div>
+
+          <button type="button" class="btn-primary" id="btn-start-codex-link">
+            <span class="btn-text">Vincular cuenta ChatGPT</span>
+            <span class="spinner hidden"></span>
+          </button>
+
+          <div id="codex-device-panel" class="hidden">
+            <p class="settings-description">1. Abre el enlace y entra en tu cuenta de ChatGPT.</p>
+            <p class="codex-verification-link">
+              <a id="codex-verification-url" href="#" target="_blank" rel="noopener noreferrer"></a>
+            </p>
+            <p class="settings-description">2. Introduce este código en la web de ChatGPT:</p>
+            <div class="share-link-row">
+              <input type="text" readonly class="form-input share-link-input" id="codex-user-code" />
+              <button type="button" class="btn-primary" id="btn-copy-codex-code">
+                <span class="btn-text">Copiar</span>
+              </button>
+            </div>
+            <p class="settings-description" id="codex-device-hint">Esperando a que completes el vínculo…</p>
+            <p class="form-error hidden" id="codex-link-error"></p>
+            <div class="form-actions">
+              <button type="button" class="btn-danger" id="btn-cancel-codex-link">Cancelar</button>
+            </div>
+          </div>
+
+          <button type="button" class="btn-danger" id="btn-unlink-codex" style="display:none">Desvincular cuenta ChatGPT</button>
         </div>
       </div>
     </div>

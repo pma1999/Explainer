@@ -87,6 +87,32 @@ class TestModelValidationRelaxation:
 
 
 # ===================================================================
+# ACCEPTANCE: Codex provider resolution (T07)
+# ===================================================================
+
+class TestCodexResolution:
+    """`codex` resuelve siempre al modelo fijo `gpt-5.6-luna` (T07)."""
+
+    def test_codex_resolves_fixed_model(self):
+        fn = _resolve_explainer_model_fn()
+        import main as m
+        assert fn("codex") == m.CODEX_MODEL
+        assert m.CODEX_MODEL == "gpt-5.6-luna"
+
+    def test_codex_ignores_extra_model_params(self):
+        fn = _resolve_explainer_model_fn()
+        import main as m
+        # Sin parámetros extra: ni openrouter_model ni deepseek_model importan.
+        assert fn("codex", "org/modelo", "deepseek-v4-pro") == m.CODEX_MODEL
+
+    def test_literal_accepts_codex(self):
+        import main as m
+        assert m.ExplainerProvider.__args__ == (
+            "gemini", "openrouter", "deepseek", "codex",
+        )
+
+
+# ===================================================================
 # ACCEPTANCE: _build_openrouter_provider_routing
 # ===================================================================
 

@@ -152,6 +152,9 @@ export const state = {
   deepSeekKeyStatus: 'loading',
   hasTavilyKey: false,
   tavilyKeyStatus: 'loading',
+  hasCodexLink: false,
+  codexLinkStatus: 'loading',
+  codexPlanType: null,
   session: null,
   user: null,
   previousUserId: null,
@@ -171,4 +174,5 @@ export const OPENROUTER_KEY_CACHE_KEY_PREFIX = 'explainer.openrouterKeyStatus.v1
 export const MISTRAL_KEY_CACHE_KEY_PREFIX = 'explainer.mistralKeyStatus.v1.';
 export const DEEPSEEK_KEY_CACHE_KEY_PREFIX = 'explainer.deepseekKeyStatus.v1.';
 export const TAVILY_KEY_CACHE_KEY_PREFIX = 'explainer.tavilyKeyStatus.v1.';
+export const CODEX_LINK_CACHE_KEY_PREFIX = 'explainer.codexLinkStatus.v1.';
 export const API_KEY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;

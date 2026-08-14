@@ -42,6 +42,21 @@ function resetDom() {
       <span class="toggle-complete-icon"></span>
     </button>
     <div id="toast-container"></div>
+    <div id="sidebar-usage-mini"><div id="mini-total-cost">$0.00</div></div>
+    <div id="project-usage-card">
+      <span id="usage-total-cost">$0.00</span>
+      <span id="usage-prompt-tokens">0</span>
+      <span id="usage-output-tokens">0</span>
+      <span id="usage-thought-tokens">0</span>
+      <span id="usage-total-tokens">0</span>
+      <div id="usage-formatter-row" style="display:none">
+        <span id="usage-formatter-cost">$0.0000</span>
+      </div>
+      <div id="usage-codex-quota-row" style="display:none">
+        <span id="usage-codex-quota">0 peticiones</span>
+      </div>
+    </div>
+    <span id="proc-cost-badge">$0.0000</span>
   `;
 }
 
@@ -249,6 +264,42 @@ describe('projectView section progress sync', () => {
       expect(content.innerHTML).toContain('target="_blank"');
       expect(content.innerHTML).toContain('rel="noopener noreferrer"');
       expect(content.innerHTML).toContain('href="https://example.com/articulo"');
+    });
+  });
+
+  describe('updateUsageUI (codex quota)', () => {
+    it('shows "Cuota ChatGPT: N peticiones" and an included cost when codex quota is used', async () => {
+      const pv = await import('../../frontend/js/projectView.js');
+
+      pv.updateUsageUI({
+        total_cost: 0,
+        codex_quota_requests: 3,
+        prompt_tokens: 10,
+        candidates_tokens: 20,
+        thoughts_tokens: 5,
+        total_tokens: 35,
+      });
+
+      expect(document.getElementById('usage-codex-quota-row').style.display).not.toBe('none');
+      expect(document.getElementById('usage-codex-quota').textContent).toBe('Cuota ChatGPT: 3 peticiones');
+      expect(document.getElementById('usage-total-cost').textContent).toBe('Incluido');
+      expect(document.getElementById('mini-total-cost').textContent).toBe('Incluido');
+    });
+
+    it('hides the quota row and shows the dollar cost when no codex quota is used', async () => {
+      const pv = await import('../../frontend/js/projectView.js');
+
+      pv.updateUsageUI({
+        total_cost: 1.25,
+        prompt_tokens: 10,
+        candidates_tokens: 20,
+        thoughts_tokens: 0,
+        total_tokens: 30,
+      });
+
+      expect(document.getElementById('usage-codex-quota-row').style.display).toBe('none');
+      expect(document.getElementById('usage-total-cost').textContent).toBe('$1.25');
+      expect(document.getElementById('usage-total-tokens').textContent).toBe('30');
     });
   });
 });

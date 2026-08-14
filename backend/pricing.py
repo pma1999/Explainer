@@ -88,6 +88,14 @@ PRICING = {
         "output_small": 3.48,
         "output_large": 3.48,
     },
+    "gpt-5.6-luna": {
+        # Codex (cuota ChatGPT): sin facturación USD. Fallback de
+        # `calculate_cost` → nunca un coste positivo (T07).
+        "input_small": 0.0,
+        "input_large": 0.0,
+        "output_small": 0.0,
+        "output_large": 0.0,
+    },
     # Valores por defecto para otros modelos
     "default": {
         "input_small": 0.50,

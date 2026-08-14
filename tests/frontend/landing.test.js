@@ -33,6 +33,7 @@ const mockState = vi.hoisted(() => ({
   hasMistralKey: false,
   hasDeepSeekKey: false,
   hasTavilyKey: false,
+  hasCodexLink: false,
   user: null,
 }));
 
@@ -127,13 +128,16 @@ describe('landing.js', () => {
       expect(isExplainerProviderSupportedForSource('youtube', 'gemini')).toBe(true);
     });
 
-    it('disables OpenRouter and DeepSeek direct for YouTube only', () => {
+    it('disables OpenRouter, DeepSeek direct and Codex for YouTube only', () => {
       expect(isExplainerProviderSupportedForSource('pdf', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('web', 'openrouter')).toBe(true);
       expect(isExplainerProviderSupportedForSource('youtube', 'openrouter')).toBe(false);
       expect(isExplainerProviderSupportedForSource('pdf', 'deepseek')).toBe(true);
       expect(isExplainerProviderSupportedForSource('web', 'deepseek')).toBe(true);
       expect(isExplainerProviderSupportedForSource('youtube', 'deepseek')).toBe(false);
+      expect(isExplainerProviderSupportedForSource('pdf', 'codex')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('web', 'codex')).toBe(true);
+      expect(isExplainerProviderSupportedForSource('youtube', 'codex')).toBe(false);
     });
   });
 
@@ -285,6 +289,53 @@ describe('landing.js', () => {
         hasTavilyKey: true,
         hasMistralKey: false,
       })).toMatch(/Mistral/i);
+    });
+
+    // --- Codex (ChatGPT) rules — frozen messages ---
+
+    it('rejects Codex on YouTube even when the account is linked', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'youtube',
+        provider: 'codex',
+        hasCodexLink: true,
+        hasMistralKey: true,
+      })).toMatch(/YouTube/i);
+    });
+
+    it('requires a ChatGPT link when Codex is selected', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'codex',
+        hasCodexLink: false,
+        hasMistralKey: true,
+      })).toBe('Vincula tu cuenta ChatGPT en Ajustes para usar Codex.');
+    });
+
+    it('requires Mistral key for Codex on PDFs', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'codex',
+        hasCodexLink: true,
+        hasMistralKey: false,
+      })).toBe('Necesitas configurar tu API key de Mistral para usar OCR en PDFs con Codex.');
+    });
+
+    it('accepts Codex for web with a linked account', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'web',
+        provider: 'codex',
+        hasCodexLink: true,
+        hasMistralKey: false,
+      })).toBeNull();
+    });
+
+    it('accepts Codex for PDFs with a linked account and Mistral key', () => {
+      expect(validateExplainerProviderSelection({
+        sourceType: 'pdf',
+        provider: 'codex',
+        hasCodexLink: true,
+        hasMistralKey: true,
+      })).toBeNull();
     });
   });
 
@@ -476,6 +527,7 @@ describe('persistModelSelector / restoreModelSelector', () => {
     mockState.hasApiKey = true;
     mockState.hasOpenRouterKey = false;
     mockState.hasDeepSeekKey = false;
+    mockState.hasCodexLink = false;
 
     const mod = await import('../../frontend/js/landing.js');
     persistModelSelector = mod.persistModelSelector;
@@ -549,6 +601,65 @@ describe('persistModelSelector / restoreModelSelector', () => {
     persistModelSelector();
     const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
     expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('codex provider with a linked ChatGPT account round-trips', () => {
+    mockState.hasCodexLink = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'codex',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('codex');
+  });
+
+  it('codex provider without a ChatGPT link falls back to gemini', () => {
+    mockState.hasCodexLink = false;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'codex',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('gemini');
+  });
+
+  it('persistModelSelector never writes new codex fields (fixed model — no extra keys)', () => {
+    mockState.hasCodexLink = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'codex',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(Object.keys(saved).sort()).toEqual([
+      'customOpenrouterModel',
+      'deepseekModel',
+      'explainerProvider',
+      'openrouterMode',
+      'openrouterModel',
+      'openrouterProvider',
+      'openrouterProviderOnly',
+    ]);
   });
 
   it('valid gemini preset round-trip', () => {

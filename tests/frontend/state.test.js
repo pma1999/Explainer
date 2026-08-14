@@ -6,6 +6,8 @@ import {
   AUTH_PERSISTENCE_PREFERENCE_KEY,
   createSupabaseAuthStorage,
   setRememberSessionPreference,
+  state,
+  CODEX_LINK_CACHE_KEY_PREFIX,
 } from '../../frontend/js/state.js';
 
 const AUTH_KEY = 'sb-test-auth-token';
@@ -66,5 +68,12 @@ describe('state.js auth session storage', () => {
 
     expect(localStorage.getItem(AUTH_KEY)).toBeNull();
     expect(sessionStorage.getItem(AUTH_KEY)).toBeNull();
+  });
+
+  it('exposes the codex link state fields and cache key prefix', () => {
+    expect(state).toHaveProperty('hasCodexLink', false);
+    expect(state).toHaveProperty('codexLinkStatus', 'loading');
+    expect(state).toHaveProperty('codexPlanType', null);
+    expect(CODEX_LINK_CACHE_KEY_PREFIX).toBe('explainer.codexLinkStatus.v1.');
   });
 });

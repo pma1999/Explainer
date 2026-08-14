@@ -1,0 +1,1 @@
+{"is_complete": false, "scope_status": "ok", "reason": "La ultima oracion queda cortada a mitad de idea.", "offending_fragments": ["la suma de los cuadrados de los catetos es igua"], "retry_instructions": "Cierra la ultima seccion con una oracion completa y con puntuacion final."}

@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from backend.gemini_model_routing import MODEL_AGENTS
 from backend.gemini_client import gemini_retry, generate_content_with_retry
 from backend.logging_config import get_logger
+from backend.codex_client import CodexError, CodexUsage, call_codex_chat
+from backend.codex_model_routing import CODEX_MODEL
 from backend.openrouter_client import (
     OpenRouterError,
     OpenRouterJsonSchemaResponseFormat,
@@ -319,6 +321,45 @@ def _call_deepseek_with_validation_retries(
     )
 
 
+async def _call_codex_with_validation_retries(
+    *,
+    call_operation: Callable[[], Awaitable[tuple[Any, Any]]],
+    validate_payload: Callable[[Any], dict[str, Any]],
+    operation_label: str,
+) -> tuple[dict[str, Any], Any]:
+    """Call Codex and correct invalid structured payloads with retries.
+
+    Espejo async de `_call_deepseek_with_validation_retries`: `call_operation`
+    queda FUERA del try, así los errores tipados del cliente
+    (`CodexRateLimitError`, etc.) se propagan sin ser envueltos. Los fallos de
+    validación retryables lanzan `CodexError` al agotar los reintentos.
+    """
+    total_attempts = OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES + 1
+    for attempt in range(1, total_attempts + 1):
+        raw, usage = await call_operation()
+        try:
+            return validate_payload(raw), usage
+        except Exception as exc:
+            if attempt >= total_attempts or not _is_retryable_payload_validation_error(exc):
+                raise CodexError(str(exc)) from exc
+            logger.warning(
+                "%s devolvió JSON estructurado inválido (%s). Reintentando %s/%s",
+                operation_label,
+                str(exc),
+                attempt,
+                OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES,
+                extra={
+                    "operation_label": operation_label,
+                    "validation_attempt": attempt,
+                    "validation_max_retries": OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES,
+                    "error_message": str(exc),
+                },
+            )
+    raise CodexError(
+        f"{operation_label} agotó reintentos por payload inválido sin devolver JSON válido."
+    )
+
+
 def _valid_review_sample() -> dict[str, Any]:
     """A structurally valid review (used by tests)."""
     return {
@@ -505,6 +546,63 @@ def run_review_ds(
 
     logger.info(
         "Review DeepSeek completado: %d preguntas en %dms",
+        len(review["preguntas"]),
+        int((time.time() - start_time) * 1000),
+        extra={
+            "num_preguntas": len(review["preguntas"]),
+            "total_duration_ms": int((time.time() - start_time) * 1000),
+            "prompt_tokens": getattr(usage, "prompt_token_count", 0),
+            "completion_tokens": getattr(usage, "candidates_token_count", 0),
+            "model": model,
+        },
+    )
+    return review, usage
+
+
+async def run_review_codex(
+    user_id: str,
+    explainer_content: dict | str,
+    part_title: str,
+    target_language: str = "es-ES",
+    model: str = CODEX_MODEL,
+) -> tuple[dict[str, Any], CodexUsage]:
+    """Run the Review agent via Codex (app-server). Returns (review_dict, usage).
+
+    Corrutina async: se espera directo (nunca en `asyncio.to_thread`). Espejo
+    posicional de `run_review_ds` con `user_id` en la posición de `api_key`,
+    reusando `_validate_review_payload` y los reintentos de review.
+    """
+    start_time = time.time()
+    logger.info(
+        "Iniciando agente review Codex",
+        extra={
+            "user_id_prefix": user_id[:8],
+            "part_title": part_title[:80],
+            "explainer_chars": len(_serialize_explainer(explainer_content)),
+            "target_language": target_language,
+            "model": model,
+        },
+    )
+
+    review, usage = await _call_codex_with_validation_retries(
+        call_operation=lambda: call_codex_chat(
+            user_id=user_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": _build_user_message(explainer_content, part_title),
+                }
+            ],
+            model=model,
+            system_prompt=build_review_system_instruction(target_language),
+            response_format="json_object",
+        ),
+        validate_payload=_validate_review_payload,
+        operation_label="Review Codex",
+    )
+
+    logger.info(
+        "Review Codex completado: %d preguntas en %dms",
         len(review["preguntas"]),
         int((time.time() - start_time) * 1000),
         extra={
