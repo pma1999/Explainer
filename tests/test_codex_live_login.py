@@ -15,6 +15,8 @@ Requisitos y credenciales reales
 - Un binario real ``codex`` (0.147.0, el pineado del bundle) que soporte
   ``app-server --stdio``. Si no está en ``/usr/local/bin/codex``, apuntar
   ``CODEX_BIN_PATH`` al binario (p.ej. ``CODEX_BIN_PATH="$(which codex)"``).
+- ``CODEX_LIVE_EFFORT`` opcional: nivel de razonamiento para el turno real
+  (p.ej. ``xhigh``); valida ``turn/start.effort`` contra el binario real.
 - ``CODEX_HOME_ROOT`` opcional (default ``/tmp/codex``; el home del tenant se
   crea con modo 0700).
 - Una cuenta ChatGPT (Plus/Pro/Team/Enterprise según el plan) con cuota de
@@ -82,6 +84,9 @@ _DEVICE_CODE_TIMEOUT_SECONDS = float(
     os.environ.get("CODEX_LINK_TIMEOUT_SECONDS", "600")
 )
 _TURN_TIMEOUT_SECONDS = 900.0
+# Effort opcional para el turno real (p.ej. CODEX_LIVE_EFFORT=xhigh valida
+# el wire `turn/start.effort` contra el binario real; ausente -> no se envia).
+_LIVE_EFFORT = os.environ.get("CODEX_LIVE_EFFORT") or None
 
 
 def _codex_manager():
@@ -182,13 +187,14 @@ async def test_live_device_code_link_turn_and_logout():
                 model="gpt-5.6-luna",
                 response_format="text",
                 timeout=_TURN_TIMEOUT_SECONDS,
+                effort=_LIVE_EFFORT,
             ),
             timeout=_TURN_TIMEOUT_SECONDS + 30.0,
         )
         assert isinstance(text, str) and text.strip(), "turno real sin texto"
         assert "ok" in text.lower(), f"respuesta inesperada del turno real: {text[:80]!r}"
         print(
-            f"Turno real OK — texto={text[:60]!r} usage="
+            f"Turno real OK (effort={_LIVE_EFFORT!r}) — texto={text[:60]!r} usage="
             f"prompt={usage.prompt_token_count} candidates={usage.candidates_token_count} "
             f"total={usage.total_token_count} cost_usd={usage.cost_usd} "
             f"quota_requests={usage.quota_requests}",

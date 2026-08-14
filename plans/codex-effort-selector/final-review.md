@@ -49,3 +49,21 @@ None for final review.
 
 ## Limitations
 - No se ejecutó el live gate contra un app-server Codex autenticado; R-EFFORT-WIRE permanece pendiente de esa verificación pre-release.
+
+
+## Live gate with effort (R-EFFORT-WIRE closed) — 2026-08-14
+
+Ejecutado contra el binario real `codex.exe` 0.145.0 con `CODEX_LIVE_EFFORT=xhigh`
+(device-code completado por el usuario). Salida real:
+
+```
+Vínculo completado (login_id=6c8f308b-cbbe-425a-902c-a6d0931e128f)
+Turno real OK (effort='xhigh') — texto='ok' usage=prompt=13487 candidates=5 total=13492 cost_usd=0.0 quota_requests=1
+Logout OK
+1 passed, 1 warning in 122.81s
+```
+
+**R-EFFORT-WIRE resuelto**: el app-server real aceptó `turn/start.effort:"xhigh"` y el
+ciclo streaming completo funcionó con el effort aplicado. El live gate
+(`tests/test_codex_live_login.py`) ahora acepta `CODEX_LIVE_EFFORT` para re-validar
+cualquier nivel contra el binario en el futuro.

@@ -51,5 +51,6 @@ default medium). Sin re-pregunta.
 - T01 backend: APPROVE (RC-01/RC-02 remediados; 622 passed, 3 skipped).
 - T02 frontend: DONE (347 passed vitest).
 - Final review: APPROVE sin findings (622 backend + 347 frontend + smoke xhigh 4 passed + git diff --check OK).
-- R-EFFORT-WIRE: riesgo live documentado (turn/start.effort verificado en source; pendiente de
-  validación contra binario autenticado — opcional, requiere device-code del usuario).
+- R-EFFORT-WIRE: **CERRADO 2026-08-14** — live gate real con CODEX_LIVE_EFFORT=xhigh: el binario
+  real (codex 0.145.0) aceptó turn/start.effort y el turno streaming completo funcionó
+  (texto='ok', usage real). Evidencia: /tmp/opencode/codex_live.log.
