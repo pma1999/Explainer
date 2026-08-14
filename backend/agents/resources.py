@@ -787,6 +787,8 @@ async def run_resources_codex(
     identificacion: str,
     model: str = CODEX_MODEL,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Run the Resources agent via Codex (app-server), SIN búsqueda web en v1.
 
@@ -833,6 +835,7 @@ async def run_resources_codex(
         model=model,
         system_prompt=build_resources_codex_system_instruction(target_language),
         response_format="json_object",
+        effort=effort,
     )
     if not isinstance(content, dict):
         raise CodexError("Resources Codex no devolvió un objeto JSON.")

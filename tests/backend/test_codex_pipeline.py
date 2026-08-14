@@ -219,7 +219,7 @@ class TestProcessPreChecksCodex:
         assert resp.json()["explainer_provider"] == "codex"
         assert resp.json()["explainer_model"] == CODEX_MODEL
         config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
-        assert config == {"provider": "codex", "model": CODEX_MODEL, "openrouter_model": None, "deepseek_model": None}
+        assert config == {"provider": "codex", "model": CODEX_MODEL, "openrouter_model": None, "deepseek_model": None, "codex_effort": "medium"}
 
     @pytest.mark.parametrize(
         ("provider", "source_type", "expects_gemini"),
@@ -356,38 +356,44 @@ class _FakeCodexAgents:
 
     async def run_segmentador_codex(self, api_key, source_text, description, source_kind="pdf",
                                     model=CODEX_MODEL, target_language="es-ES", *,
-                                    conversation=None, correction=None):
+                                    conversation=None, correction=None, effort=None):
         self.segmentador_calls.append(
             {"api_key": api_key, "source_kind": source_kind, "model": model,
-             "conversation": conversation, "correction": correction}
+             "conversation": conversation, "correction": correction, "effort": effort}
         )
         return _segmentation_dict(), _usage(prompt=200, total=260), []
 
     async def run_explainer_codex(self, source_path, identificacion, model=CODEX_MODEL,
                                   mime_type="application/pdf", user_id="", validator_user_id="",
                                   pdf_cache_entry=None, page_numbers=None,
-                                  validation_context=None, target_language="es-ES"):
+                                  validation_context=None, target_language="es-ES", *,
+                                  effort=None):
         self.explainer_calls.append(
             {"source_path": source_path, "model": model, "mime_type": mime_type,
              "user_id": user_id, "validator_user_id": validator_user_id,
-             "page_numbers": page_numbers}
+             "page_numbers": page_numbers, "effort": effort}
         )
         if self.explainer_error is not None:
             raise self.explainer_error
         return _explainer_dict(), _usage(prompt=400, total=500), []
 
     async def run_recorrido_codex(self, user_id, source_text, identificacion,
-                                  model=CODEX_MODEL, target_language="es-ES"):
-        self.recorrido_calls.append({"user_id": user_id, "model": model})
+                                  model=CODEX_MODEL, target_language="es-ES", *,
+                                  effort=None):
+        self.recorrido_calls.append({"user_id": user_id, "model": model, "effort": effort})
         return {"recorrido_anotado": []}, _usage(prompt=50, total=60)
 
     async def run_resources_codex(self, user_id, source_text, identificacion,
-                                  model=CODEX_MODEL, target_language="es-ES"):
-        self.resources_calls.append({"user_id": user_id, "model": model})
+                                  model=CODEX_MODEL, target_language="es-ES", *,
+                                  effort=None):
+        self.resources_calls.append({"user_id": user_id, "model": model, "effort": effort})
         return {"titulo_mapa": "Mapa determinista", "ejes_tematicos": []}, _usage(prompt=50, total=60)
 
-    async def format_explainer_content_codex(self, user_id, explainer_data, target_language="es-ES"):
-        self.formatter_calls.append({"user_id": user_id, "target_language": target_language})
+    async def format_explainer_content_codex(self, user_id, explainer_data,
+                                             target_language="es-ES", *, effort=None):
+        self.formatter_calls.append(
+            {"user_id": user_id, "target_language": target_language, "effort": effort}
+        )
         return explainer_data, {
             "input_tokens": 0, "output_tokens": 0, "thoughts_tokens": 0,
             "total_tokens": 0, "cost": 0.0, "quota_requests": 2,
@@ -585,18 +591,195 @@ class TestProcessProjectCodex:
 
 
 # ---------------------------------------------------------------------------
+# Effort codex (T01): validación 400 en /process, persistencia y threading
+# ---------------------------------------------------------------------------
+
+FROZEN_EFFORT_400_MESSAGE = (
+    "Nivel de razonamiento de Codex no soportado: '{valor}'. "
+    "Usa uno de: low, medium, high, xhigh, max."
+)
+
+
+class TestEffortCodexProcess:
+    """`ProcessProjectRequest.codex_effort`: validación solo para codex."""
+
+    def _stub(self, monkeypatch, codex_auth_client):
+        client, user_id = codex_auth_client
+        updates = []
+        process_calls = []
+        monkeypatch.setattr(main_module, "get_project", lambda *a, **k: _project_dict())
+        monkeypatch.setattr(
+            main_module.supabase_data,
+            "get_user_provider_connection",
+            lambda uid: {"status": "linked"},
+        )
+        monkeypatch.setattr(main_module, "update_project",
+                            lambda pid, uid, payload: updates.append(payload) or {"id": pid})
+
+        async def _recording_process(*args, **kwargs):
+            process_calls.append((args, kwargs))
+
+        monkeypatch.setattr(main_module, "_process_project", _recording_process)
+        return client, updates, process_calls
+
+    def test_codex_effort_xhigh_persisted_and_threaded(self, monkeypatch, codex_auth_client):
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": "codex", "codex_effort": "xhigh"},
+        )
+        assert resp.status_code == 200
+        config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
+        assert config["codex_effort"] == "xhigh"
+        # `_process_project` lo recibe como ÚLTIMO argumento posicional (tras
+        # `openrouter_provider_routing`), sin kwargs.
+        assert process_calls and process_calls[0][0][-1] == "xhigh"
+        assert process_calls[0][1] == {}
+
+    def test_codex_effort_absent_defaults_to_medium(self, monkeypatch, codex_auth_client):
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": "codex"},
+        )
+        assert resp.status_code == 200
+        config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
+        assert config["codex_effort"] == "medium"
+        assert process_calls and process_calls[0][0][-1] == "medium"
+
+    def test_codex_effort_null_defaults_to_medium(self, monkeypatch, codex_auth_client):
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": "codex", "codex_effort": None},
+        )
+        assert resp.status_code == 200
+        config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
+        assert config["codex_effort"] == "medium"
+
+    @pytest.mark.parametrize("bad", ["none", "ultra", "auto", "extra_high", "minimal"])
+    def test_codex_effort_unsupported_returns_400_frozen_message(
+        self, monkeypatch, codex_auth_client, bad
+    ):
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": "codex", "codex_effort": bad},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == FROZEN_EFFORT_400_MESSAGE.format(valor=bad)
+        # Sin persistencia ni arranque del pipeline tras el 400.
+        assert updates == []
+        assert process_calls == []
+
+    def test_codex_effort_empty_string_defaults_to_medium(
+        self, monkeypatch, codex_auth_client
+    ):
+        """RC-01: `""` se unifica con el contrato congelado (`None/'' → medium`):
+        200, persistido medium y threaded al pipeline — nunca 400."""
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": "codex", "codex_effort": ""},
+        )
+        assert resp.status_code == 200
+        config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
+        assert config["codex_effort"] == "medium"
+        assert process_calls and process_calls[0][0][-1] == "medium"
+
+    @pytest.mark.parametrize("provider", ["gemini", "openrouter", "deepseek"])
+    def test_non_codex_provider_ignores_codex_effort(
+        self, monkeypatch, codex_auth_client, provider
+    ):
+        client, updates, process_calls = self._stub(monkeypatch, codex_auth_client)
+        # Keys BYOK presentes para todos los providers (web, sin Mistral).
+        monkeypatch.setattr(main_module, "has_user_api_key", lambda uid, provider: True)
+
+        resp = client.post(
+            "/api/projects/proj-codex-1/process",
+            json={"explainer_provider": provider, "codex_effort": "max"},
+        )
+        assert resp.status_code == 200
+        config = next(p for p in updates if "explainer_config" in p)["explainer_config"]
+        # Campo ignorado: persistido como None, sin 400.
+        assert config["codex_effort"] is None
+        assert process_calls and process_calls[0][0][-1] is None
+
+
+class TestEffortCodexPipelineThreading:
+    """El pipeline `_process_project` pasa `effort` a TODAS las fases codex.
+
+    El wire de cada fase ya se verifica a nivel de agente con la traza del
+    fake (test_codex_agents_core.py / test_codex_agents_family.py); aquí se
+    prueba que el threading de `_process_project` alcanza todos los call
+    sites codex con el mismo valor.
+    """
+
+    pytestmark = pytest.mark.asyncio(loop_scope="session")
+
+    async def test_all_codex_phases_receive_effort_xhigh(self, monkeypatch):
+        user_id = _uid(705)
+        agents = _FakeCodexAgents()
+        _run_codex_pipeline(monkeypatch, user_id=user_id, agents=agents)
+
+        await main_module._process_project("proj-codex-1", user_id, "codex", codex_effort="xhigh")
+
+        assert agents.segmentador_calls and all(
+            c["effort"] == "xhigh" for c in agents.segmentador_calls
+        )
+        assert agents.explainer_calls and all(
+            c["effort"] == "xhigh" for c in agents.explainer_calls
+        )
+        assert agents.recorrido_calls and all(
+            c["effort"] == "xhigh" for c in agents.recorrido_calls
+        )
+        assert agents.resources_calls and all(
+            c["effort"] == "xhigh" for c in agents.resources_calls
+        )
+        assert agents.formatter_calls and all(
+            c["effort"] == "xhigh" for c in agents.formatter_calls
+        )
+
+    async def test_default_effort_medium_when_not_passed(self, monkeypatch):
+        user_id = _uid(706)
+        agents = _FakeCodexAgents()
+        _run_codex_pipeline(monkeypatch, user_id=user_id, agents=agents)
+
+        await main_module._process_project("proj-codex-1", user_id, "codex")
+
+        assert agents.segmentador_calls and all(
+            c["effort"] == "medium" for c in agents.segmentador_calls
+        )
+        assert agents.explainer_calls and all(
+            c["effort"] == "medium" for c in agents.explainer_calls
+        )
+        assert agents.recorrido_calls and all(
+            c["effort"] == "medium" for c in agents.recorrido_calls
+        )
+        assert agents.resources_calls and all(
+            c["effort"] == "medium" for c in agents.resources_calls
+        )
+        assert agents.formatter_calls and all(
+            c["effort"] == "medium" for c in agents.formatter_calls
+        )
+
+
+# ---------------------------------------------------------------------------
 # Review y reformat por rama codex (HTTP, auth_client)
 # ---------------------------------------------------------------------------
 
 class TestPartReviewCodexBranch:
-    def _project(self) -> dict:
+    def _project(self, codex_effort: str | None = None) -> dict:
+        explainer_config: dict = {"provider": "codex", "model": CODEX_MODEL}
+        if codex_effort is not None:
+            explainer_config["codex_effort"] = codex_effort
         return {
             "id": "proj-codex-1",
             "name": "Proyecto codex",
             "description": "",
             "source_type": "web",
             "status": "completed",
-            "explainer_config": {"provider": "codex", "model": CODEX_MODEL},
+            "explainer_config": explainer_config,
             "usage": {"explainer_provider": "codex"},
             "segmentation": {"partes": [{"numero": 1, "titulo": "Parte 1"}]},
             "partes_contenido": {
@@ -604,9 +787,13 @@ class TestPartReviewCodexBranch:
             },
         }
 
-    def _stub(self, monkeypatch, codex_auth_client, *, linked: bool, review_error: Exception | None = None):
+    def _stub(self, monkeypatch, codex_auth_client, *, linked: bool,
+              review_error: Exception | None = None, codex_effort: str | None = None):
         client, user_id = codex_auth_client
-        monkeypatch.setattr(main_module, "get_project", lambda *a, **k: self._project())
+        monkeypatch.setattr(
+            main_module, "get_project",
+            lambda *a, **k: self._project(codex_effort=codex_effort),
+        )
         monkeypatch.setattr(
             main_module.supabase_data,
             "get_user_provider_connection",
@@ -619,8 +806,10 @@ class TestPartReviewCodexBranch:
         )
         calls = []
 
-        async def _fake_review(uid, explainer_content, part_title, target_language="es-ES", model=CODEX_MODEL):
-            calls.append({"user_id": uid, "model": model, "target_language": target_language})
+        async def _fake_review(uid, explainer_content, part_title,
+                               target_language="es-ES", model=CODEX_MODEL, *, effort=None):
+            calls.append({"user_id": uid, "model": model, "target_language": target_language,
+                          "effort": effort})
             if review_error is not None:
                 raise review_error
             return {
@@ -647,11 +836,31 @@ class TestPartReviewCodexBranch:
         assert len(calls) == 1
         assert calls[0]["user_id"] == user_id
         assert calls[0]["model"] == CODEX_MODEL
+        # Proyecto sin `codex_effort` en el config → default medium (defensivo).
+        assert calls[0]["effort"] == "medium"
 
         # Uso: `codex_quota_requests` acumulado con coste 0.
         usage = next(p for p in updates if "usage" in p)["usage"]
         assert usage["codex_quota_requests"] == 1
         assert usage["total_cost"] == 0.0
+
+    def test_review_codex_uses_persisted_effort(self, monkeypatch, codex_auth_client):
+        client, _, calls, _ = self._stub(
+            monkeypatch, codex_auth_client, linked=True, codex_effort="xhigh"
+        )
+        resp = client.post("/api/projects/proj-codex-1/parts/1/review", json={})
+        assert resp.status_code == 200
+        assert len(calls) == 1
+        assert calls[0]["effort"] == "xhigh"
+
+    def test_review_codex_corrupt_config_effort_degrades_to_medium(self, monkeypatch, codex_auth_client):
+        client, _, calls, _ = self._stub(
+            monkeypatch, codex_auth_client, linked=True, codex_effort="ultra"
+        )
+        resp = client.post("/api/projects/proj-codex-1/parts/1/review", json={})
+        assert resp.status_code == 200
+        assert len(calls) == 1
+        assert calls[0]["effort"] == "medium"
 
     def test_review_codex_without_link_returns_400(self, monkeypatch, codex_auth_client):
         client, _, calls, _ = self._stub(monkeypatch, codex_auth_client, linked=False)
@@ -682,24 +891,33 @@ class TestPartReviewCodexBranch:
 
 
 class TestReformatCodexBranch:
-    def test_reformat_codex_branch_uses_user_id_and_accumulates_zero_cost(self, monkeypatch, codex_auth_client):
-        client, user_id = codex_auth_client
-        project = {
+    def _project(self, *, codex_effort: str | None = None) -> dict:
+        explainer_config: dict | None = None
+        if codex_effort is not None:
+            explainer_config = {"provider": "codex", "model": CODEX_MODEL, "codex_effort": codex_effort}
+        return {
             "id": "proj-codex-1",
             "name": "Proyecto codex",
             "status": "completed",
             "source_metadata": {"target_language": "es-ES"},
+            "explainer_config": explainer_config,
             "usage": {"explainer_provider": "codex", "codex_quota_requests": 4},
             "partes_contenido": {
                 "1": {"status": "completed", "explainer": _explainer_dict()},
             },
         }
-        monkeypatch.setattr(main_module, "get_project", lambda *a, **k: project)
+
+    def _stub(self, monkeypatch, codex_auth_client, *, codex_effort: str | None = None):
+        client, user_id = codex_auth_client
+        monkeypatch.setattr(
+            main_module, "get_project",
+            lambda *a, **k: self._project(codex_effort=codex_effort),
+        )
         calls = []
         updates = []
 
-        async def _fake_formatter(uid, explainer_data, target_language="es-ES"):
-            calls.append({"user_id": uid, "target_language": target_language})
+        async def _fake_formatter(uid, explainer_data, target_language="es-ES", *, effort=None):
+            calls.append({"user_id": uid, "target_language": target_language, "effort": effort})
             return explainer_data, {
                 "input_tokens": 5, "output_tokens": 3, "thoughts_tokens": 0,
                 "total_tokens": 8, "cost": 0.0, "quota_requests": 2,
@@ -710,6 +928,10 @@ class TestReformatCodexBranch:
             main_module, "update_project",
             lambda project_id, uid, payload: updates.append(payload) or {"id": project_id},
         )
+        return client, user_id, calls, updates
+
+    def test_reformat_codex_branch_uses_user_id_and_accumulates_zero_cost(self, monkeypatch, codex_auth_client):
+        client, user_id, calls, updates = self._stub(monkeypatch, codex_auth_client)
 
         resp = client.post("/api/projects/proj-codex-1/reformat")
         assert resp.status_code == 200
@@ -718,6 +940,8 @@ class TestReformatCodexBranch:
         assert len(calls) == 1
         assert calls[0]["user_id"] == user_id
         assert calls[0]["target_language"] == "es-ES"
+        # Proyecto viejo sin `codex_effort` en el config → default medium.
+        assert calls[0]["effort"] == "medium"
 
         # Acumulación en project_usage: tokens presentes, coste USD 0.
         # RC-01: las 2 peticiones nuevas del formatter se suman a la cuota previa.
@@ -726,6 +950,22 @@ class TestReformatCodexBranch:
         assert usage["formatter_cost"] == 0.0
         assert usage["total_cost"] == 0.0
         assert usage["codex_quota_requests"] == 6  # 4 previa + 2 nuevas del formatter
+
+    def test_reformat_codex_uses_persisted_effort(self, monkeypatch, codex_auth_client):
+        client, _, calls, _ = self._stub(monkeypatch, codex_auth_client, codex_effort="xhigh")
+
+        resp = client.post("/api/projects/proj-codex-1/reformat")
+        assert resp.status_code == 200
+        assert len(calls) == 1
+        assert calls[0]["effort"] == "xhigh"
+
+    def test_reformat_codex_corrupt_config_effort_degrades_to_medium(self, monkeypatch, codex_auth_client):
+        client, _, calls, _ = self._stub(monkeypatch, codex_auth_client, codex_effort="none")
+
+        resp = client.post("/api/projects/proj-codex-1/reformat")
+        assert resp.status_code == 200
+        assert len(calls) == 1
+        assert calls[0]["effort"] == "medium"
 
 
 class TestFormatterCodexQuotaSummary:
@@ -740,8 +980,8 @@ class TestFormatterCodexQuotaSummary:
         data = _explainer_dict()  # introduccion + conclusion → 2 turnos en paralelo
         calls = []
 
-        async def fake_format_text_codex(uid, text, context="", target_language="es-ES"):
-            calls.append({"user_id": uid, "text": text})
+        async def fake_format_text_codex(uid, text, context="", target_language="es-ES", *, effort=None):
+            calls.append({"user_id": uid, "text": text, "effort": effort})
             return text + " [FMT]", _usage(prompt=5, candidates=3, total=8)
 
         monkeypatch.setattr(formatter_module, "_format_text_codex", fake_format_text_codex)

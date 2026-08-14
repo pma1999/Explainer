@@ -627,6 +627,8 @@ async def run_recorrido_codex(
     identificacion: str,
     model: str = CODEX_MODEL,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Run the Recorrido Anotado agent via Codex (app-server) on inline OCR/text.
 
@@ -663,6 +665,7 @@ async def run_recorrido_codex(
         model=model,
         system_prompt=build_recorrido_openrouter_system_instruction(target_language),
         response_format="json_object",
+        effort=effort,
     )
     if not isinstance(content, dict):
         raise CodexError("El recorrido Codex no devolvió un objeto JSON.")

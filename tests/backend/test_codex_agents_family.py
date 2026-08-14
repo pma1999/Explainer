@@ -108,6 +108,25 @@ def _set_usage_file(monkeypatch, fixture_name: str) -> None:
     )
 
 
+def _set_trace(monkeypatch, tmp_path) -> Path:
+    """Activa `FAKE_CODEX_TRACE_FILE` del fake app-server y devuelve la traza."""
+    trace = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("FAKE_CODEX_TRACE_FILE", str(trace))
+    return trace
+
+
+def _turn_start_efforts(trace: Path) -> list:
+    """`params.effort` de cada `turn/start` recibido por el fake (JSONL)."""
+    efforts = []
+    for line in trace.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        msg = json.loads(line)
+        if msg.get("method") == "turn/start":
+            efforts.append(msg.get("params", {}).get("effort"))
+    return efforts
+
+
 def _install_capturing_wrapper(monkeypatch, module, captured: dict):
     """Envuelve `call_codex_chat` del módulo con un wrapper que captura kwargs
     y delega en el cliente real (el fake de T02)."""
@@ -154,6 +173,105 @@ async def _reset_manager():
     """Deja el singleton limpio tras cada test (shutdown es idempotente)."""
     yield
     await codex_manager.shutdown()
+
+
+class TestEffortForwarding:
+    """T01: cada variante pública de la familia reenvía `effort` al wire.
+
+    Cada variante se invoca con `effort="low"` y se verifica en la traza del
+    fake que TODOS sus `turn/start` llevan `"effort":"low"` — incluido el
+    gather del formatter (`format_explainer_content_codex` →
+    `_format_text_codex`, obligatorio en el list comprehension).
+    """
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_recorrido_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(621)
+        _set_scripted_turn(monkeypatch, "turn_recorrido_valid.json")
+        _set_usage_file(monkeypatch, "turn_recorrido_valid.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        data, usage = await run_recorrido_codex(
+            user_id, "Fuente de la parte.", "Parte 1 del texto.", effort="low"
+        )
+
+        assert data["recorrido_anotado"]
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_resources_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(622)
+        _set_scripted_turn(monkeypatch, "turn_resources_valid.json")
+        _set_usage_file(monkeypatch, "turn_resources_valid.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        data, usage = await run_resources_codex(
+            user_id, "Fuente de la parte.", "Parte 1 del texto.", effort="low"
+        )
+
+        assert data["ejes_tematicos"]
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_review_codex_forwards_effort_to_wire(self, monkeypatch, tmp_path):
+        user_id = _uid(623)
+        _set_scripted_turn(monkeypatch, "turn_review_valid.json")
+        _set_usage_file(monkeypatch, "turn_review_valid.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        review, usage = await run_review_codex(
+            user_id, {"introduccion": "Contenido."}, "Parte 1", effort="low"
+        )
+
+        assert len(review["preguntas"]) == 5
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_format_explainer_content_codex_forwards_effort_to_all_fields(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(624)
+        _set_scripted_turn(monkeypatch, "turn_formatter_markdown.json")
+        _set_usage_file(monkeypatch, "turn_formatter_markdown.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        data = {
+            "introduccion": "Intro sin formato.",
+            "conclusion": "Conclusión sin formato.",
+            "desarrollo": [
+                {
+                    "titulo_seccion": "Sección 1",
+                    "explicacion_introductoria": "Explicación introductoria.",
+                    "subsecciones": [
+                        {
+                            "titulo_subseccion": "Sub 1",
+                            "explicacion_detallada": "Detalle de la sub 1.",
+                        }
+                    ],
+                }
+            ],
+            "conexiones_contextuales": [
+                {
+                    "seccion_temario_relacionada": "Tema 1",
+                    "descripcion_conexion": "Conexión con el tema 1.",
+                }
+            ],
+        }
+
+        result, usage_summary = await format_explainer_content_codex(
+            user_id, data, "es-ES", effort="low"
+        )
+
+        formatted = "**Texto formateado** determinista de prueba."
+        assert result["introduccion"] == formatted
+        efforts = _turn_start_efforts(trace)
+        # 5 campos de prosa → 5 turn/start en paralelo, todos con el mismo effort.
+        assert len(efforts) == 5
+        assert set(efforts) == {"low"}
 
 
 class TestRecorridoCodex:

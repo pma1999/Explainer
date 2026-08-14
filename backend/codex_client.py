@@ -29,7 +29,10 @@ Contrato (global-constraints.md §Codex client and errors; receta
   `message`, `system`, `temperature`, `threadID` ni `response_format` en el
   wire: `temperature` y `response_format` de la firma pública congelada solo
   configuran el comportamiento local (temperatura no se envía; `json_object`
-  parsea el texto final con `json.loads`).
+  parsea el texto final con `json.loads`). Desde T01, `turn/start` acepta
+  además `effort` (override por turno; validado localmente con
+  `normalize_codex_effort` si no es None; solo si no es None se envía) y
+  `thread/start` NUNCA lleva effort ni `config.model_reasoning_effort`.
 - Jerarquía congelada `CodexError` (base con `.message`): `CodexRateLimitError`,
   `CodexAuthError`, `CodexBusyError`, `CodexTimeoutError`; re-usa
   `CodexSpawnError`/`CodexRequestError` de T02. El spawn sin hueco se re-lanza
@@ -72,7 +75,7 @@ from backend.codex_app_server import (
     codex_manager,
     codex_manager as _app_server_codex_manager,
 )
-from backend.codex_model_routing import CODEX_MODEL
+from backend.codex_model_routing import CODEX_MODEL, normalize_codex_effort
 
 logger = logging.getLogger("backend.codex_client")
 
@@ -308,16 +311,26 @@ def _thread_start_params(model: str, system_prompt: str | None) -> dict[str, Any
     return params
 
 
-def _turn_params(*, thread_id: str | None, text: str, model: str) -> dict[str, Any]:
+def _turn_params(
+    *, thread_id: str | None, text: str, model: str, effort: str | None = None
+) -> dict[str, Any]:
     """Params de `turn/start` v2: `{threadId, input:[{type:"text",text}],
     model}`. NO existen `message`, `system`, `temperature`, `threadID` ni
-    `response_format` (verificación de source FR-01b)."""
+    `response_format` (verificación de source FR-01b).
+
+    Effort (T01, receta integration-effort.md §Verified Contract): `turn/start`
+    acepta `effort` como override por turno (clave exacta `"effort"`, no
+    `reasoning_effort`); se incluye SOLO si no es None (los llamadores pueden
+    omitirlo y el wire queda sin la clave).
+    """
     params: dict[str, Any] = {
         "input": [{"type": "text", "text": text}],
         "model": model,
     }
     if thread_id is not None:
         params["threadId"] = thread_id
+    if effort is not None:
+        params["effort"] = effort
     return params
 
 
@@ -545,6 +558,7 @@ async def call_codex_chat(
     response_format: Literal["text", "json_object"] = "json_object",
     temperature: float | None = OPENROUTER_EXPLAINER_TEMPERATURE,
     timeout: float = CODEX_REQUEST_TIMEOUT_SECONDS,
+    effort: str | None = None,
 ) -> tuple[Any, CodexUsage]:
     """Chat con Codex (app-server) y devuelve `(data, CodexUsage)`.
 
@@ -557,6 +571,19 @@ async def call_codex_chat(
     `turn/completed` (no existe `turn/end`). El `timeout` aplica tanto a cada
     request RPC como a la espera de `turn/completed` de cada intento.
 
+    `effort` (T01): nivel de razonamiento de `gpt-5.6-luna` (allowlist
+    `CODEX_EFFORT_LEVELS`). Se valida localmente con `normalize_codex_effort`
+    SOLO si no es None: un llamador directo que pase un valor fuera de la
+    allowlist comete un error de programación (`ValueError` antes de tocar el
+    server; el pipeline ya valida en `api_process_project` y esto es defensa en
+    profundidad — el wire solo recibe valores exactos de la allowlist). El
+    valor ya normalizado se envía como `"effort"` en cada `turn/start` SOLO si
+    no es None — nunca en `thread/start` (la receta `integration-effort.md`
+    §Verified Contract verifica que `ThreadStartParams` no tiene `effort`
+    top-level ni `config.model_reasoning_effort` aquí: thread por llamada,
+    override por turno es suficiente). El turno correctivo del reintento JSON
+    (mismo thread) conserva el MISMO `effort` del intento original.
+
     Con `response_format="json_object"` el texto final se parsea con
     `json.loads` y, si falla, se reintenta conversacionalmente (máx.
     `OPENROUTER_PAYLOAD_VALIDATION_MAX_RETRIES`) con un turno correctivo corto
@@ -567,6 +594,10 @@ async def call_codex_chat(
     Corrutina async: se espera directo, nunca dentro de `asyncio.to_thread`.
 
     Raises:
+        ValueError: `effort` no es None y no está en `CODEX_EFFORT_LEVELS`
+            (error de programación del llamador; se lanza antes de tocar el
+            server — el pipeline valida en `api_process_project` y esto es
+            defensa en profundidad).
         CodexBusyError: spawn sin hueco (`CodexSpawnError` re-lanzado).
         CodexRateLimitError / CodexAuthError: cuota en ejecución (notificación
             `error`/`turn.error`) o error object del server mapeado por `code`.
@@ -577,6 +608,13 @@ async def call_codex_chat(
             sin mapeo conocido (`CODEX_TURN_FAILED_MESSAGE`).
     """
     _ensure_notification_handlers()
+    if effort is not None:
+        # Defensa en profundidad (RC-02): el wire solo recibe valores exactos
+        # de la allowlist. Un llamador directo con un valor fuera de la
+        # allowlist es un error de programación (ValueError antes de tocar el
+        # server), nunca un 400 de API; el pipeline ya valida en
+        # `api_process_project`. `None` preserva el campo ausente en el wire.
+        effort = normalize_codex_effort(effort)
     try:
         server = await codex_manager.acquire(user_id)
     except CodexSpawnError as exc:
@@ -612,7 +650,9 @@ async def call_codex_chat(
             )
             turn_result = await server.request(
                 "turn/start",
-                _turn_params(thread_id=thread_id, text=text, model=model),
+                _turn_params(
+                    thread_id=thread_id, text=text, model=model, effort=effort
+                ),
                 timeout=timeout,
             )
             turn_id = _extract_turn_id(turn_result)

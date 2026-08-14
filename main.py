@@ -133,7 +133,11 @@ from backend.agents.formatter import (
 )
 from backend.agents.language_policy import normalize_target_language
 from backend.codex_client import CodexError, CodexRateLimitError, CodexAuthError
-from backend.codex_model_routing import CODEX_MODEL
+from backend.codex_model_routing import (
+    CODEX_DEFAULT_EFFORT,
+    CODEX_MODEL,
+    normalize_codex_effort,
+)
 from backend.middleware import SecurityHeadersMiddleware, RequestLoggingMiddleware
 from backend.openrouter_client import OpenRouterPdfParseCacheEntry
 from backend.openrouter_model_routing import OPENROUTER_MODEL_AUXILIARY
@@ -210,6 +214,7 @@ class ProcessProjectRequest(BaseModel):
     deepseek_model: DeepSeekExplainerModel | None = None
     openrouter_provider: str | None = None
     openrouter_provider_only: bool = False
+    codex_effort: str | None = None
 
 
 class ReviewRequest(BaseModel):
@@ -2493,6 +2498,7 @@ async def _format_and_finalize_part(
     use_deepseek: bool = False,
     deepseek_api_key: str = "",
     use_codex: bool = False,
+    codex_effort: str = CODEX_DEFAULT_EFFORT,
 ) -> None:
     """Background task: format explainer content then persist and notify.
 
@@ -2519,7 +2525,7 @@ async def _format_and_finalize_part(
             elif use_codex:
                 # Corrutina async: `user_id` en la posición de la API key.
                 formatted, fmt_usage = await format_explainer_content_codex(
-                    user_id, explainer_data, target_language
+                    user_id, explainer_data, target_language, effort=codex_effort
                 )
             else:
                 formatted, fmt_usage = await format_explainer_content(api_key, explainer_data, target_language)
@@ -2678,6 +2684,7 @@ async def _process_project(
     deepseek_model: DeepSeekExplainerModel | str | None = None,
     target_language: str = "es-ES",
     openrouter_provider_routing: dict | None = None,
+    codex_effort: str = CODEX_DEFAULT_EFFORT,
 ) -> None:
     process_start_time = time.time()
     project: dict[str, Any] | None = None
@@ -3263,6 +3270,7 @@ async def _process_project(
                         user_id,
                         openrouter_full_source_text,
                         pdf_total_pages,
+                        effort=codex_effort,
                     )
                 else:
                     content_page_set, clf_usage, _clf_raw = await asyncio.to_thread(
@@ -3410,6 +3418,7 @@ async def _process_project(
                             content_pages_prefix + base_desc,
                             source_kind,
                             target_language=target_language_code,
+                            effort=codex_effort,
                         )
                     else:
                         segmentation, usage_meta, seg_ds_conversation = await run_segmentador_codex(
@@ -3420,6 +3429,7 @@ async def _process_project(
                             target_language=target_language_code,
                             conversation=seg_ds_conversation,
                             correction=correction_suffix,
+                            effort=codex_effort,
                         )
             else:
                 segmentation, usage_meta = await asyncio.to_thread(
@@ -4017,6 +4027,7 @@ async def _process_project(
                                         tuple(openrouter_page_scopes[idx]),
                                         validation_context=validation_context,
                                         target_language=target_language_code,
+                                        effort=codex_effort,
                                     )
                                 return asyncio.to_thread(
                                     _call_agent_with_optional_validation_context,
@@ -4042,6 +4053,7 @@ async def _process_project(
                                     user_id,
                                     validation_context=validation_context,
                                     target_language=target_language_code,
+                                    effort=codex_effort,
                                 )
                             return asyncio.to_thread(
                                 _call_agent_with_optional_validation_context,
@@ -4092,6 +4104,7 @@ async def _process_project(
                                     page_scope,
                                     validation_context=subpart_validation_contexts[idx],
                                     target_language=target_language_code,
+                                    effort=codex_effort,
                                 )
                                 for idx, (sp_prompt, page_scope) in enumerate(zip(subpart_prompts, openrouter_page_scopes))
                             ]
@@ -4125,6 +4138,7 @@ async def _process_project(
                                     user_id,
                                     validation_context=subpart_validation_contexts[idx],
                                     target_language=target_language_code,
+                                    effort=codex_effort,
                                 )
                                 for idx, sp_prompt in enumerate(subpart_prompts)
                             ]
@@ -4199,12 +4213,14 @@ async def _process_project(
                         openrouter_part_source_text,
                         agent_prompt,
                         target_language=target_language_code,
+                        effort=codex_effort,
                     )
                     resources_task = run_resources_codex(
                         user_id,
                         openrouter_part_source_text,
                         agent_prompt,
                         target_language=target_language_code,
+                        effort=codex_effort,
                     )
                 else:
                     recorrido_task = asyncio.to_thread(
@@ -4362,6 +4378,7 @@ async def _process_project(
                     use_deepseek=use_deepseek_explainer,
                     deepseek_api_key=deepseek_api_key,
                     use_codex=use_codex_explainer,
+                    codex_effort=codex_effort,
                 )
             )
             return formatter_task, local_segment_pdf_paths, local_temp_paths
@@ -4663,6 +4680,20 @@ async def api_reformat_project(
         # vínculo caducó, el error tipado del agente se descarta por parte
         # (gather return_exceptions) y se loguea; no se bloquea el reformat.
         api_key = ""
+        # Effort persistido en `explainer_config`; degradación defensiva a
+        # medium (R-OLD-PROJECTS): proyecto viejo sin campo o con valor
+        # corrupto nunca produce 400.
+        try:
+            codex_effort = normalize_codex_effort(
+                (project.get("explainer_config") or {}).get("codex_effort")
+            )
+        except ValueError:
+            codex_effort = CODEX_DEFAULT_EFFORT
+            logger.warning(
+                "[Reformat] codex_effort inválido en explainer_config del proyecto %s — se usa medium (defensivo)",
+                project_id,
+                extra={"project_id": project_id},
+            )
     elif use_openrouter:
         api_key = get_user_api_key(user_id, provider=PROVIDER_OPENROUTER)
         if not api_key:
@@ -4704,7 +4735,9 @@ async def api_reformat_project(
         ):
             if use_codex:
                 # Corrutina async: `user_id` en la posición de la API key.
-                formatted, fmt_usage = await format_explainer_content_codex(user_id, explainer, reformat_target_language)
+                formatted, fmt_usage = await format_explainer_content_codex(
+                    user_id, explainer, reformat_target_language, effort=codex_effort
+                )
             elif use_deepseek:
                 formatted, fmt_usage = await format_explainer_content_ds(api_key, explainer, reformat_target_language)
             elif use_openrouter:
@@ -4827,6 +4860,19 @@ async def api_process_project(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if explainer_provider == EXPLAINER_PROVIDER_CODEX:
+        # Único validador de autoridad del effort (global-constraints.md
+        # §Allowlist y default): normalize_codex_effort lanza ValueError con el
+        # mensaje congelado (valor crudo SOLO dentro de ese mensaje, sin
+        # stack); para otros providers el campo se ignora y queda None.
+        try:
+            codex_effort = normalize_codex_effort(
+                payload.codex_effort if payload else None
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        codex_effort = None
     logger.info(
         f"[API] Solicitud de procesamiento recibida",
         extra={
@@ -4950,6 +4996,7 @@ async def api_process_project(
             "model": explainer_model,
             "openrouter_model": openrouter_model,
             "deepseek_model": deepseek_model,
+            "codex_effort": codex_effort,
         }
     })
     background_tasks.add_task(
@@ -4961,6 +5008,7 @@ async def api_process_project(
         deepseek_model,
         target_language_code,
         openrouter_provider_routing,
+        codex_effort,
     )
     return {
         "ok": True,
@@ -5138,6 +5186,18 @@ async def api_part_review(
         provider_label = "Codex"
         provider_const = None
         review_agent = run_review_codex
+        # Effort persistido en `explainer_config`; degradación defensiva a
+        # medium (R-OLD-PROJECTS): proyecto viejo sin campo o con valor
+        # corrupto nunca produce 400 (ReviewRequest NO gana campos).
+        try:
+            codex_effort = normalize_codex_effort(explainer_config.get("codex_effort"))
+        except ValueError:
+            codex_effort = CODEX_DEFAULT_EFFORT
+            logger.warning(
+                "[Review] codex_effort inválido en explainer_config del proyecto %s — se usa medium (defensivo)",
+                project_id,
+                extra={"project_id": project_id, "part_id": part_id},
+            )
     else:
         raise HTTPException(status_code=400, detail=f"Proveedor de explainer no soportado: {provider}")
 
@@ -5187,7 +5247,8 @@ async def api_part_review(
         if provider == EXPLAINER_PROVIDER_CODEX:
             # Corrutina async: `user_id` en la posición de la key.
             review, usage_meta = await review_agent(
-                user_id, explainer, part_title, target_language_code, model
+                user_id, explainer, part_title, target_language_code, model,
+                effort=codex_effort,
             )
         else:
             review, usage_meta = await asyncio.to_thread(

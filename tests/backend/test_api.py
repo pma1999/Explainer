@@ -289,6 +289,7 @@ class TestProcessProject:
             deepseek_model=None,
             target_language="es-ES",
             openrouter_provider_routing=None,
+            codex_effort="medium",
         ):
             scheduled.update({
                 "project_id": project_id,
@@ -348,6 +349,7 @@ class TestProcessProject:
             deepseek_model=None,
             target_language="es-ES",
             openrouter_provider_routing=None,
+            codex_effort="medium",
         ):
             scheduled.update({"project_id": project_id, "explainer_provider": explainer_provider})
 
@@ -378,6 +380,7 @@ class TestProcessProject:
             deepseek_model=None,
             target_language="es-ES",
             openrouter_provider_routing=None,
+            codex_effort="medium",
         ):
             scheduled.update({
                 "project_id": project_id,
@@ -440,6 +443,7 @@ class TestProcessProject:
             deepseek_model=None,
             target_language="es-ES",
             openrouter_provider_routing=None,
+            codex_effort="medium",
         ):
             scheduled.update({
                 "project_id": project_id,

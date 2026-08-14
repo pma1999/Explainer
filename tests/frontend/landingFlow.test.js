@@ -102,6 +102,26 @@ function renderLandingDom() {
     <input id="deepseek-model-flash" type="radio" name="deepseek-model" />
     <div id="deepseek-model-panel" class="hidden"></div>
     <div id="codex-model-panel" class="hidden">
+      <div id="codex-model-group"></div>
+      <label class="form-label">Nivel de razonamiento (thinking)</label>
+      <div class="provider-grid openrouter-model-grid" id="codex-effort-group">
+        <label class="provider-card" id="codex-effort-card-low" for="codex-effort-low">
+          <input type="radio" name="codex-effort" id="codex-effort-low" value="low" />
+        </label>
+        <label class="provider-card" id="codex-effort-card-medium" for="codex-effort-medium">
+          <input type="radio" name="codex-effort" id="codex-effort-medium" value="medium" checked />
+        </label>
+        <label class="provider-card" id="codex-effort-card-high" for="codex-effort-high">
+          <input type="radio" name="codex-effort" id="codex-effort-high" value="high" />
+        </label>
+        <label class="provider-card" id="codex-effort-card-xhigh" for="codex-effort-xhigh">
+          <input type="radio" name="codex-effort" id="codex-effort-xhigh" value="xhigh" />
+        </label>
+        <label class="provider-card" id="codex-effort-card-max" for="codex-effort-max">
+          <input type="radio" name="codex-effort" id="codex-effort-max" value="max" />
+        </label>
+      </div>
+      <p class="input-hint" id="codex-effort-note">El nivel se aplica a todas las fases: segmentación, explicación, recorrido, recursos, repaso y formateo.</p>
       <p id="codex-panel-link-status">
         <span id="codex-panel-link-text"></span>
         <button type="button" id="codex-panel-btn-link">Vincular cuenta ChatGPT</button>
@@ -1377,7 +1397,7 @@ describe('landing.js project creation flow', () => {
       expect(api).not.toHaveBeenCalled();
     });
 
-    it('submits codex with no extra payload fields when linked and source is web', async () => {
+    it('submits codex with the default codex_effort when linked and source is web', async () => {
       state.hasCodexLink = true;
       api
         .mockResolvedValueOnce({ id: 'project-1', name: 'Codex web', description: '' })
@@ -1406,9 +1426,118 @@ describe('landing.js project creation flow', () => {
           body: JSON.stringify({
             explainer_provider: 'codex',
             target_language: 'es-ES',
+            codex_effort: 'medium',
           }),
         }),
       );
+    });
+
+    it('renders the effort group with medium checked and the frozen note when codex is selected', async () => {
+      state.hasCodexLink = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const panel = document.getElementById('codex-model-panel');
+      expect(panel.classList.contains('hidden')).toBe(false);
+
+      // 5 radios in canonical allowlist order, same name, medium checked by default
+      const radios = Array.from(document.querySelectorAll('#codex-effort-group input[name="codex-effort"]'));
+      expect(radios.map((r) => r.id)).toEqual([
+        'codex-effort-low',
+        'codex-effort-medium',
+        'codex-effort-high',
+        'codex-effort-xhigh',
+        'codex-effort-max',
+      ]);
+      expect(document.getElementById('codex-effort-medium').checked).toBe(true);
+      expect(document.getElementById('codex-effort-low').checked).toBe(false);
+
+      // Frozen note "todas las fases"
+      expect(document.getElementById('codex-effort-note').textContent)
+        .toBe('El nivel se aplica a todas las fases: segmentación, explicación, recorrido, recursos, repaso y formateo.');
+
+      // Group inherits panel visibility: hidden when switching back to gemini
+      document.getElementById('explainer-provider-gemini').click();
+      document.getElementById('explainer-provider-gemini').dispatchEvent(new Event('change', { bubbles: true }));
+      expect(panel.classList.contains('hidden')).toBe(true);
+    });
+
+    it('persists codexEffort when an effort radio is clicked', async () => {
+      state.hasCodexLink = true;
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const xhigh = document.getElementById('codex-effort-xhigh');
+      xhigh.click();
+      xhigh.dispatchEvent(new Event('change', { bubbles: true }));
+
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.codexEffort).toBe('xhigh');
+      expect(xhigh.checked).toBe(true);
+    });
+
+    it('includes the selected codex_effort in the process payload for codex', async () => {
+      state.hasCodexLink = true;
+      api
+        .mockResolvedValueOnce({ id: 'project-1', name: 'Codex web', description: '' })
+        .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Codex web';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      document.getElementById('explainer-provider-codex').click();
+      document.getElementById('explainer-provider-codex').dispatchEvent(new Event('change', { bubbles: true }));
+
+      const xhigh = document.getElementById('codex-effort-xhigh');
+      xhigh.click();
+      xhigh.dispatchEvent(new Event('change', { bubbles: true }));
+
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      expect(api).toHaveBeenNthCalledWith(
+        2,
+        '/api/projects/project-1/process',
+        expect.objectContaining({
+          body: JSON.stringify({
+            explainer_provider: 'codex',
+            target_language: 'es-ES',
+            codex_effort: 'xhigh',
+          }),
+        }),
+      );
+    });
+
+    it('never includes codex_effort in the payload for gemini', async () => {
+      api
+        .mockResolvedValueOnce({ id: 'project-1', name: 'Gemini web', description: '' })
+        .mockResolvedValueOnce({ ok: true, status: 'started' });
+
+      const { initLanding } = await import('../../frontend/js/landing.js');
+      initLanding();
+
+      document.getElementById('tab-web').click();
+      document.getElementById('project-name').value = 'Gemini web';
+      document.getElementById('web-url').value = 'https://example.com/article';
+      document.getElementById('web-url').dispatchEvent(new Event('input', { bubbles: true }));
+
+      document.getElementById('btn-upload').click();
+      await flushAsyncWork();
+
+      const processCall = api.mock.calls.find(([url]) => url === '/api/projects/project-1/process');
+      expect(processCall).toBeDefined();
+      expect(JSON.parse(processCall[1].body).codex_effort).toBeUndefined();
     });
 
     it('restores a saved codex selection when the ChatGPT account is linked', async () => {

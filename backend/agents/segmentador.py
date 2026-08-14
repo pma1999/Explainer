@@ -1411,6 +1411,7 @@ async def run_segmentador_codex(
     *,
     conversation: list[dict[str, Any]] | None = None,
     correction: str | None = None,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage, list[dict[str, Any]]]:
     """Run/continue the Segmentador Codex conversation on inline OCR/text.
 
@@ -1461,6 +1462,7 @@ async def run_segmentador_codex(
         model=model,
         response_format="json_object",
         temperature=TEMPERATURE_SEGMENTADOR,
+        effort=effort,
     )
     if not isinstance(content, dict):
         raise CodexError("El segmentador Codex no devolvió un objeto JSON.")

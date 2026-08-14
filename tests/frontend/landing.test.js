@@ -652,6 +652,7 @@ describe('persistModelSelector / restoreModelSelector', () => {
     persistModelSelector();
     const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
     expect(Object.keys(saved).sort()).toEqual([
+      'codexEffort',
       'customOpenrouterModel',
       'deepseekModel',
       'explainerProvider',
@@ -660,6 +661,77 @@ describe('persistModelSelector / restoreModelSelector', () => {
       'openrouterProvider',
       'openrouterProviderOnly',
     ]);
+  });
+
+  it('restore without codexEffort falls back to medium and persists it', () => {
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'gemini',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.codexEffort).toBe('medium');
+  });
+
+  it('restore with a valid codexEffort round-trips the saved value', () => {
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'gemini',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+      codexEffort: 'xhigh',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.codexEffort).toBe('xhigh');
+  });
+
+  it('restore with invalid codexEffort values falls back to medium and never throws', () => {
+    for (const invalid of ['none', 123, null]) {
+      localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+        explainerProvider: 'gemini',
+        openrouterMode: 'preset',
+        openrouterModel: 'xiaomi/mimo-v2.5-pro',
+        customOpenrouterModel: null,
+        openrouterProvider: '',
+        openrouterProviderOnly: false,
+        deepseekModel: 'deepseek-v4-pro',
+        codexEffort: invalid,
+      }));
+      expect(() => restoreModelSelector()).not.toThrow();
+      persistModelSelector();
+      const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+      expect(saved.codexEffort).toBe('medium');
+    }
+  });
+
+  it('codex round-trip with a linked account conserves codexEffort', () => {
+    mockState.hasCodexLink = true;
+    localStorage.setItem(SELECTOR_KEY, JSON.stringify({
+      explainerProvider: 'codex',
+      openrouterMode: 'preset',
+      openrouterModel: 'xiaomi/mimo-v2.5-pro',
+      customOpenrouterModel: null,
+      openrouterProvider: '',
+      openrouterProviderOnly: false,
+      deepseekModel: 'deepseek-v4-pro',
+      codexEffort: 'high',
+    }));
+    restoreModelSelector();
+    persistModelSelector();
+    const saved = JSON.parse(localStorage.getItem(SELECTOR_KEY));
+    expect(saved.explainerProvider).toBe('codex');
+    expect(saved.codexEffort).toBe('high');
   });
 
   it('valid gemini preset round-trip', () => {

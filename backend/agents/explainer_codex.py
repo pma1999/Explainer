@@ -113,6 +113,7 @@ async def _call_codex_json_with_pdf_fallback(
     user_id: str,
     pdf_cache_entry: PdfOcrCacheEntry | None = None,
     page_numbers: tuple[int, ...] | None = None,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Una llamada explainer Codex: mensaje inline con la fuente + JSON mode."""
     user_message = _build_inline_source_message(
@@ -129,6 +130,7 @@ async def _call_codex_json_with_pdf_fallback(
         model=model,
         response_format="json_object",
         temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+        effort=effort,
     )
     if not isinstance(content, dict):
         raise CodexError("Explainer Codex no devolvió un objeto JSON.")
@@ -144,6 +146,8 @@ async def run_explainer_codex(
     pdf_cache_entry: PdfOcrCacheEntry | None = None,
     page_numbers: tuple[int, ...] | None = None,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Explainer completo vía Codex. Retorna (structured_result, usage)."""
     start = time.time()
@@ -169,6 +173,7 @@ async def run_explainer_codex(
             user_id=user_id,
             pdf_cache_entry=pdf_cache_entry,
             page_numbers=page_numbers,
+            effort=effort,
         ),
         validate_payload=_validate_full_explainer_payload,
         operation_label="Explainer Codex",
@@ -205,6 +210,8 @@ async def run_subpart_explainer_codex(
     pdf_cache_entry: PdfOcrCacheEntry | None = None,
     page_numbers: tuple[int, ...] | None = None,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Explainer de subparte vía Codex — retorna solo `desarrollo` estructurado."""
     start = time.time()
@@ -230,6 +237,7 @@ async def run_subpart_explainer_codex(
             user_id=user_id,
             pdf_cache_entry=pdf_cache_entry,
             page_numbers=page_numbers,
+            effort=effort,
         ),
         validate_payload=_validate_subpart_explainer_payload,
         operation_label="Explainer subparte Codex",
@@ -281,10 +289,12 @@ class _CodexExplainerConversation:
         validate_payload: Callable[[Any], dict[str, Any]],
         validation_context: ExplainerValidationContext | None,
         operation_label: str,
+        effort: str | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._model = model
         self._user_id = user_id
+        self._effort = effort
         self._validate_payload = validate_payload
         self._validation_context = validation_context
         self._operation_label = operation_label
@@ -301,6 +311,7 @@ class _CodexExplainerConversation:
                 model=self._model,
                 response_format="json_object",
                 temperature=OPENROUTER_EXPLAINER_TEMPERATURE,
+                effort=self._effort,
             )
             # Reproducir el output del modelo en la siguiente ronda para
             # mantener la continuidad del prefijo (system + user0).
@@ -367,6 +378,8 @@ async def check_explainer_validation_codex(
     user_id: str,
     validation_context: ExplainerValidationContext | None = None,
     model: str = CODEX_MODEL_AUXILIARY,
+    *,
+    effort: str | None = None,
 ) -> tuple[ExplainerValidationReport, CodexUsage | None]:
     """Valida una explicación con Codex.
 
@@ -386,6 +399,7 @@ async def check_explainer_validation_codex(
             system_prompt=_CODEX_VALIDATOR_SYSTEM_PROMPT,
             model=model,
             response_format="json_object",
+            effort=effort,
         )
         if not isinstance(content, dict):
             raise TypeError("El validador Codex no devolvió un objeto JSON.")
@@ -436,6 +450,7 @@ async def run_with_codex_explainer_validation(
     user_id: str,
     label: str,
     validation_context: ExplainerValidationContext | None = None,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage, list[Any]]:
     """Ejecuta una llamada explainer, la valida con Codex y regenera si falla.
 
@@ -451,7 +466,7 @@ async def run_with_codex_explainer_validation(
 
     for attempt in range(MAX_EXPLAINER_VALIDATION_RETRIES + 1):
         report, val_usage = await check_explainer_validation_codex(
-            result, user_id=user_id, validation_context=validation_context
+            result, user_id=user_id, validation_context=validation_context, effort=effort
         )
         last_report = report
         if val_usage is not None:
@@ -515,6 +530,8 @@ async def run_explainer_codex_validated(
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage, list[Any]]:
     """run_explainer_codex con validación de completitud y reintento automático.
 
@@ -538,6 +555,7 @@ async def run_explainer_codex_validated(
         validate_payload=_validate_full_explainer_payload,
         validation_context=validation_context,
         operation_label="Explainer Codex",
+        effort=effort,
     )
     return await run_with_codex_explainer_validation(
         initial_call=conversation.run_initial,
@@ -545,6 +563,7 @@ async def run_explainer_codex_validated(
         user_id=validator_user_id or user_id,
         label=f"Explainer Codex [{model}]",
         validation_context=validation_context,
+        effort=effort,
     )
 
 
@@ -559,6 +578,8 @@ async def run_subpart_explainer_codex_validated(
     page_numbers: tuple[int, ...] | None = None,
     validation_context: ExplainerValidationContext | None = None,
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage, list[Any]]:
     """run_subpart_explainer_codex con validación de completitud y reintento.
 
@@ -581,6 +602,7 @@ async def run_subpart_explainer_codex_validated(
         validate_payload=_validate_subpart_explainer_payload,
         validation_context=validation_context,
         operation_label="Subpart Explainer Codex",
+        effort=effort,
     )
     return await run_with_codex_explainer_validation(
         initial_call=conversation.run_initial,
@@ -588,4 +610,5 @@ async def run_subpart_explainer_codex_validated(
         user_id=validator_user_id or user_id,
         label=f"Subpart Explainer Codex [{model}]",
         validation_context=validation_context,
+        effort=effort,
     )

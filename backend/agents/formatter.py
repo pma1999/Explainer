@@ -592,6 +592,8 @@ async def _format_text_codex(
     text: str,
     context: str = "",
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[str, Any]:
     """Format one text block via Codex (app-server; corrutina, sin to_thread)."""
     if not text or not text.strip():
@@ -607,6 +609,7 @@ async def _format_text_codex(
             system_prompt=build_formatter_system_prompt(target_language),
             response_format="json_object",
             temperature=0.1,
+            effort=effort,
         )
     except CodexError as exc:
         logger.warning(
@@ -788,6 +791,8 @@ async def format_explainer_content_codex(
     user_id: str,
     explainer_data: dict[str, Any],
     target_language: str = "es-ES",
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Format all prose fields via Codex (app-server) in parallel.
 
@@ -804,7 +809,7 @@ async def format_explainer_content_codex(
         return result, _empty_formatter_usage()
 
     coros = [
-        _format_text_codex(user_id, text, ctx, target_language)
+        _format_text_codex(user_id, text, ctx, target_language, effort=effort)
         for _, text, ctx in field_tasks
     ]
     gathered = await asyncio.gather(*coros, return_exceptions=True)

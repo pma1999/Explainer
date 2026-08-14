@@ -20,6 +20,8 @@ export const DEFAULT_TARGET_LANGUAGE = 'es-ES';
 export const SUPPORTED_TARGET_LANGUAGES = ['es-ES', 'en', 'fr', 'de', 'it', 'pt-PT'];
 export const DEEPSEEK_MODEL_V4_PRO = 'deepseek-v4-pro';
 export const DEEPSEEK_MODEL_V4_FLASH = 'deepseek-v4-flash';
+export const CODEX_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const CODEX_DEFAULT_EFFORT = 'medium';
 let currentOpenRouterModel = OPENROUTER_MODEL_MIMO_PRO;
 let currentOpenRouterMode = 'preset'; // 'preset' | 'custom'
 let currentCustomOpenRouterModel = null; // string | null
@@ -32,6 +34,7 @@ let _openrouterProviderCombobox = null; // provider combobox instance
 let _orModelsCache = null; // cached model list
 let _orEndpointsCache = {}; // modelId -> [endpoint row objects]
 let currentDeepSeekModel = DEEPSEEK_MODEL_V4_PRO;
+let currentCodexEffort = CODEX_DEFAULT_EFFORT;
 let _landingListenersAttached = false;
 
 const SELECTOR_KEY = 'explainer.modelSelector.v1';
@@ -256,6 +259,7 @@ export function persistModelSelector() {
       openrouterProvider: currentOpenRouterProvider,
       openrouterProviderOnly: currentOpenRouterProviderOnly,
       deepseekModel: currentDeepSeekModel,
+      codexEffort: currentCodexEffort,
     }));
   } catch (_) {
     // Ignore write failures (private mode, quota exceeded, etc.)
@@ -299,6 +303,11 @@ export function restoreModelSelector() {
   currentDeepSeekModel = isValidDeepSeekModel(saved.deepseekModel)
     ? saved.deepseekModel
     : DEEPSEEK_MODEL_V4_PRO;
+
+  // --- codexEffort (absent / invalid / non-string → default) ---
+  currentCodexEffort = CODEX_EFFORT_LEVELS.includes(saved.codexEffort)
+    ? saved.codexEffort
+    : CODEX_DEFAULT_EFFORT;
 
   // --- openrouterProviderOnly (coerce to boolean) ---
   currentOpenRouterProviderOnly = Boolean(saved.openrouterProviderOnly);
@@ -537,6 +546,12 @@ export function initLanding() {
   const codexModelPanel = $('codex-model-panel');
   const codexPanelBtnLink = $('codex-panel-btn-link');
   const codexPanelBtnUnlink = $('codex-panel-btn-unlink');
+  const codexEffortGroup = $('codex-effort-group');
+  const codexEffortLow = $('codex-effort-low');
+  const codexEffortMedium = $('codex-effort-medium');
+  const codexEffortHigh = $('codex-effort-high');
+  const codexEffortXhigh = $('codex-effort-xhigh');
+  const codexEffortMax = $('codex-effort-max');
   const providerHint = $('explainer-provider-hint');
   const providerError = $('explainer-provider-error');
 
@@ -653,6 +668,17 @@ export function initLanding() {
     deepseekModelFlash.checked = currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH;
     $('deepseek-model-card-pro').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_PRO);
     $('deepseek-model-card-flash').classList.toggle('selected', currentDeepSeekModel === DEEPSEEK_MODEL_V4_FLASH);
+
+    codexEffortLow.checked = currentCodexEffort === 'low';
+    codexEffortMedium.checked = currentCodexEffort === 'medium';
+    codexEffortHigh.checked = currentCodexEffort === 'high';
+    codexEffortXhigh.checked = currentCodexEffort === 'xhigh';
+    codexEffortMax.checked = currentCodexEffort === 'max';
+    $('codex-effort-card-low').classList.toggle('selected', currentCodexEffort === 'low');
+    $('codex-effort-card-medium').classList.toggle('selected', currentCodexEffort === 'medium');
+    $('codex-effort-card-high').classList.toggle('selected', currentCodexEffort === 'high');
+    $('codex-effort-card-xhigh').classList.toggle('selected', currentCodexEffort === 'xhigh');
+    $('codex-effort-card-max').classList.toggle('selected', currentCodexEffort === 'max');
 
     providerHint.textContent = buildExplainerProviderHint(currentSourceType, currentExplainerProvider);
 
@@ -899,6 +925,15 @@ export function initLanding() {
     deepseekModelFlash.addEventListener('change', () => {
       if (deepseekModelFlash.checked) setDeepSeekModel(DEEPSEEK_MODEL_V4_FLASH);
     });
+    if (codexEffortGroup) {
+      codexEffortGroup.addEventListener('change', (e) => {
+        if (e.target && CODEX_EFFORT_LEVELS.includes(e.target.value)) {
+          currentCodexEffort = e.target.value;
+          syncExplainerProviderUI();
+          persistModelSelector();
+        }
+      });
+    }
     openRouterCustomRadio.addEventListener('change', () => {
       if (openRouterCustomRadio.checked) setOpenRouterModel('__custom__');
     });
@@ -1211,6 +1246,8 @@ async function handleUpload() {
       hide($('openrouter-provider-fetch-error'));
     } else if (currentExplainerProvider === 'deepseek') {
       processPayload.deepseek_model = currentDeepSeekModel;
+    } else if (currentExplainerProvider === 'codex') {
+      processPayload.codex_effort = currentCodexEffort;
     }
 
     await api(`/api/projects/${project.id}/process`, {

@@ -481,6 +481,8 @@ async def run_page_classifier_codex(
     source_text: str,
     total_pages: int,
     model: str = CODEX_MODEL,
+    *,
+    effort: str | None = None,
 ) -> tuple[frozenset[int], CodexUsage, dict[str, Any]]:
     """Classify PDF pages via Codex using precomputed OCR text.
 
@@ -516,6 +518,7 @@ async def run_page_classifier_codex(
         system_prompt=OPENROUTER_SYSTEM_INSTRUCTION,
         response_format="json_object",
         temperature=TEMPERATURE_PAGE_CLASSIFIER,
+        effort=effort,
     )
     if not isinstance(content, dict):
         raise CodexError("El clasificador Codex no devolvió un objeto JSON.")

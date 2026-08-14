@@ -368,6 +368,45 @@
                   </span>
                 </div>
               </div>
+              <label class="form-label">Nivel de razonamiento (thinking)</label>
+              <div class="provider-grid openrouter-model-grid" id="codex-effort-group">
+                <label class="provider-card" id="codex-effort-card-low" for="codex-effort-low">
+                  <input type="radio" name="codex-effort" id="codex-effort-low" value="low" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">Rápido</span>
+                    <span class="provider-card-sub">Menos razonamiento y menor consumo de cuota. Ideal para textos sencillos.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="codex-effort-card-medium" for="codex-effort-medium">
+                  <input type="radio" name="codex-effort" id="codex-effort-medium" value="medium" checked />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">Equilibrado (Recomendado)</span>
+                    <span class="provider-card-sub">Equilibrio entre velocidad y profundidad. Consume una cuota moderada.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="codex-effort-card-high" for="codex-effort-high">
+                  <input type="radio" name="codex-effort" id="codex-effort-high" value="high" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">Profundo</span>
+                    <span class="provider-card-sub">Razonamiento más extenso. Mayor calidad y más consumo de cuota.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="codex-effort-card-xhigh" for="codex-effort-xhigh">
+                  <input type="radio" name="codex-effort" id="codex-effort-xhigh" value="xhigh" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">Muy profundo</span>
+                    <span class="provider-card-sub">Análisis muy intensivo para textos complejos. Consumo alto.</span>
+                  </span>
+                </label>
+                <label class="provider-card" id="codex-effort-card-max" for="codex-effort-max">
+                  <input type="radio" name="codex-effort" id="codex-effort-max" value="max" />
+                  <span class="provider-card-main">
+                    <span class="provider-card-title">Máximo</span>
+                    <span class="provider-card-sub">Máxima profundidad de razonamiento. El mayor consumo de cuota.</span>
+                  </span>
+                </label>
+              </div>
+              <p class="input-hint" id="codex-effort-note">El nivel se aplica a todas las fases: segmentación, explicación, recorrido, recursos, repaso y formateo.</p>
               <p class="codex-panel-link-status" id="codex-panel-link-status">
                 <span id="codex-panel-link-text"></span>
                 <button type="button" class="btn-primary btn-sm" id="codex-panel-btn-link" style="display:none">Vincular cuenta ChatGPT</button>

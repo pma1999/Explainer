@@ -19,6 +19,7 @@ para que el singleton `codex_manager` sea seguro de reutilizar entre tests.
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import shutil
 import tempfile
@@ -177,6 +178,25 @@ def _script_turns(monkeypatch, turn_file: Path, fixture_names: list[str]) -> Non
         return real_parse(text)
 
     monkeypatch.setattr(codex_client, "_parse_turn_json", switching_parse)
+
+
+def _set_trace(monkeypatch, tmp_path) -> Path:
+    """Activa `FAKE_CODEX_TRACE_FILE` del fake app-server y devuelve la traza."""
+    trace = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("FAKE_CODEX_TRACE_FILE", str(trace))
+    return trace
+
+
+def _turn_start_efforts(trace: Path) -> list:
+    """`params.effort` de cada `turn/start` recibido por el fake (JSONL)."""
+    efforts = []
+    for line in trace.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        msg = json.loads(line)
+        if msg.get("method") == "turn/start":
+            efforts.append(msg.get("params", {}).get("effort"))
+    return efforts
 
 
 @pytest.fixture(autouse=True)
@@ -479,6 +499,136 @@ class TestExplainerCodex:
             "thread/start",
             "turn/start",
         ] * (2 * (MAX_EXPLAINER_VALIDATION_RETRIES + 1))
+
+
+class TestEffortForwarding:
+    """T01: cada variante pública codex reenvía `effort` hasta el wire.
+
+    Cada variante se invoca con `effort="low"` y se verifica en la traza del
+    fake (`FAKE_CODEX_TRACE_FILE`) que TODOS sus `turn/start` llevan
+    `"effort":"low"` — incluidas las cadenas internas obligatorias
+    (`_call_codex_json_with_pdf_fallback`, `_CodexExplainerConversation`,
+    `run_with_codex_explainer_validation` → `check_explainer_validation_codex`).
+    """
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_explainer_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(321)
+        _set_turn_file(monkeypatch, _FIXTURES_DIR / "turn_explainer_full.json")
+        _set_usage_file(monkeypatch, _FIXTURES_DIR / "turn_explainer_full.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        result, usage = await explainer_codex.run_explainer_codex(
+            str(_write_source(tmp_path)),
+            "Parte 1: El teorema de Pitagoras",
+            mime_type="text/plain",
+            user_id=user_id,
+            effort="low",
+        )
+
+        assert result["conclusion"]
+        assert isinstance(usage, CodexUsage)
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_subpart_explainer_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(322)
+        _set_turn_file(monkeypatch, _FIXTURES_DIR / "turn_explainer_subpart.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        result, usage = await explainer_codex.run_subpart_explainer_codex(
+            str(_write_source(tmp_path)),
+            "Subparte 1.1: Formulacion algebraica",
+            mime_type="text/plain",
+            user_id=user_id,
+            effort="low",
+        )
+
+        assert set(result) == {"desarrollo"}
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_explainer_codex_validated_forwards_effort_explainer_and_validator(
+        self, monkeypatch, tmp_path
+    ):
+        """La cadena completa lleva effort: explainer (conversación) y
+        validador (`run_with_codex_explainer_validation` →
+        `check_explainer_validation_codex`)."""
+        user_id = _uid(323)
+        turn_file = tmp_path / "turn_scripted.json"
+        turn_file.write_text(_fixture("turn_explainer_full.json"), encoding="utf-8")
+        _set_turn_file(monkeypatch, turn_file)
+        _script_turns(
+            monkeypatch,
+            turn_file,
+            ["turn_explainer_full.json", "turn_validator_accept.json"],
+        )
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        result, usage, validator_usages = (
+            await explainer_codex.run_explainer_codex_validated(
+                str(_write_source(tmp_path)),
+                "Parte 1: El teorema de Pitagoras",
+                mime_type="text/plain",
+                user_id=user_id,
+                validator_user_id=user_id,
+                effort="high",
+            )
+        )
+
+        assert result["desarrollo"][0]["titulo_seccion"] == "Enunciado del teorema"
+        assert len(validator_usages) == 1
+        assert _turn_start_efforts(trace) == ["high", "high"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_check_explainer_validation_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(324)
+        _set_turn_file(monkeypatch, _FIXTURES_DIR / "turn_validator_accept.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        report, usage = await explainer_codex.check_explainer_validation_codex(
+            {"introduccion": "Contenido determinista."}, user_id, effort="low"
+        )
+
+        assert report.is_valid
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_segmentador_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(325)
+        _set_turn_file(monkeypatch, _FIXTURES_DIR / "turn_segmentador.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        data, usage, conversation = await segmentador.run_segmentador_codex(
+            user_id, "Texto fuente determinista.", "Descripción", effort="low"
+        )
+
+        assert data["decision_num_partes"] == 2
+        assert _turn_start_efforts(trace) == ["low"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_run_page_classifier_codex_forwards_effort_to_wire(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(326)
+        _set_turn_file(monkeypatch, _FIXTURES_DIR / "turn_classifier.json")
+        _set_usage_file(monkeypatch, _FIXTURES_DIR / "turn_classifier.usage.json")
+        trace = _set_trace(monkeypatch, tmp_path)
+
+        content_pages, usage, raw = await page_classifier.run_page_classifier_codex(
+            user_id, "OCR de prueba.", 5, effort="low"
+        )
+
+        assert content_pages == frozenset({1, 2, 3, 5})
+        assert _turn_start_efforts(trace) == ["low"]
 
 
 class TestSegmentadorCodex:

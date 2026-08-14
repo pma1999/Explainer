@@ -73,9 +73,12 @@ from backend.codex_client import (  # noqa: E402
     call_codex_chat,
 )
 from backend.codex_model_routing import (  # noqa: E402
+    CODEX_DEFAULT_EFFORT,
+    CODEX_EFFORT_LEVELS,
     CODEX_EXPLAINER_MODELS,
     CODEX_MODEL,
     CODEX_MODEL_AUXILIARY,
+    normalize_codex_effort,
 )
 
 
@@ -662,6 +665,182 @@ class TestTimeoutsAndCapacity:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+class TestEffortWire:
+    """T01: `effort` en el wire de `turn/start`, nunca en `thread/start`.
+
+    Observación vía `FAKE_CODEX_TRACE_FILE` (el fake de T02 apéndice cada
+    request recibido, con sus params, a un JSONL; read-only).
+    """
+
+    @staticmethod
+    def _set_trace(monkeypatch, tmp_path) -> Path:
+        trace = tmp_path / "trace.jsonl"
+        monkeypatch.setenv("FAKE_CODEX_TRACE_FILE", str(trace))
+        return trace
+
+    @staticmethod
+    def _received(trace: Path) -> list[dict]:
+        return [
+            json.loads(line)
+            for line in trace.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    @staticmethod
+    def _turn_start_efforts(trace: Path) -> list:
+        return [
+            msg.get("params", {}).get("effort")
+            for msg in TestEffortWire._received(trace)
+            if msg.get("method") == "turn/start"
+        ]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_effort_xhigh_appears_in_turn_start_wire(self, monkeypatch, tmp_path):
+        user_id = _uid(260)
+        _set_turn(monkeypatch, _FIXTURES_DIR / "turn_valid_json.json")
+        trace = self._set_trace(monkeypatch, tmp_path)
+
+        data, _ = await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": "Explica algo."}],
+            system_prompt="sys",
+            effort="xhigh",
+        )
+
+        assert data == {"ok": True, "explicacion": "Teorema de Pitágoras"}
+        assert self._turn_start_efforts(trace) == ["xhigh"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_no_effort_omits_key_from_turn_start_wire(self, monkeypatch, tmp_path):
+        user_id = _uid(261)
+        _set_turn(monkeypatch, _FIXTURES_DIR / "turn_valid_json.json")
+        trace = self._set_trace(monkeypatch, tmp_path)
+
+        await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": "Explica algo."}],
+            system_prompt="sys",
+        )
+
+        turn_starts = [
+            msg for msg in self._received(trace) if msg.get("method") == "turn/start"
+        ]
+        assert turn_starts
+        assert all("effort" not in msg["params"] for msg in turn_starts)
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_corrective_retry_turn_keeps_same_effort(self, monkeypatch, tmp_path):
+        user_id = _uid(262)
+        # Convención por turno del fake: el turno N lee `<FILE>.<N>` si existe.
+        # Turno 1 → texto no-JSON; turno 2 (correctivo, mismo thread) → válido.
+        turn_file = tmp_path / "effort_turn.json"
+        turn_file.write_text(
+            (_FIXTURES_DIR / "turn_invalid_json_text.json").read_text(
+                encoding="utf-8"
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "effort_turn.json.2").write_text(
+            (_FIXTURES_DIR / "turn_valid_json_retry.json").read_text(
+                encoding="utf-8"
+            ),
+            encoding="utf-8",
+        )
+        _set_turn(monkeypatch, turn_file)
+        trace = self._set_trace(monkeypatch, tmp_path)
+
+        data, _ = await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": "Fuente."}],
+            system_prompt="sys",
+            effort="high",
+        )
+
+        assert data == {"ok": True, "explicacion": "Teorema corregido"}
+        assert self._turn_start_efforts(trace) == ["high", "high"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_empty_effort_normalizes_to_medium_on_wire(self, monkeypatch, tmp_path):
+        """RC-01: `effort=""` se normaliza a medium (contrato congelado
+        `None/'' → medium`), no es un 400: el wire lleva `"effort":"medium"`."""
+        user_id = _uid(264)
+        _set_turn(monkeypatch, _FIXTURES_DIR / "turn_valid_json.json")
+        trace = self._set_trace(monkeypatch, tmp_path)
+
+        data, _ = await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": "Explica algo."}],
+            system_prompt="sys",
+            effort="",
+        )
+
+        assert data == {"ok": True, "explicacion": "Teorema de Pitágoras"}
+        assert self._turn_start_efforts(trace) == ["medium"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_thread_start_never_carries_effort_or_reasoning_config(
+        self, monkeypatch, tmp_path
+    ):
+        user_id = _uid(263)
+        _set_turn(monkeypatch, _FIXTURES_DIR / "turn_valid_json.json")
+        trace = self._set_trace(monkeypatch, tmp_path)
+
+        await call_codex_chat(
+            user_id=user_id,
+            messages=[{"role": "user", "content": "Explica algo."}],
+            system_prompt="sys",
+            effort="max",
+        )
+
+        thread_starts = [
+            msg for msg in self._received(trace) if msg.get("method") == "thread/start"
+        ]
+        assert thread_starts
+        for msg in thread_starts:
+            assert "effort" not in msg["params"]
+            # `config.model_reasoning_effort` NO existe en thread/start (receta
+            # integration-effort.md §Gotchas 1-2): sin config ni reasoning_effort.
+            assert "config" not in msg["params"]
+            assert "model_reasoning_effort" not in msg["params"]
+
+
+class TestEffortValidation:
+    """RC-01/RC-02: semántica unificada de `normalize_codex_effort` (`None`/`""`
+    → medium; solo strings NO vacíos fuera de la allowlist → ValueError) y
+    validación local en `call_codex_chat` (defensa en profundidad para
+    llamadores directos: error de programación, nunca 400 de API)."""
+
+    def test_normalize_none_returns_medium(self):
+        assert normalize_codex_effort(None) == CODEX_DEFAULT_EFFORT
+
+    def test_normalize_empty_string_returns_medium(self):
+        assert normalize_codex_effort("") == CODEX_DEFAULT_EFFORT
+
+    def test_normalize_allowlist_value_passthrough(self):
+        for level in CODEX_EFFORT_LEVELS:
+            assert normalize_codex_effort(level) == level
+
+    @pytest.mark.parametrize(
+        "bad", ["none", "ultra", "auto", "extra_high", "minimal", "  ", "Medium"]
+    )
+    def test_normalize_non_empty_non_allowlist_raises_value_error(self, bad):
+        with pytest.raises(ValueError, match="no soportado"):
+            normalize_codex_effort(bad)
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_call_codex_chat_rejects_unsupported_effort(self):
+        """RC-02: una llamada directa con un valor fuera de la allowlist es un
+        error de programación del llamador (ValueError) ANTES de tocar el
+        server; nunca llega un valor arbitrario al wire."""
+        with pytest.raises(ValueError, match="no soportado"):
+            await call_codex_chat(
+                user_id=_uid(265),
+                messages=[{"role": "user", "content": "Explica algo."}],
+                system_prompt="sys",
+                effort="ultra",
+            )
 
 
 class TestConcurrentCalls:

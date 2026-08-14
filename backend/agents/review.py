@@ -565,6 +565,8 @@ async def run_review_codex(
     part_title: str,
     target_language: str = "es-ES",
     model: str = CODEX_MODEL,
+    *,
+    effort: str | None = None,
 ) -> tuple[dict[str, Any], CodexUsage]:
     """Run the Review agent via Codex (app-server). Returns (review_dict, usage).
 
@@ -596,6 +598,7 @@ async def run_review_codex(
             model=model,
             system_prompt=build_review_system_instruction(target_language),
             response_format="json_object",
+            effort=effort,
         ),
         validate_payload=_validate_review_payload,
         operation_label="Review Codex",
